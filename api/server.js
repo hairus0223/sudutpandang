@@ -439,14 +439,15 @@ app.post("/api/print", async (req, res) => {
   const hasIcc = fs.existsSync(iccPath);
 
   // Tentukan jumlah copy sesuai session
-  const copies = activeSession
-    ? activeSession.peopleCount === 1
-      ? 2
-      : activeSession.peopleCount === 2
-      ? 3
-      : 5
-    : 1;
-
+  // const copies = activeSession
+  //   ? activeSession.peopleCount === 1
+  //     ? 2
+  //     : activeSession.peopleCount === 2
+  //     ? 3
+  //     : 5
+  //   : 1;
+  const copies = 1;
+  
   try {
     for (const imgData of images) {
       const buffer = Buffer.from(imgData.replace(/^data:image\/png;base64,/, ""), "base64");
