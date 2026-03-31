@@ -63,12 +63,12 @@ export function App() {
       transports: ["websocket"],
     });
 
-    socket.on("kiosk-trial-start", ({ user, durationMs }) => {
+    socket.on("kiosk-trial-start", ({ user, endsAt }) => {
       setSessionUser(user);
       setScreen(Screen.TRIAL);
       setCaptureCount(0);
       setLastImageUrl(null);
-      sessionTimer.start(durationMs);
+      sessionTimer.startWithEndsAt(endsAt);
       startCameraPreview();
     });
 
@@ -80,13 +80,13 @@ export function App() {
       }
     });
 
-    socket.on("kiosk-main-start", ({ user, durationMs, packageType: pkg }) => {
+    socket.on("kiosk-main-start", ({ user, endsAt, packageType: pkg }) => {
       setSessionUser(user);
       setScreen(Screen.MAIN);
       setCaptureCount(0);
       setLastImageUrl(null);
       setPackageType(pkg || "self-photo");
-      sessionTimer.start(durationMs);
+      sessionTimer.startWithEndsAt(endsAt);
       startCameraPreview();
     });
 

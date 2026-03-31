@@ -105,11 +105,15 @@ async function apiKioskMainStart(
   durationSeconds: number,
   packageType: PackageType
 ) {
-  await fetch(`${API_BASE_URL}/api/kiosk/main-start`, {
+  const res = await fetch(`${API_BASE_URL}/api/kiosk/main-start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user, durationSeconds, packageType }),
   });
+
+  if (!res.ok) throw new Error("kiosk_main_start_failed");
+
+  return res.json();
 }
 
 async function apiLatestImageUrl(userSlug: string): Promise<string | null> {
@@ -338,13 +342,17 @@ export function SessionKioskClient() {
             <>
               <Button
                 className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
-                onClick={() => {
+                onClick={async () => {
                   if (!session?.user) return;
-                  const pkg: PackageType = session.packageType || "self-photo";
-                  const mainSeconds = 1 * 60;
-                  apiKioskMainStart(session.user, mainSeconds, pkg).catch(() => { });
-                  setSessionEndsAt(Date.now() + mainSeconds * 1000);
-                  setRemainingMs(mainSeconds * 1000);
+                
+                  try {
+                    const data = await apiKioskMainStart(session.user, 60, session.packageType || "self-photo");
+                
+                    setSessionEndsAt(data.endsAt);
+                    setRemainingMs(data.endsAt - Date.now());
+                  } catch {
+                    alert("Gagal start trial");
+                  }
                 }}
               >
                 Start Trial
@@ -361,13 +369,19 @@ export function SessionKioskClient() {
               </Button>
               <Button
                 className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
-                onClick={() => {
+                onClick={async () => {
                   if (!session?.user) return;
+                
                   const pkg: PackageType = session.packageType || "self-photo";
                   const mainSeconds = (pkg === "pas-photo" ? 5 : 10) * 60;
-                  apiKioskMainStart(session.user, mainSeconds, pkg).catch(() => { });
-                  setSessionEndsAt(Date.now() + mainSeconds * 1000);
-                  setRemainingMs(mainSeconds * 1000);
+                
+                  try {
+                    const data = await apiKioskMainStart(session.user, mainSeconds, pkg);
+                    setSessionEndsAt(data.endsAt);
+                    setRemainingMs(data.endsAt - Date.now());
+                  } catch {
+                    alert("Gagal mulai sesi");
+                  }
                 }}
               >
                 Mulai Sesi Utama ({session?.packageType === "pas-photo" ? "5m" : "10m"})

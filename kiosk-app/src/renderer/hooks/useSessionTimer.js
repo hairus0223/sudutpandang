@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 export function useSessionTimer({ durationMs, onExpire, onWarn }) {
   const [endsAt, setEndsAt] = useState(null);
   const [remainingMs, setRemainingMs] = useState(durationMs);
+
   const timerRef = useRef(null);
   const warnedRef = useRef(false);
 
@@ -10,22 +11,28 @@ export function useSessionTimer({ durationMs, onExpire, onWarn }) {
     if (!endsAt) return;
 
     if (timerRef.current) clearInterval(timerRef.current);
+
     timerRef.current = setInterval(() => {
-      const remaining = endsAt - Date.now();
+      const now = Date.now();
+      const remaining = endsAt - now;
+
       if (remaining <= 0) {
         clearInterval(timerRef.current);
         timerRef.current = null;
+
         setRemainingMs(0);
         warnedRef.current = false;
         onExpire?.();
         return;
       }
-      if (!warnedRef.current && remaining <= 60_000) {
+
+      if (!warnedRef.current && remaining <= 60000) {
         warnedRef.current = true;
         onWarn?.();
       }
+
       setRemainingMs(remaining);
-    }, 1000);
+    }, 500);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -33,17 +40,26 @@ export function useSessionTimer({ durationMs, onExpire, onWarn }) {
     };
   }, [endsAt, onExpire, onWarn]);
 
-  function start(customDurationMs) {
-    const base = typeof customDurationMs === "number" ? customDurationMs : durationMs;
-    const nextEndsAt = Date.now() + base;
-    setEndsAt(nextEndsAt);
-    setRemainingMs(base);
+  function startWithEndsAt(serverEndsAt) {
+    setEndsAt(serverEndsAt);
+    setRemainingMs(Math.max(0, serverEndsAt - Date.now()));
     warnedRef.current = false;
+  }
+
+  function start(durationOverride) {
+    const base =
+      typeof durationOverride === "number"
+        ? durationOverride
+        : durationMs;
+
+    const nextEndsAt = Date.now() + base;
+    startWithEndsAt(nextEndsAt);
   }
 
   function clear() {
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = null;
+
     setEndsAt(null);
     setRemainingMs(durationMs);
     warnedRef.current = false;
@@ -51,8 +67,8 @@ export function useSessionTimer({ durationMs, onExpire, onWarn }) {
 
   return {
     remainingMs,
+    startWithEndsAt,
     start,
     clear,
   };
 }
-

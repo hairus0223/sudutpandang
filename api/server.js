@@ -22,6 +22,7 @@ const PORT = process.env.PORT || 4000;
 // Semua foto final dan struktur tanggal/user akan disimpan di sini.
 // Di Windows ini berarti D:\SudutPandangStudio
 const BASE_DIR = "D:\\SudutPandangStudio";
+// const BASE_DIR = "/Users/hairus/Documents/Studio456";
 
 // Folder INPUT dari Imaging Edge: D:\SudutPandangStudio\capture
 const CAPTURE_DIR = path.join(BASE_DIR, "capture");
@@ -195,9 +196,15 @@ app.post("/api/session/start", (req, res) => {
 app.post("/api/kiosk/trial-start", (req, res) => {
   const { user, durationSeconds = 60 } = req.body || {};
   if (!user) return res.status(400).json({ error: "user required" });
-  const durationMs = durationSeconds * 1000;
-  io.emit("kiosk-trial-start", { user, durationMs });
-  res.json({ success: true });
+  const endsAt = Date.now() + durationSeconds * 1000;
+
+  io.emit("kiosk-trial-start", {
+    user,
+    durationMs: durationSeconds * 1000,
+    endsAt,
+  });
+
+  res.json({ success: true, endsAt });
 });
 
 app.post("/api/kiosk/trial-skip", (req, res) => {
@@ -214,9 +221,16 @@ app.post("/api/kiosk/main-start", (req, res) => {
     packageType = "self-photo",
   } = req.body || {};
   if (!user) return res.status(400).json({ error: "user required" });
-  const durationMs = durationSeconds * 1000;
-  io.emit("kiosk-main-start", { user, durationMs, packageType });
-  res.json({ success: true });
+  const endsAt = Date.now() + durationSeconds * 1000;
+
+  io.emit("kiosk-main-start", {
+    user,
+    durationMs: durationSeconds * 1000,
+    endsAt,
+    packageType,
+  });
+
+  res.json({ success: true, endsAt });
 });
 
 // Kiosk configuration for frontend (session duration, countdown, etc)
