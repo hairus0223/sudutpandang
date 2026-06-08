@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNewPhotoSocket } from "@/hooks/useNewPhotoSocket";
 import { usePhotoProcessedSocket } from "@/hooks/usePhotoProcessedSocket";
 import { useRouter, useSearchParams } from "next/navigation";
-import { fetchImages } from "@/services/image.service";
+import { fetchImages, processImage } from "@/services/image.service";
 import { useGalleryStore } from "@/stores/useGalleryStore";
 import { PhotoCard } from "@/components/cards/PhotoCard";
 import { InfoCard } from "@/components/cards/InfoCard";
@@ -21,6 +21,9 @@ export default function GalleryClient() {
   const user = params.get("user") ?? "";
 
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [processingImageId, setProcessingImageId] = useState<string | null>(
+    null
+  );
   const { images, setImages, setAllowedPrint, setPrintTemplate } =
     useGalleryStore();
 
@@ -71,6 +74,33 @@ export default function GalleryClient() {
       });
   }, [user]);
 
+  const handleRemoveBackground = useCallback(
+    async (imageId: string) => {
+      if (!user || processingImageId) return;
+
+      setProcessingImageId(imageId);
+      setImages(
+        images.map((img) =>
+          img.imageId === imageId
+            ? { ...img, processingStatus: "pending" as const }
+            : img
+        )
+      );
+
+      try {
+        await processImage(user, imageId);
+        await refreshGallery();
+      } catch (err) {
+        console.error(err);
+        alert("Gagal memproses hapus background. Silakan coba lagi.");
+        await refreshGallery();
+      } finally {
+        setProcessingImageId(null);
+      }
+    },
+    [user, processingImageId, images, setImages, refreshGallery]
+  );
+
   return (
     <main className="p-3 sm:p-4 pb-28 sm:pb-32 max-w-[1960px] mx-auto min-h-screen">
       {/* HEADER */}
@@ -97,6 +127,12 @@ export default function GalleryClient() {
             src={img.url}
             filename={img.filename}
             processingStatus={img.processingStatus}
+            onRemoveBackground={
+              img.imageId
+                ? () => void handleRemoveBackground(img.imageId!)
+                : undefined
+            }
+            removeBackgroundLoading={processingImageId === img.imageId}
             onClick={() => setActiveIndex(index)}
           />
         ))}

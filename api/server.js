@@ -13,6 +13,7 @@ import multer from "multer";
 import {
   PROCESSING_STATUS,
   createPendingMeta,
+  ingestLegacyPhoto,
   readMeta,
   saveOriginalFromCapture,
   saveUploadedToCaptures,
@@ -658,12 +659,16 @@ app.post("/api/images/:user/:imageId/process", (req, res) => {
     return res.status(404).json({ error: "not_found" });
   }
 
-  const meta = readMeta(userPath, imageId);
+  let meta = readMeta(userPath, imageId);
   if (!meta) {
-    return res.status(404).json({ error: "not_found" });
+    const ingested = ingestLegacyPhoto(userPath, imageId);
+    if (!ingested) {
+      return res.status(404).json({ error: "not_found" });
+    }
+    meta = readMeta(userPath, imageId);
+  } else {
+    updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, { error: null });
   }
-
-  updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, { error: null });
 
   scheduleBackgroundRemoval({
     userFolder: userPath,

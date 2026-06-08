@@ -267,6 +267,61 @@ export function saveUploadedToCaptures(userDir, buffer, originalName) {
 }
 
 /**
+ * Prepare a legacy root-level photo for the remove-bg pipeline.
+ * Moves the file into captures/ and creates pending meta when needed.
+ * @param {string} userDir
+ * @param {string} imageId
+ * @returns {{ imageId: string, destPath: string } | null}
+ */
+export function ingestLegacyPhoto(userDir, imageId) {
+  const existingMeta = readMeta(userDir, imageId);
+  if (existingMeta) {
+    const destPath = findOriginalPath(userDir, imageId);
+    return destPath ? { imageId, destPath } : null;
+  }
+
+  const originalInCaptures = findOriginalPath(userDir, imageId);
+  if (
+    originalInCaptures &&
+    originalInCaptures.includes(`${path.sep}captures${path.sep}`)
+  ) {
+    const ext = path.extname(originalInCaptures) || ".jpg";
+    createPendingMeta({
+      userDir,
+      imageId,
+      sourceFilename: path.basename(originalInCaptures),
+      ext,
+    });
+    return { imageId, destPath: originalInCaptures };
+  }
+
+  if (!fs.existsSync(userDir)) return null;
+
+  for (const file of fs.readdirSync(userDir)) {
+    const fullPath = path.join(userDir, file);
+    if (!fs.statSync(fullPath).isFile()) continue;
+    if (!/\.(jpg|jpeg|png|webp)$/i.test(file)) continue;
+    if (generateImageId(file) !== imageId) continue;
+
+    const ext = path.extname(file) || ".jpg";
+    const destPath = getCapturePath(userDir, imageId, ext);
+
+    ensureDir(getCapturesDir(userDir));
+    fs.renameSync(fullPath, destPath);
+    createPendingMeta({
+      userDir,
+      imageId,
+      sourceFilename: file,
+      ext,
+    });
+
+    return { imageId, destPath };
+  }
+
+  return null;
+}
+
+/**
  * @param {string} baseDir
  * @param {string} todayFolder
  * @returns {Array<{ userDir: string, imageId: string, user: string, status: string }>}

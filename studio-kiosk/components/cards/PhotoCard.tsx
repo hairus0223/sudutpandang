@@ -9,10 +9,16 @@ type PhotoCardProps = {
   filename: string;
   onClick: () => void;
   processingStatus?: ProcessingStatus;
+  onRemoveBackground?: () => void;
+  removeBackgroundLoading?: boolean;
   hideFilename?: boolean;
   hidePrintToggle?: boolean;
   style?: React.CSSProperties;
 };
+
+function canRemoveBackground(status?: ProcessingStatus) {
+  return status === "none" || status === "failed" || status === undefined;
+}
 
 function getStatusLabel(status?: ProcessingStatus) {
   switch (status) {
@@ -47,6 +53,8 @@ export function PhotoCard({
   filename,
   onClick,
   processingStatus,
+  onRemoveBackground,
+  removeBackgroundLoading = false,
   hideFilename = false,
   hidePrintToggle = false,
   style,
@@ -54,6 +62,10 @@ export function PhotoCard({
   const { selectedForPrint, togglePrint } = useGalleryStore();
   const isSelected = selectedForPrint.includes(filename);
   const statusLabel = getStatusLabel(processingStatus);
+  const showRemoveBg =
+    Boolean(onRemoveBackground) &&
+    canRemoveBackground(processingStatus) &&
+    !removeBackgroundLoading;
 
   return (
     <div
@@ -80,6 +92,27 @@ export function PhotoCard({
           className={`absolute top-3 right-3 z-20 rounded-full px-3 py-1 text-xs text-white backdrop-blur ${getStatusClass(processingStatus)}`}
         >
           {statusLabel}
+        </div>
+      )}
+
+      {showRemoveBg && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemoveBackground?.();
+          }}
+          className="absolute bottom-3 left-3 z-20 rounded-full bg-violet-600/90
+                     px-3 py-1 text-xs text-white backdrop-blur
+                     hover:bg-violet-500 transition"
+        >
+          Hapus BG
+        </button>
+      )}
+
+      {removeBackgroundLoading && (
+        <div className="absolute bottom-3 left-3 z-20 rounded-full bg-amber-500/80 px-3 py-1 text-xs text-white backdrop-blur">
+          Memulai…
         </div>
       )}
 
