@@ -1,4 +1,4 @@
-export const DEFAULT_API_BASE = "http://192.168.1.10:4000";
+export const DEFAULT_API_BASE = "http://localhost:4000";
 
 export function getApiBase() {
   if (typeof window !== "undefined" && window.__KIOSK_CONFIG__?.apiBase) {

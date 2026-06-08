@@ -118,7 +118,8 @@ The **API** owns the canonical session timer (`activeSession.endsAt`, `pausedAt`
 | **Kiosk Session Sync** | Push trial/main and timer updates to customer display | `/session` → Socket | `SessionKioskClient`, `App.jsx` | Socket.IO in api | `POST /api/kiosk/trial-start`, `trial-skip`, `main-start`; `session-timer-update` |
 | **Live Camera Preview** | HDMI/capture card live view | kiosk trial/main | `useCameraPreview` | getUserMedia + optional Electron IPC | — |
 | **Photo Capture** | Countdown, trigger shutter, show last shot | `/session`, kiosk | `SessionKioskClient`, `App.jsx` | `triggerBackendCapture`, `fetchLatestImage` | `POST /api/capture`, `GET /api/images/:user` |
-| **Capture File Pipeline** | Move captures to user folder | backend | — | chokidar in `api/server.js` | Socket: `new-photo` |
+| **Capture File Pipeline** | Move captures to `captures/`, queue remove-bg | backend | — | chokidar + `imageProcessingQueue` | Socket: `new-photo`, `photo-processed` |
+| **Background Remover** | Remove background → transparent PNG | backend + gallery + kiosk | `GalleryClient`, `PhotoCard`, `App.jsx` | `image.service.ts`, `api/services/backgroundRemoval.js` | `GET /api/images/:user`, `POST /api/images/:user/upload`, `POST .../process`, `GET .../status` |
 | **Session Lifecycle** | Start/stop/pause/resume/add-time/expire | backend + operator + kiosk UI | `SessionKioskClient`, `App.jsx` | `session.service.ts`, in-memory in api | `GET/POST /api/session/*` |
 | **User Photo Gallery** | Browse and select photos | `/gallery?user=` | `GalleryClient`, `PhotoCard`, `PhotoModal`, `BottomPrintBar` | `image.service.ts` | `GET /api/images/:user` |
 | **Print Selection & Limits** | Enforce max printable photos | `/gallery` | `PhotoCard`, `useGalleryStore` | Zustand | `GET /api/print-config/:user` |
@@ -139,7 +140,8 @@ The **API** owns the canonical session timer (`activeSession.endsAt`, `pausedAt`
 | `session-state` | API → kiosk | On connect: `{ activeSession, sessionLocked, timer }` |
 | `session-paused` | API → clients | Pause notification; kiosk also uses `session-timer-update` |
 | `session-resumed` | API → clients | Resume with full `activeSession`; kiosk syncs timer |
-| `new-photo` | API → clients | New file moved to user folder *(no UI listener yet)* |
+| `new-photo` | API → clients | New file saved to `captures/` |
+| `photo-processed` | API → clients | Remove-bg finished: `{ user, imageId, status, subjectUrl?, error? }` |
 | `session-started` | API → clients | Session registered *(operator-driven; kiosk uses timer events)* |
 
 ### `GET /api/kiosk-config` fields
@@ -159,7 +161,7 @@ Config drives **defaults and labels**; the live countdown on both displays comes
 |------|-------------------------|----------------|
 | `self-photo` | 10 min (`packageDurations`) | Standard self-photo |
 | `pas-photo` | 5 min | Pas-photo frame overlay on live preview |
-| `ai-photo` | 10 min | AI messaging on review (no AI pipeline in code) |
+| `ai-photo` | 10 min | Remove-bg on capture; kiosk preview uses `subject` PNG when ready |
 
 ---
 
@@ -171,7 +173,9 @@ There is no shared package today. Reuse **within** each app, or extract to `pack
 
 | Service | Location | Use when |
 |---------|----------|----------|
-| `fetchImages(userId)` | `services/image.service.ts` | Loading user photos for gallery |
+| `fetchImages`, `fetchImageStatus`, `processImage`, `uploadImage` | `services/image.service.ts` | Gallery + background removal API |
+| `GalleryImageData`, `ProcessingStatus` | `lib/imageTypes.ts` | Image list typing with variants |
+| `usePhotoProcessedSocket` | `hooks/usePhotoProcessedSocket.ts` | Realtime gallery refresh after processing |
 | Session/kiosk API | `services/session.service.ts` | `getSession`, `startSession`, `pauseSession`, `resumeSession`, `addTime`, `trialStart`, `mainStart`, `getKioskConfig` |
 | `msToMMSS` | `utils/time.ts` | Format countdown display |
 | `useSessionTimer` | `hooks/useSessionTimer.ts` | Operator timer display synced to server |

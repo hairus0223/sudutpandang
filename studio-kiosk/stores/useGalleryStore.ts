@@ -1,13 +1,11 @@
 import { PRINT_TEMPLATES, PrintTemplate } from "@/lib/printTemplates";
+import type { GalleryImageData } from "@/lib/imageTypes";
 import { FaceBox } from "@/utils/faceDetect";
 import { create } from "zustand";
 
 /* ================= TYPES ================= */
 
-export type ImageData = {
-    filename: string;
-    url: string;
-};
+export type ImageData = GalleryImageData;
 
 export type PhotoFilter =
   | "none"

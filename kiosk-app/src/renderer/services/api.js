@@ -28,6 +28,23 @@ export async function stopSession() {
   await fetch(`${API_BASE}/api/session/stop`, { method: "POST" });
 }
 
+export function getPreviewUrl(image, packageType = "self-photo") {
+  if (!image) return null;
+
+  const preferSubject =
+    packageType === "ai-photo" || packageType === "pas-photo";
+
+  if (
+    preferSubject &&
+    image.processingStatus === "ready" &&
+    image.variants?.subject
+  ) {
+    return image.variants.subject;
+  }
+
+  return image.url ?? null;
+}
+
 export async function fetchLatestImage(userSlug) {
   const res = await fetch(`${API_BASE}/api/images/${encodeURIComponent(userSlug)}`);
   if (!res.ok) return null;

@@ -134,7 +134,9 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 
 | Module | Use for |
 |--------|---------|
-| `services/image.service.ts` → `fetchImages(userId)` | User photo lists |
+| `services/image.service.ts` → `fetchImages`, `fetchImageStatus`, `processImage`, `uploadImage` | User photo lists + background removal |
+| `lib/imageTypes.ts` → `GalleryImageData`, `ProcessingStatus` | Image variants typing |
+| `hooks/usePhotoProcessedSocket.ts` | Gallery refresh when `photo-processed` fires |
 | `stores/useGalleryStore.ts` | Images, print selection, transforms, filters, template |
 | `lib/env.ts` → `API_BASE_URL` | All Next.js API URLs |
 | `lib/printTemplates.ts` | `4R`, `4R_FULL` dimensions |
@@ -159,12 +161,13 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 |---------|----------|
 | All REST routes | Same file |
 | Socket emits | Same file |
-| Capture watcher | chokidar on `CAPTURE_DIR` |
+| Capture watcher | chokidar on `CAPTURE_DIR` → `captures/` + `processed/` |
+| Background removal | `api/services/backgroundRemoval.js` + `imageProcessingQueue.js` |
 | Print pipeline | Sharp → PDFKit → SumatraPDF |
 
 ### Package types
 
-`self-photo` (10m) · `pas-photo` (5m + frame) · `ai-photo` (UI messaging only)
+`self-photo` (10m) · `pas-photo` (5m + frame) · `ai-photo` (remove-bg + kiosk preview)
 
 ---
 
@@ -216,6 +219,9 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 | `BASE_DIR` | api | `D:\SudutPandangStudio` (hardcoded in `server.js`) |
 | `CAMERA_CAPTURE_COMMAND` | api | Optional shell shutter trigger |
 | `SESSION_DURATION_MINUTES` | api | Default `10` |
+| `BG_REMOVAL_ENABLED` | api | Default `true`; set `false` to disable auto remove-bg |
+| `API_PUBLIC_HOST` | api | Host for `subjectUrl` in Socket payloads |
+| `UPLOAD_MAX_BYTES` | api | Upload limit (default 20MB) |
 
 ### Filesystem layout
 
@@ -227,18 +233,22 @@ BASE_DIR/
   DD-MM-YYYY/
     <user_slug>/
       customer.json
-      *.jpg
+      captures/          ← originals
+      processed/<id>/    ← subject.png + meta.json
+      *.jpg                ← legacy flat captures
 ```
 
 ### API surface (key endpoints)
 
-`POST /api/register` · `GET /api/customer-by-name` · `POST /api/session/*` · `POST /api/kiosk/trial-start|trial-skip|main-start` · `GET /api/images/:user` · `GET /api/print-config/:user` · `POST /api/print` · `POST /api/capture` · `GET /api/kiosk-config` · `GET /api/headline`
+`POST /api/register` · `GET /api/customer-by-name` · `POST /api/session/*` · `POST /api/kiosk/trial-start|trial-skip|main-start` · `GET /api/images/:user` · `GET /api/images/:user/:imageId/status` · `POST /api/images/:user/:imageId/process` · `POST /api/images/:user/upload` · `GET /api/print-config/:user` · `POST /api/print` · `POST /api/capture` · `GET /api/kiosk-config` · `GET /api/headline`
 
 ### Socket events (kiosk listens)
 
-`kiosk-trial-start` · `kiosk-trial-skip` · `kiosk-main-start` · `session-ended` · `session-state`
+`kiosk-trial-start` · `kiosk-trial-skip` · `kiosk-main-start` · `session-ended` · `session-state` · `photo-processed`
 
-Unused in UI today: `new-photo`, `session-paused`, `session-resumed`
+Gallery also listens: `new-photo`, `photo-processed`
+
+Unused in UI today: `session-paused`, `session-resumed`
 
 ### Known limitations (do not assume otherwise)
 
@@ -248,7 +258,7 @@ Unused in UI today: `new-photo`, `session-paused`, `session-resumed`
 - Electron **loads localhost:5180** in dev — production packaging incomplete
 - `CameraService` in `main.js` is a **stub**
 - Kiosk config key mismatch risk: `sessionDurationMinutes` (API) vs `sessionDurationSeconds` (config.js)
-- `ai-photo` package has **no AI backend**
+- `ai-photo` has **remove-bg only** — no theme generation yet
 - Print copies forced to `1` in api (people-based logic commented out)
 
 ---
