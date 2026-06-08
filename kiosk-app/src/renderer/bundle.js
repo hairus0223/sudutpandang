@@ -1096,7 +1096,7 @@
             var dispatcher = resolveDispatcher();
             return dispatcher.useReducer(reducer, initialArg, init);
           }
-          function useRef3(initialValue) {
+          function useRef4(initialValue) {
             var dispatcher = resolveDispatcher();
             return dispatcher.useRef(initialValue);
           }
@@ -1890,7 +1890,7 @@
           exports.useLayoutEffect = useLayoutEffect;
           exports.useMemo = useMemo3;
           exports.useReducer = useReducer;
-          exports.useRef = useRef3;
+          exports.useRef = useRef4;
           exports.useState = useState4;
           exports.useSyncExternalStore = useSyncExternalStore;
           exports.useTransition = useTransition;
@@ -24498,26 +24498,60 @@
   var import_react4 = __toESM(require_react());
 
   // src/renderer/config.js
-  var DEFAULT_API_BASE = "http://192.168.1.10:4000";
+  var DEFAULT_API_BASE = "http://localhost:4000";
   function getApiBase() {
     if (typeof window !== "undefined" && window.__KIOSK_CONFIG__?.apiBase) {
       return window.__KIOSK_CONFIG__.apiBase;
     }
     return DEFAULT_API_BASE;
   }
-  var DEFAULT_KIOSK_CONFIG = {
-    sessionDurationSeconds: 600,
-    captureCountdownSeconds: 3
+  var DEFAULT_PACKAGE_DURATIONS = {
+    "self-photo": 10,
+    "pas-photo": 5,
+    "ai-photo": 10
   };
+  var DEFAULT_KIOSK_CONFIG = {
+    sessionDurationMinutes: 10,
+    captureCountdownSeconds: 3,
+    trialDurationSeconds: 60,
+    packageDurations: DEFAULT_PACKAGE_DURATIONS
+  };
+  function resolveSessionDurationMinutes(data) {
+    if (data.sessionDurationMinutes != null && !Number.isNaN(Number(data.sessionDurationMinutes))) {
+      return Number(data.sessionDurationMinutes);
+    }
+    if (data.sessionDurationSeconds != null && !Number.isNaN(Number(data.sessionDurationSeconds))) {
+      return Math.round(Number(data.sessionDurationSeconds) / 60);
+    }
+    return DEFAULT_KIOSK_CONFIG.sessionDurationMinutes;
+  }
+  function resolveTrialDurationSeconds(data) {
+    if (data.trialDurationSeconds != null && !Number.isNaN(Number(data.trialDurationSeconds))) {
+      return Number(data.trialDurationSeconds);
+    }
+    return DEFAULT_KIOSK_CONFIG.trialDurationSeconds;
+  }
+  function resolvePackageDurations(data) {
+    const fromApi = data.packageDurations;
+    if (!fromApi || typeof fromApi !== "object") {
+      return DEFAULT_KIOSK_CONFIG.packageDurations;
+    }
+    return {
+      "self-photo": Number(fromApi["self-photo"]) || DEFAULT_PACKAGE_DURATIONS["self-photo"],
+      "pas-photo": Number(fromApi["pas-photo"]) || DEFAULT_PACKAGE_DURATIONS["pas-photo"],
+      "ai-photo": Number(fromApi["ai-photo"]) || DEFAULT_PACKAGE_DURATIONS["ai-photo"]
+    };
+  }
   async function fetchKioskConfig() {
     try {
       const res = await fetch(`${getApiBase()}/api/kiosk-config`);
       if (!res.ok) return DEFAULT_KIOSK_CONFIG;
       const data = await res.json();
-      console.log("FETCHED CONFIG FROM API:", data);
       return {
-        sessionDurationSeconds: data.sessionDurationSeconds ?? DEFAULT_KIOSK_CONFIG.sessionDurationSeconds,
-        captureCountdownSeconds: data.captureCountdownSeconds ?? DEFAULT_KIOSK_CONFIG.captureCountdownSeconds
+        sessionDurationMinutes: resolveSessionDurationMinutes(data),
+        captureCountdownSeconds: data.captureCountdownSeconds ?? DEFAULT_KIOSK_CONFIG.captureCountdownSeconds,
+        trialDurationSeconds: resolveTrialDurationSeconds(data),
+        packageDurations: resolvePackageDurations(data)
       };
     } catch {
       return DEFAULT_KIOSK_CONFIG;
@@ -24526,6 +24560,14 @@
 
   // src/renderer/services/api.js
   var API_BASE = getApiBase();
+  function getPreviewUrl(image, packageType = "self-photo") {
+    if (!image) return null;
+    const preferSubject = packageType === "ai-photo" || packageType === "pas-photo";
+    if (preferSubject && image.processingStatus === "ready" && image.variants?.subject) {
+      return image.variants.subject;
+    }
+    return image.url ?? null;
+  }
   async function fetchLatestImage(userSlug) {
     const res = await fetch(`${API_BASE}/api/images/${encodeURIComponent(userSlug)}`);
     if (!res.ok) return null;
@@ -24578,10 +24620,11 @@
   function useSessionTimer({ durationMs, onExpire, onWarn }) {
     const [endsAt, setEndsAt] = (0, import_react2.useState)(null);
     const [remainingMs, setRemainingMs] = (0, import_react2.useState)(durationMs);
+    const [isPaused, setIsPaused] = (0, import_react2.useState)(false);
     const timerRef = (0, import_react2.useRef)(null);
     const warnedRef = (0, import_react2.useRef)(false);
     (0, import_react2.useEffect)(() => {
-      if (!endsAt) return;
+      if (!endsAt || isPaused) return;
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = setInterval(() => {
         const remaining = endsAt - Date.now();
@@ -24598,30 +24641,63 @@
           onWarn?.();
         }
         setRemainingMs(remaining);
-      }, 1e3);
+      }, 500);
       return () => {
         if (timerRef.current) clearInterval(timerRef.current);
         timerRef.current = null;
       };
-    }, [endsAt, onExpire, onWarn]);
-    function start(customDurationMs) {
-      const base = typeof customDurationMs === "number" ? customDurationMs : durationMs;
-      const nextEndsAt = Date.now() + base;
-      setEndsAt(nextEndsAt);
-      setRemainingMs(base);
-      warnedRef.current = false;
-    }
-    function clear() {
+    }, [endsAt, isPaused, onExpire, onWarn]);
+    function stopInterval() {
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = null;
+    }
+    function syncFromServer({ endsAt: serverEndsAt, pausedAt, remainingMs: serverRemainingMs } = {}) {
+      if (serverEndsAt != null) setEndsAt(serverEndsAt);
+      if (pausedAt) {
+        setIsPaused(true);
+        if (serverRemainingMs != null) {
+          setRemainingMs(serverRemainingMs);
+        } else if (serverEndsAt != null) {
+          setRemainingMs(Math.max(0, serverEndsAt - Date.now()));
+        }
+        stopInterval();
+        return;
+      }
+      if (pausedAt === null) {
+        setIsPaused(false);
+      }
+      if (serverEndsAt != null) {
+        setRemainingMs(Math.max(0, serverEndsAt - Date.now()));
+        warnedRef.current = false;
+      } else if (serverRemainingMs != null) {
+        setRemainingMs(serverRemainingMs);
+      }
+    }
+    function startWithEndsAt(serverEndsAt) {
+      setIsPaused(false);
+      setEndsAt(serverEndsAt);
+      setRemainingMs(Math.max(0, serverEndsAt - Date.now()));
+      warnedRef.current = false;
+    }
+    function start(durationOverride) {
+      const base = typeof durationOverride === "number" ? durationOverride : durationMs;
+      const nextEndsAt = Date.now() + base;
+      startWithEndsAt(nextEndsAt);
+    }
+    function clear() {
+      stopInterval();
       setEndsAt(null);
+      setIsPaused(false);
       setRemainingMs(durationMs);
       warnedRef.current = false;
     }
     return {
       remainingMs,
+      isPaused,
+      startWithEndsAt,
       start,
-      clear
+      clear,
+      syncFromServer
     };
   }
 
@@ -28089,7 +28165,12 @@
     const [isReviewing, setIsReviewing] = (0, import_react4.useState)(false);
     const [captureCount, setCaptureCount] = (0, import_react4.useState)(0);
     const [lastImageUrl, setLastImageUrl] = (0, import_react4.useState)(null);
+    const [lastImageProcessing, setLastImageProcessing] = (0, import_react4.useState)(false);
     const [packageType, setPackageType] = (0, import_react4.useState)("self-photo");
+    const sessionUserRef = (0, import_react4.useRef)(sessionUser);
+    const packageTypeRef = (0, import_react4.useRef)(packageType);
+    sessionUserRef.current = sessionUser;
+    packageTypeRef.current = packageType;
     const { videoRef, start: startCameraPreview, stop: stopCameraPreview, ready: cameraReady } = useCameraPreview();
     const sessionTimer = useSessionTimer({
       durationMs: kioskConfig.sessionDurationMinutes * 60 * 1e3,
@@ -28117,12 +28198,13 @@
       const socket = lookup2(getApiBase(), {
         transports: ["websocket"]
       });
-      socket.on("kiosk-trial-start", ({ user, durationMs }) => {
+      socket.on("kiosk-trial-start", ({ user, endsAt }) => {
         setSessionUser(user);
         setScreen(Screen.TRIAL);
         setCaptureCount(0);
         setLastImageUrl(null);
-        sessionTimer.start(durationMs);
+        setLastImageProcessing(false);
+        sessionTimer.startWithEndsAt(endsAt);
         startCameraPreview();
       });
       socket.on("kiosk-trial-skip", ({ user }) => {
@@ -28131,13 +28213,14 @@
           setScreen(Screen.IDLE);
         }
       });
-      socket.on("kiosk-main-start", ({ user, durationMs, packageType: pkg }) => {
+      socket.on("kiosk-main-start", ({ user, endsAt, packageType: pkg }) => {
         setSessionUser(user);
         setScreen(Screen.MAIN);
         setCaptureCount(0);
         setLastImageUrl(null);
+        setLastImageProcessing(false);
         setPackageType(pkg || "self-photo");
-        sessionTimer.start(durationMs);
+        sessionTimer.startWithEndsAt(endsAt);
         startCameraPreview();
       });
       socket.on("session-ended", () => {
@@ -28147,6 +28230,62 @@
         sessionTimer.clear();
         setScreen(Screen.END);
         setSessionUser(null);
+      });
+      socket.on("session-state", ({ activeSession, sessionLocked, timer }) => {
+        if (sessionLocked || !timer) return;
+        setSessionUser(timer.user);
+        sessionTimer.syncFromServer({
+          endsAt: timer.endsAt,
+          pausedAt: timer.pausedAt,
+          remainingMs: timer.remainingMs
+        });
+        if (timer.phase === "trial") {
+          setScreen(Screen.TRIAL);
+          startCameraPreview();
+        } else if (timer.phase === "main") {
+          setScreen(Screen.MAIN);
+          if (activeSession?.packageType) {
+            setPackageType(activeSession.packageType);
+          }
+          startCameraPreview();
+        }
+      });
+      socket.on("session-timer-update", ({ user, endsAt, pausedAt, remainingMs: remainingMs2, phase }) => {
+        setSessionUser(user);
+        sessionTimer.syncFromServer({ endsAt, pausedAt, remainingMs: remainingMs2 });
+        if (pausedAt) return;
+        if (phase === "trial") {
+          setScreen(Screen.TRIAL);
+          startCameraPreview();
+        } else if (phase === "main") {
+          setScreen(Screen.MAIN);
+          startCameraPreview();
+        }
+      });
+      socket.on("session-paused", ({ remainingMs: remainingMs2 }) => {
+        sessionTimer.syncFromServer({
+          pausedAt: Date.now(),
+          remainingMs: remainingMs2
+        });
+      });
+      socket.on("session-resumed", (session) => {
+        sessionTimer.syncFromServer({
+          endsAt: session.endsAt,
+          pausedAt: null,
+          remainingMs: Math.max(0, session.endsAt - Date.now())
+        });
+      });
+      socket.on("photo-processed", (payload) => {
+        const currentUser = sessionUserRef.current;
+        if (!currentUser || payload.user !== currentUser) return;
+        if (payload.status === "ready" && payload.subjectUrl) {
+          setLastImageUrl(payload.subjectUrl);
+          setLastImageProcessing(false);
+          return;
+        }
+        if (payload.status === "failed") {
+          setLastImageProcessing(false);
+        }
       });
       return () => {
         socket.disconnect();
@@ -28169,7 +28308,10 @@
       setCaptureCount((c) => c + 1);
       setTimeout(async () => {
         const latest = await fetchLatestImage(userSlug);
-        if (latest?.url) setLastImageUrl(latest.url);
+        const previewUrl = getPreviewUrl(latest, packageType);
+        if (previewUrl) setLastImageUrl(previewUrl);
+        const waitingForSubject = (packageType === "ai-photo" || packageType === "pas-photo") && latest?.processingStatus !== "ready";
+        setLastImageProcessing(Boolean(waitingForSubject));
       }, 1500);
     }
     function startCaptureCountdown() {
@@ -28200,6 +28342,7 @@
       stopCameraPreview();
       sessionTimer.clear();
       setLastImageUrl(null);
+      setLastImageProcessing(false);
       setCaptureCount(0);
       setScreen(Screen.IDLE);
     }
@@ -28239,7 +28382,7 @@
         ] }),
         isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "capture-overlay", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: lastImageUrl, alt: "Foto terakhir", className: "preview-video" }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "last-shot-label", children: isAiPhoto ? "Menghasilkan foto AI... harap tunggu sebentar" : "Menampilkan hasil foto... sesi lanjut sebentar lagi" })
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "last-shot-label", children: isAiPhoto && lastImageProcessing ? "Menghapus background... harap tunggu sebentar" : isAiPhoto ? "Foto AI siap... sesi lanjut sebentar lagi" : isPasPhoto && lastImageProcessing ? "Memproses pas foto... harap tunggu sebentar" : "Menampilkan hasil foto... sesi lanjut sebentar lagi" })
         ] }),
         !isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "last-shot-thumb", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: lastImageUrl, alt: "Foto terakhir" }),
