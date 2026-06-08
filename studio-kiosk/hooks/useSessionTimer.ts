@@ -1,11 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 
-export function useSessionTimer({ durationMs, onExpire, onWarn }) {
-  const [endsAt, setEndsAt] = useState(null);
+type SyncPayload = {
+  endsAt?: number | null;
+  pausedAt?: number | null | boolean;
+  remainingMs?: number | null;
+};
+
+type UseSessionTimerOptions = {
+  durationMs: number;
+  onExpire?: () => void;
+  onWarn?: () => void;
+};
+
+export function useSessionTimer({
+  durationMs,
+  onExpire,
+  onWarn,
+}: UseSessionTimerOptions) {
+  const [endsAt, setEndsAt] = useState<number | null>(null);
   const [remainingMs, setRemainingMs] = useState(durationMs);
   const [isPaused, setIsPaused] = useState(false);
 
-  const timerRef = useRef(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const warnedRef = useRef(false);
 
   useEffect(() => {
@@ -17,7 +33,7 @@ export function useSessionTimer({ durationMs, onExpire, onWarn }) {
       const remaining = endsAt - Date.now();
 
       if (remaining <= 0) {
-        clearInterval(timerRef.current);
+        if (timerRef.current) clearInterval(timerRef.current);
         timerRef.current = null;
 
         setRemainingMs(0);
@@ -45,7 +61,11 @@ export function useSessionTimer({ durationMs, onExpire, onWarn }) {
     timerRef.current = null;
   }
 
-  function syncFromServer({ endsAt: serverEndsAt, pausedAt, remainingMs: serverRemainingMs } = {}) {
+  function syncFromServer({
+    endsAt: serverEndsAt,
+    pausedAt,
+    remainingMs: serverRemainingMs,
+  }: SyncPayload = {}) {
     if (serverEndsAt != null) setEndsAt(serverEndsAt);
 
     if (pausedAt) {
@@ -71,21 +91,18 @@ export function useSessionTimer({ durationMs, onExpire, onWarn }) {
     }
   }
 
-  function startWithEndsAt(serverEndsAt) {
+  function startWithEndsAt(serverEndsAt: number) {
     setIsPaused(false);
     setEndsAt(serverEndsAt);
     setRemainingMs(Math.max(0, serverEndsAt - Date.now()));
     warnedRef.current = false;
   }
 
-  function start(durationOverride) {
+  function start(durationOverride?: number) {
     const base =
-      typeof durationOverride === "number"
-        ? durationOverride
-        : durationMs;
+      typeof durationOverride === "number" ? durationOverride : durationMs;
 
-    const nextEndsAt = Date.now() + base;
-    startWithEndsAt(nextEndsAt);
+    startWithEndsAt(Date.now() + base);
   }
 
   function clear() {

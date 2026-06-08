@@ -61,6 +61,22 @@ Multi-app, loosely coupled monorepo with **no shared package** and **no database
 | **studio-kiosk** | Zustand (`useGalleryStore`) + React local state |
 | **kiosk-app** | React `useState` + custom hooks |
 
+### Session timer authority
+
+The **API** owns the canonical session timer (`activeSession.endsAt`, `pausedAt`, `remainingMs`, `phase`). Operator and customer displays sync from the server — they do not run independent countdown authorities.
+
+| Source | Role |
+|--------|------|
+| `POST /api/session/*`, `POST /api/kiosk/*` | Mutate `activeSession` and emit Socket events |
+| `session-timer-update` | Unified timer payload after any timer change |
+| `session-state` on Socket connect | Restore timer after kiosk reconnect (`timer` field) |
+| `GET /api/kiosk-config` | Defaults only (durations, countdown); not the live session timer |
+| `useSessionTimer` (both apps) | Display layer: `endsAt - Date.now()`, pause freeze, 1-min warning |
+
+**Operator** (`SessionKioskClient`): `session.service.ts` + `hooks/useSessionTimer.ts`; polls `GET /api/session` every 8s on preview; Pause / Resume / +1 min / +5 min buttons.
+
+**Customer kiosk** (`App.jsx`): passive Socket listener; `syncFromServer` on `session-timer-update`, `session-paused`, `session-resumed`, and `session-state.timer`.
+
 ### Key Design Constraints
 
 - Windows-centric paths (`D:\SudutPandangStudio`, SumatraPDF for silent print)
@@ -97,13 +113,13 @@ Multi-app, loosely coupled monorepo with **no shared package** and **no database
 | **Customer Registration** | Create daily user folder + metadata | `/`, `/session` | `RegisterForm`, `SessionKioskClient` | Inline fetch; `kiosk-app/services/api.js` | `POST /api/register` |
 | **Customer Lookup** | Resume session for registered name | `/session` | `SessionKioskClient` | Inline `apiCustomerByName` | `GET /api/customer-by-name` |
 | **Access Photo** | Open gallery by user slug | `/` → gallery | `AccessForm` | — | — |
-| **Operator Session Control** | Staff runs timers, trial/main, capture | `/session` | `SessionKioskClient` | Inline API helpers | `POST /api/session/*`, `POST /api/kiosk/*`, `GET /api/images/:user` |
+| **Operator Session Control** | Staff runs timers, trial/main, pause/resume, capture | `/session` | `SessionKioskClient` | `session.service.ts`, `useSessionTimer` | `POST /api/session/*`, `POST /api/kiosk/*`, `GET /api/session`, `GET /api/images/:user` |
 | **Customer Kiosk Display** | Fullscreen customer UX | kiosk screens | `kiosk-app/App.jsx`, hooks | `api.js`, `config.js`, Socket.IO | `GET /api/kiosk-config`, `POST /api/capture`, Socket events |
-| **Kiosk Session Sync** | Push trial/main to customer display | `/session` → Socket | `SessionKioskClient`, `App.jsx` | Socket.IO in api | `POST /api/kiosk/trial-start`, `trial-skip`, `main-start` |
+| **Kiosk Session Sync** | Push trial/main and timer updates to customer display | `/session` → Socket | `SessionKioskClient`, `App.jsx` | Socket.IO in api | `POST /api/kiosk/trial-start`, `trial-skip`, `main-start`; `session-timer-update` |
 | **Live Camera Preview** | HDMI/capture card live view | kiosk trial/main | `useCameraPreview` | getUserMedia + optional Electron IPC | — |
 | **Photo Capture** | Countdown, trigger shutter, show last shot | `/session`, kiosk | `SessionKioskClient`, `App.jsx` | `triggerBackendCapture`, `fetchLatestImage` | `POST /api/capture`, `GET /api/images/:user` |
 | **Capture File Pipeline** | Move captures to user folder | backend | — | chokidar in `api/server.js` | Socket: `new-photo` |
-| **Session Lifecycle** | Start/stop/pause/resume/expire | backend + partial UI | `SessionKioskClient`, `App.jsx` | In-memory in api | `GET/POST /api/session/*` |
+| **Session Lifecycle** | Start/stop/pause/resume/add-time/expire | backend + operator + kiosk UI | `SessionKioskClient`, `App.jsx` | `session.service.ts`, in-memory in api | `GET/POST /api/session/*` |
 | **User Photo Gallery** | Browse and select photos | `/gallery?user=` | `GalleryClient`, `PhotoCard`, `PhotoModal`, `BottomPrintBar` | `image.service.ts` | `GET /api/images/:user` |
 | **Print Selection & Limits** | Enforce max printable photos | `/gallery` | `PhotoCard`, `useGalleryStore` | Zustand | `GET /api/print-config/:user` |
 | **Print Editor** | Templates, filters, pan/zoom | `/print` | `PrintCanvas`, `PrintToolbar`, canvas utils | `exportCanvas.ts`, `useGalleryStore` | — |
@@ -118,16 +134,30 @@ Multi-app, loosely coupled monorepo with **no shared package** and **no database
 | `kiosk-trial-start` | API → kiosk | Start trial session on customer display |
 | `kiosk-trial-skip` | API → kiosk | Skip trial, return to idle |
 | `kiosk-main-start` | API → kiosk | Start main session |
+| `session-timer-update` | API → clients | Unified timer sync: `{ user, endsAt, pausedAt, remainingMs, phase }` |
 | `session-ended` | API → kiosk | End session |
-| `session-state` | API → kiosk | Initial state on connect |
+| `session-state` | API → kiosk | On connect: `{ activeSession, sessionLocked, timer }` |
+| `session-paused` | API → clients | Pause notification; kiosk also uses `session-timer-update` |
+| `session-resumed` | API → clients | Resume with full `activeSession`; kiosk syncs timer |
 | `new-photo` | API → clients | New file moved to user folder *(no UI listener yet)* |
-| `session-started`, `session-paused`, `session-resumed` | API → clients | Session state changes *(limited UI use)* |
+| `session-started` | API → clients | Session registered *(operator-driven; kiosk uses timer events)* |
+
+### `GET /api/kiosk-config` fields
+
+| Field | Purpose |
+|-------|---------|
+| `sessionDurationMinutes` | Default main duration (env: `SESSION_DURATION_MINUTES`) |
+| `captureCountdownSeconds` | Shutter countdown on kiosk |
+| `trialDurationSeconds` | Default trial length (env: `TRIAL_DURATION_SECONDS`) |
+| `packageDurations` | Per-package main duration in minutes: `{ self-photo, pas-photo, ai-photo }` |
+
+Config drives **defaults and labels**; the live countdown on both displays comes from Socket timer events and `activeSession.endsAt`.
 
 ### Package Types
 
-| Type | Main duration | Kiosk behavior |
-|------|---------------|----------------|
-| `self-photo` | 10 min | Standard self-photo |
+| Type | Main duration (default) | Kiosk behavior |
+|------|-------------------------|----------------|
+| `self-photo` | 10 min (`packageDurations`) | Standard self-photo |
 | `pas-photo` | 5 min | Pas-photo frame overlay on live preview |
 | `ai-photo` | 10 min | AI messaging on review (no AI pipeline in code) |
 
@@ -142,10 +172,12 @@ There is no shared package today. Reuse **within** each app, or extract to `pack
 | Service | Location | Use when |
 |---------|----------|----------|
 | `fetchImages(userId)` | `services/image.service.ts` | Loading user photos for gallery |
+| Session/kiosk API | `services/session.service.ts` | `getSession`, `startSession`, `pauseSession`, `resumeSession`, `addTime`, `trialStart`, `mainStart`, `getKioskConfig` |
+| `msToMMSS` | `utils/time.ts` | Format countdown display |
+| `useSessionTimer` | `hooks/useSessionTimer.ts` | Operator timer display synced to server |
 | `API_BASE_URL` | `lib/env.ts` | Any API call from Next.js app |
 | `useGalleryStore` | `stores/useGalleryStore.ts` | Gallery + print selection, transforms, templates |
-| Inline fetch helpers | `SessionKioskClient.tsx` | Session/register/kiosk control *(should move to api-client)* |
-| Inline fetch | `RegisterForm`, `HeadlineGallery`, `GalleryClient`, `PrintToolbar` | Feature-specific calls *(consolidate over time)* |
+| Inline fetch | `SessionKioskClient.tsx` (register, images), `RegisterForm`, `HeadlineGallery`, `GalleryClient`, `PrintToolbar` | Feature-specific calls *(consolidate over time)* |
 
 ### kiosk-app
 
@@ -153,7 +185,7 @@ There is no shared package today. Reuse **within** each app, or extract to `pack
 |---------|----------|----------|
 | `registerCustomer`, `startSession`, `stopSession` | `services/api.js` | Kiosk registration/session (legacy; kiosk is mostly passive now) |
 | `fetchLatestImage`, `triggerBackendCapture` | `services/api.js` | Post-capture preview and shutter trigger |
-| `getApiBase`, `fetchKioskConfig` | `config.js` | API URL and server-driven timer/countdown config |
+| `getApiBase`, `fetchKioskConfig` | `config.js` | API URL; defaults (`sessionDurationMinutes`, `trialDurationSeconds`, `packageDurations`, `captureCountdownSeconds`) |
 | `useKioskAudio` | `services/audio.js` | Countdown beeps, shutter, warnings, session end |
 
 ### api (monolithic `server.js`)
@@ -170,7 +202,7 @@ There is no shared package today. Reuse **within** each app, or extract to `pack
 
 1. **`packages/api-client`** — all `/api/*` calls + TypeScript types
 2. **`packages/types`** — `Customer`, `Session`, `ImageData`, `PackageType`, `PrintTemplate`
-3. **`utils/time.ts`** — `msToMMSS` (duplicated in kiosk-app and SessionKioskClient)
+3. **`utils/time.ts`** — `msToMMSS` *(done in studio-kiosk; kiosk-app still has inline label formatting)*
 
 ---
 
@@ -274,7 +306,7 @@ Reuse as a group when adding templates or export paths:
 ### State
 
 - **Gallery/print:** Zustand `useGalleryStore` — do not duplicate selection state locally
-- **Session screens:** React `useState` + `useRef` for timers
+- **Session screens:** `useSessionTimer` hook (operator + kiosk); capture countdown still uses `useRef` interval
 - **Canvas interaction:** `useCanvasPanZoomPro` for pan/zoom on print canvas
 
 ### Comments

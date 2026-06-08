@@ -5,21 +5,27 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { API_BASE_URL } from "@/lib/env";
 import { cn } from "@/lib/utils";
+import { msToMMSS } from "@/utils/time";
+import { useSessionTimer } from "@/hooks/useSessionTimer";
+import {
+  type PackageType,
+  type Session,
+  addTime,
+  getKioskConfig,
+  getPackageDurationMinutes,
+  getSession,
+  mainStart,
+  pauseSession,
+  resumeSession,
+  startSession,
+  stopSession,
+  trialSkip,
+  trialStart,
+} from "@/services/session.service";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 type Screen = "register" | "preview" | "end";
-
-type Session = {
-  user: string;
-  peopleCount: number;
-  endsAt: number;
-  pausedAt: number | null;
-  remainingMs: number | null;
-  packageType?: PackageType;
-};
-
-type PackageType = "self-photo" | "pas-photo" | "ai-photo";
 
 type Customer = {
   user: string;
@@ -30,24 +36,26 @@ type Customer = {
   packageType?: PackageType;
 };
 
-const SESSION_DURATION_MS = 10 * 60 * 1000;
+const TRIAL_PRESETS = [30, 60, 90] as const;
 
-function msToMMSS(ms: number) {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const m = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
-  const s = String(totalSeconds % 60).padStart(2, "0");
-  return `${m}:${s}`;
-}
+const DEFAULT_KIOSK_CONFIG = {
+  sessionDurationMinutes: 10,
+  captureCountdownSeconds: 3,
+  trialDurationSeconds: 60,
+  packageDurations: {
+    "self-photo": 10,
+    "pas-photo": 5,
+    "ai-photo": 10,
+  } as Record<PackageType, number>,
+};
 
-async function apiRegister(
-  payload: {
-    name: string;
-    phone: string;
-    peopleCount: number;
-    templateId: string;
-    packageType: PackageType;
-  }
-): Promise<Customer> {
+async function apiRegister(payload: {
+  name: string;
+  phone: string;
+  peopleCount: number;
+  templateId: string;
+  packageType: PackageType;
+}): Promise<Customer> {
   const res = await fetch(`${API_BASE_URL}/api/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -56,64 +64,6 @@ async function apiRegister(
   if (!res.ok) throw new Error("register_failed");
   const data = (await res.json()) as { customer: Customer };
   return data.customer;
-}
-
-async function apiSessionStart(
-  payload: {
-    user: string;
-    peopleCount: number;
-    duration: number;
-    packageType: PackageType;
-  }
-): Promise<Session> {
-  const res = await fetch(`${API_BASE_URL}/api/session/start`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error("session_start_failed");
-
-  const data = await res.json();
-
-  console.log("SESSION FROM API:", data.session); // ✅ DEBUG
-
-  return data.session;
-}
-
-async function apiSessionStop(): Promise<void> {
-  await fetch(`${API_BASE_URL}/api/session/stop`, { method: "POST" });
-}
-
-async function apiKioskTrialStart(user: string, durationSeconds = 60) {
-  await fetch(`${API_BASE_URL}/api/kiosk/trial-start`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user, durationSeconds }),
-  });
-}
-
-async function apiKioskTrialSkip(user: string) {
-  await fetch(`${API_BASE_URL}/api/kiosk/trial-skip`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user }),
-  });
-}
-
-async function apiKioskMainStart(
-  user: string,
-  durationSeconds: number,
-  packageType: PackageType
-) {
-  const res = await fetch(`${API_BASE_URL}/api/kiosk/main-start`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user, durationSeconds, packageType }),
-  });
-
-  if (!res.ok) throw new Error("kiosk_main_start_failed");
-
-  return res.json();
 }
 
 async function apiLatestImageUrl(userSlug: string): Promise<string | null> {
@@ -133,6 +83,20 @@ async function apiCustomerByName(name: string): Promise<Customer | null> {
   return data.customer ?? null;
 }
 
+function syncTimerFromSession(
+  session: Session,
+  syncFromServer: ReturnType<typeof useSessionTimer>["syncFromServer"]
+) {
+  syncFromServer({
+    endsAt: session.endsAt,
+    pausedAt: session.pausedAt,
+    remainingMs:
+      session.pausedAt != null
+        ? (session.remainingMs ?? 0)
+        : Math.max(0, session.endsAt - Date.now()),
+  });
+}
+
 export function SessionKioskClient() {
   const router = useRouter();
   const [screen, setScreen] = React.useState<Screen>("register");
@@ -140,17 +104,59 @@ export function SessionKioskClient() {
   const [captureCountdown, setCaptureCountdown] = React.useState(3);
   const [captureCount, setCaptureCount] = React.useState(0);
   const [session, setSession] = React.useState<Session | null>(null);
-  const [sessionEndsAt, setSessionEndsAt] = React.useState<number | null>(null);
-  const [remainingMs, setRemainingMs] = React.useState<number>(SESSION_DURATION_MS);
   const [lastImageUrl, setLastImageUrl] = React.useState<string | null>(null);
+  const [kioskConfig, setKioskConfig] = React.useState(DEFAULT_KIOSK_CONFIG);
+  const [trialSeconds, setTrialSeconds] = React.useState(60);
 
   const captureTimerRef = React.useRef<number | null>(null);
-  const sessionTimerRef = React.useRef<number | null>(null);
+  const syncFromServerRef = React.useRef<
+    ReturnType<typeof useSessionTimer>["syncFromServer"]
+  >(() => {});
+
+  const sessionTimer = useSessionTimer({
+    durationMs: kioskConfig.sessionDurationMinutes * 60 * 1000,
+    onExpire: () => {
+      void stopSession().catch(() => {});
+      setScreen("end");
+      setSession(null);
+      setLastImageUrl(null);
+    },
+  });
+
+  React.useEffect(() => {
+    syncFromServerRef.current = sessionTimer.syncFromServer;
+  });
+
+  React.useEffect(() => {
+    getKioskConfig()
+      .then((config) => {
+        setKioskConfig({
+          sessionDurationMinutes:
+            config.sessionDurationMinutes ??
+            DEFAULT_KIOSK_CONFIG.sessionDurationMinutes,
+          captureCountdownSeconds:
+            config.captureCountdownSeconds ??
+            DEFAULT_KIOSK_CONFIG.captureCountdownSeconds,
+          trialDurationSeconds:
+            config.trialDurationSeconds ?? DEFAULT_KIOSK_CONFIG.trialDurationSeconds,
+          packageDurations: {
+            ...DEFAULT_KIOSK_CONFIG.packageDurations,
+            ...config.packageDurations,
+          },
+        });
+        const defaultTrial = config.trialDurationSeconds ?? 60;
+        setTrialSeconds(
+          TRIAL_PRESETS.includes(defaultTrial as (typeof TRIAL_PRESETS)[number])
+            ? defaultTrial
+            : 60
+        );
+      })
+      .catch(() => {});
+  }, []);
 
   React.useEffect(() => {
     return () => {
       if (captureTimerRef.current) window.clearInterval(captureTimerRef.current);
-      if (sessionTimerRef.current) window.clearInterval(sessionTimerRef.current);
     };
   }, []);
 
@@ -160,35 +166,6 @@ export function SessionKioskClient() {
     if (url) setLastImageUrl(url);
   }, [session?.user]);
 
-  // Session timer
-  React.useEffect(() => {
-    if (!sessionEndsAt) return;
-
-    if (sessionTimerRef.current) window.clearInterval(sessionTimerRef.current);
-    sessionTimerRef.current = window.setInterval(async () => {
-      const remaining = sessionEndsAt - Date.now();
-      if (remaining <= 0) {
-        if (sessionTimerRef.current) window.clearInterval(sessionTimerRef.current);
-        sessionTimerRef.current = null;
-        await apiSessionStop().catch(() => { });
-        setScreen("end");
-        setSession(null);
-        setSessionEndsAt(null);
-        setRemainingMs(0);
-        return;
-      }
-
-      setRemainingMs(remaining);
-    }, 1000);
-
-    return () => {
-      if (sessionTimerRef.current) window.clearInterval(sessionTimerRef.current);
-      sessionTimerRef.current = null;
-    };
-  }, [sessionEndsAt]);
-
-  // Realtime preview: poll latest image when on preview screen.
-  // Must stay here (top-level) to keep hook order stable.
   React.useEffect(() => {
     if (screen !== "preview" || !session?.user) return;
     refreshLastImage();
@@ -196,10 +173,41 @@ export function SessionKioskClient() {
     return () => window.clearInterval(t);
   }, [refreshLastImage, screen, session?.user]);
 
+  React.useEffect(() => {
+    if (screen !== "preview") return;
+
+    async function pollSession() {
+      try {
+        const { activeSession, sessionLocked } = await getSession();
+        if (sessionLocked || !activeSession) {
+          sessionTimer.clear();
+          setSession(null);
+          setScreen("end");
+          return;
+        }
+
+        setSession(activeSession);
+        syncFromServerRef.current({
+          endsAt: activeSession.endsAt,
+          pausedAt: activeSession.pausedAt,
+          remainingMs:
+            activeSession.pausedAt != null
+              ? (activeSession.remainingMs ?? 0)
+              : Math.max(0, activeSession.endsAt - Date.now()),
+        });
+      } catch {
+        // ignore transient poll errors
+      }
+    }
+
+    void pollSession();
+    const t = window.setInterval(() => void pollSession(), 8000);
+    return () => window.clearInterval(t);
+    // Poll interval only depends on screen; sync uses ref to avoid stale closures.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
+
   const handleCapture = React.useCallback(async () => {
-    // In Next.js kiosk mode (browser), we cannot control Sony directly.
-    // The capture trigger should be performed by Electron shell / backend integration later.
-    // For now, we only refresh latest image after capture should have happened externally.
     setCaptureCount((c) => c + 1);
     window.setTimeout(() => {
       refreshLastImage();
@@ -227,16 +235,35 @@ export function SessionKioskClient() {
   }, [handleCapture, isCapturing, session]);
 
   const endSession = React.useCallback(async () => {
-    await apiSessionStop().catch(() => { });
+    await stopSession().catch(() => {});
+    sessionTimer.clear();
     setScreen("end");
     setSession(null);
-    setSessionEndsAt(null);
     setLastImageUrl(null);
-  }, []);
+  }, [sessionTimer]);
+
+  const beginPreview = React.useCallback(
+    (s: Session) => {
+      setSession(s);
+      setCaptureCount(0);
+      setLastImageUrl(null);
+      sessionTimer.startWithEndsAt(s.endsAt);
+      setScreen("preview");
+    },
+    [sessionTimer]
+  );
+
+  const mainDurationMinutes = session
+    ? getPackageDurationMinutes(
+        session.packageType || "self-photo",
+        kioskConfig.packageDurations
+      )
+    : kioskConfig.sessionDurationMinutes;
 
   if (screen === "register") {
     return (
       <RegisterOrCheckScreen
+        packageDurations={kioskConfig.packageDurations}
         onRegister={async (name, phone, peopleCount, packageType) => {
           const customer = await apiRegister({
             name,
@@ -245,18 +272,13 @@ export function SessionKioskClient() {
             templateId: "4R",
             packageType,
           });
-          const s = await apiSessionStart({
+          const s = await startSession({
             user: customer.user,
             peopleCount: customer.peopleCount,
-            duration: packageType === "pas-photo" ? 5 : 10,
+            duration: getPackageDurationMinutes(packageType, kioskConfig.packageDurations),
             packageType,
           });
-          setSession(s);
-          setCaptureCount(0);
-          setLastImageUrl(null);
-          setSessionEndsAt(s.endsAt);
-          setRemainingMs(s.endsAt - Date.now());
-          setScreen("preview");
+          beginPreview(s);
         }}
         onCheckByName={async (name) => {
           const customer = await apiCustomerByName(name);
@@ -265,18 +287,13 @@ export function SessionKioskClient() {
             return;
           }
           const pkg: PackageType = customer.packageType || "self-photo";
-          const s = await apiSessionStart({
+          const s = await startSession({
             user: customer.user,
             peopleCount: customer.peopleCount,
-            duration: pkg === "pas-photo" ? 5 : 10,
+            duration: getPackageDurationMinutes(pkg, kioskConfig.packageDurations),
             packageType: pkg,
           });
-          setSession(s);
-          setCaptureCount(0);
-          setLastImageUrl(null);
-          setSessionEndsAt(s.endsAt);
-          setRemainingMs(s.endsAt - Date.now());
-          setScreen("preview");
+          beginPreview(s);
         }}
         onBack={() => router.push("/")}
       />
@@ -296,7 +313,14 @@ export function SessionKioskClient() {
           <div className="flex flex-wrap gap-2">
             <Pill label={`Sesi: ${session?.user ?? "-"}`} />
             <Pill label={`Shot: ${captureCount}`} />
-            <Pill label={`Waktu: ${msToMMSS(remainingMs)}`} intent={remainingMs <= 60_000 ? "warn" : "default"} />
+            <Pill
+              label={
+                sessionTimer.isPaused
+                  ? `Waktu: ${msToMMSS(sessionTimer.remainingMs)} (PAUSED)`
+                  : `Waktu: ${msToMMSS(sessionTimer.remainingMs)}`
+              }
+              intent={sessionTimer.remainingMs <= 60_000 ? "warn" : "default"}
+            />
           </div>
         </header>
 
@@ -320,7 +344,9 @@ export function SessionKioskClient() {
               </>
             ) : (
               <div className="flex flex-col items-center justify-center gap-4 text-white/50">
-                <p className="text-center text-sm sm:text-base">Belum ada foto. Klik &quot;Ambil Foto&quot; untuk capture.</p>
+                <p className="text-center text-sm sm:text-base">
+                  Belum ada foto. Klik &quot;Ambil Foto&quot; untuk capture.
+                </p>
                 {isCapturing && (
                   <div className="text-6xl font-extrabold tracking-[0.18em] text-white sm:text-8xl">
                     {captureCountdown}
@@ -340,16 +366,25 @@ export function SessionKioskClient() {
           </Button>
           {session && (
             <>
+              <select
+                value={trialSeconds}
+                onChange={(e) => setTrialSeconds(Number(e.target.value))}
+                className="h-11 rounded border border-white/20 bg-white/10 px-2 text-sm text-white"
+              >
+                {TRIAL_PRESETS.map((seconds) => (
+                  <option key={seconds} value={seconds} className="text-black">
+                    Trial {seconds}s
+                  </option>
+                ))}
+              </select>
               <Button
                 className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
                 onClick={async () => {
                   if (!session?.user) return;
-                
+
                   try {
-                    const data = await apiKioskMainStart(session.user, 60, session.packageType || "self-photo");
-                
-                    setSessionEndsAt(data.endsAt);
-                    setRemainingMs(data.endsAt - Date.now());
+                    const data = await trialStart(session.user, trialSeconds);
+                    sessionTimer.startWithEndsAt(data.endsAt);
                   } catch {
                     alert("Gagal start trial");
                   }
@@ -358,11 +393,10 @@ export function SessionKioskClient() {
                 Start Trial
               </Button>
               <Button
-
                 className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
                 onClick={() => {
                   if (!session?.user) return;
-                  apiKioskTrialSkip(session.user).catch(() => { });
+                  trialSkip(session.user).catch(() => {});
                 }}
               >
                 Skip Trial
@@ -371,20 +405,83 @@ export function SessionKioskClient() {
                 className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
                 onClick={async () => {
                   if (!session?.user) return;
-                
+
                   const pkg: PackageType = session.packageType || "self-photo";
-                  const mainSeconds = (pkg === "pas-photo" ? 5 : 10) * 60;
-                
+                  const mainSeconds =
+                    getPackageDurationMinutes(pkg, kioskConfig.packageDurations) * 60;
+
                   try {
-                    const data = await apiKioskMainStart(session.user, mainSeconds, pkg);
-                    setSessionEndsAt(data.endsAt);
-                    setRemainingMs(data.endsAt - Date.now());
+                    const data = await mainStart(session.user, mainSeconds, pkg);
+                    sessionTimer.startWithEndsAt(data.endsAt);
                   } catch {
                     alert("Gagal mulai sesi");
                   }
                 }}
               >
-                Mulai Sesi Utama ({session?.packageType === "pas-photo" ? "5m" : "10m"})
+                Mulai Sesi Utama ({mainDurationMinutes}m)
+              </Button>
+              <Button
+                className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
+                disabled={sessionTimer.isPaused}
+                onClick={async () => {
+                  try {
+                    await pauseSession();
+                    const { activeSession } = await getSession();
+                    if (activeSession) {
+                      syncTimerFromSession(activeSession, sessionTimer.syncFromServer);
+                    }
+                  } catch {
+                    alert("Gagal pause sesi");
+                  }
+                }}
+              >
+                Pause
+              </Button>
+              <Button
+                className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
+                disabled={!sessionTimer.isPaused}
+                onClick={async () => {
+                  try {
+                    const resumed = await resumeSession();
+                    syncTimerFromSession(resumed, sessionTimer.syncFromServer);
+                  } catch {
+                    alert("Gagal resume sesi");
+                  }
+                }}
+              >
+                Resume
+              </Button>
+              <Button
+                className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
+                onClick={async () => {
+                  try {
+                    await addTime(1);
+                    const { activeSession } = await getSession();
+                    if (activeSession) {
+                      syncTimerFromSession(activeSession, sessionTimer.syncFromServer);
+                    }
+                  } catch {
+                    alert("Gagal tambah waktu");
+                  }
+                }}
+              >
+                +1 min
+              </Button>
+              <Button
+                className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
+                onClick={async () => {
+                  try {
+                    await addTime(5);
+                    const { activeSession } = await getSession();
+                    if (activeSession) {
+                      syncTimerFromSession(activeSession, sessionTimer.syncFromServer);
+                    }
+                  } catch {
+                    alert("Gagal tambah waktu");
+                  }
+                }}
+              >
+                +5 min
               </Button>
             </>
           )}
@@ -400,22 +497,20 @@ export function SessionKioskClient() {
     );
   }
 
-  // end
   return (
     <main className="flex min-h-screen w-full flex-col items-center justify-center bg-black px-4 sm:px-6 py-8">
       <h1 className="text-center text-3xl font-semibold tracking-wide text-white sm:text-5xl">
         Terima kasih
       </h1>
       <p className="mt-5 max-w-xl text-center text-sm text-white/60 sm:text-lg">
-        Foto Anda sedang diproses.<br/> Silakan hubungi tim studio jika ingin review atau cetak.
+        Foto Anda sedang diproses.<br /> Silakan hubungi tim studio jika ingin review atau cetak.
       </p>
       <div className="mt-8 sm:mt-10 flex flex-wrap gap-3 justify-center">
         <Button
           className="rounded bg-blue-600 px-6 py-3 text-white shadow-lg hover:bg-blue-700"
           onClick={() => {
+            sessionTimer.clear();
             setSession(null);
-            setSessionEndsAt(null);
-            setRemainingMs(SESSION_DURATION_MS);
             setCaptureCount(0);
             setLastImageUrl(null);
             setScreen("register");
@@ -444,6 +539,7 @@ function Pill({ label, intent = "default" }: { label: string; intent?: "default"
 }
 
 type RegisterOrCheckScreenProps = {
+  packageDurations: Record<PackageType, number>;
   onRegister: (
     name: string,
     phone: string,
@@ -454,11 +550,19 @@ type RegisterOrCheckScreenProps = {
   onBack: () => void;
 };
 
-function RegisterOrCheckScreen({ onRegister, onCheckByName, onBack }: RegisterOrCheckScreenProps) {
+function RegisterOrCheckScreen({
+  packageDurations,
+  onRegister,
+  onCheckByName,
+  onBack,
+}: RegisterOrCheckScreenProps) {
   const [mode, setMode] = React.useState<"register" | "check">("register");
   const [checkName, setCheckName] = React.useState("");
   const [checkLoading, setCheckLoading] = React.useState(false);
   const [packageType, setPackageType] = React.useState<PackageType>("self-photo");
+
+  const selfPhotoMinutes = packageDurations["self-photo"];
+  const pasPhotoMinutes = packageDurations["pas-photo"];
 
   return (
     <main className="flex min-h-screen w-full items-center justify-center bg-black px-4 py-6 sm:px-6">
@@ -546,7 +650,7 @@ function RegisterOrCheckScreen({ onRegister, onCheckByName, onBack }: RegisterOr
                       Self Photo Studio
                     </span>
                     <span className="mt-1 text-[11px] sm:text-xs text-white/70">
-                      Durasi utama 10 menit, pengalaman self photo bebas pose.
+                      Durasi utama {selfPhotoMinutes} menit, pengalaman self photo bebas pose.
                     </span>
                   </button>
                   <button
@@ -563,7 +667,7 @@ function RegisterOrCheckScreen({ onRegister, onCheckByName, onBack }: RegisterOr
                       Pas Photo
                     </span>
                     <span className="mt-1 text-[11px] sm:text-xs text-white/70">
-                      Durasi utama 5 menit dengan frame pas foto di layar live preview.
+                      Durasi utama {pasPhotoMinutes} menit dengan frame pas foto di layar live preview.
                     </span>
                   </button>
                   <button
@@ -615,12 +719,7 @@ function RegisterOrCheckScreen({ onRegister, onCheckByName, onBack }: RegisterOr
                 />
               </div>
               <div className="flex gap-3 pt-2">
-                <Button
-                  type="button"
-
-                  className="h-11 flex-1"
-                  onClick={onBack}
-                >
+                <Button type="button" className="h-11 flex-1" onClick={onBack}>
                   Kembali
                 </Button>
                 <Button
@@ -647,4 +746,3 @@ function RegisterOrCheckScreen({ onRegister, onCheckByName, onBack }: RegisterOr
     </main>
   );
 }
-

@@ -15,9 +15,11 @@ Inventory of known technical debt, prioritized for a single-studio LAN deploymen
 | Severity | Count | Top themes |
 |----------|-------|------------|
 | Critical | 3 | Production Electron, monolithic api blast radius, session loss on restart |
-| High | 8 | Duplicated API clients, config bugs, no tests, Windows lock-in |
-| Medium | 10 | Incomplete features, legacy code, print/gallery gaps |
+| High | 7 | Duplicated API clients, no tests, Windows lock-in |
+| Medium | 8 | Incomplete features, legacy code, print/gallery gaps |
 | Low | 6 | Docs, deps hygiene, minor UX |
+
+**Recently resolved (timer sync work):** #8 config key mismatch · #11 timer utilities (partial) · #20 pause/resume/add-time UI
 
 ---
 
@@ -40,11 +42,11 @@ Inventory of known technical debt, prioritized for a single-studio LAN deploymen
 
 | # | Technical debt | Severity | Recommended fix | Effort | Business impact |
 |---|----------------|----------|-----------------|--------|-----------------|
-| 7 | **Duplicated API clients** — inline `fetch` in `SessionKioskClient`, `RegisterForm`, `GalleryClient`, `PrintToolbar`, `HeadlineGallery` plus `kiosk-app/services/api.js` | High | `packages/api-client` or `studio-kiosk/services/api/` with typed functions for all endpoints | M | Same bug fixed in one place only; inconsistent error handling; slower feature work |
-| 8 | **Kiosk config key mismatch** — API returns `sessionDurationMinutes`; `config.js` maps `sessionDurationSeconds`; `App.jsx` reads `sessionDurationMinutes` | High | Align `fetchKioskConfig()` to map API fields correctly; single config type | S | Wrong default timer on kiosk if config fetch fails or fields drift |
+| 7 | **Duplicated API clients** — **Partially reduced** — session/kiosk calls in `session.service.ts`; register/images still inline in `SessionKioskClient`; other pages unchanged | High | Extend `session.service.ts` pattern to register/gallery/print; or `packages/api-client` | M | Same bug fixed in one place only; inconsistent error handling; slower feature work |
+| 8 | ~~**Kiosk config key mismatch**~~ — **Resolved** — `config.js` maps `sessionDurationMinutes`; extended config includes `trialDurationSeconds` and `packageDurations` | — | — | — | — |
 | 9 | **Hardcoded API URL** — `192.168.1.10:4000` fallback in `env.ts` and `config.js` | Medium | Require env in production; document `.env.example` per app | S | Studio move or IP change breaks all clients until manual edit |
 | 10 | **`API_BASE` captured at module load** in `kiosk-app/services/api.js` | Medium | Resolve `getApiBase()` per request or lazy getter | S | Runtime `__KIOSK_CONFIG__` override ignored after first import |
-| 11 | **Duplicated timer logic** — `msToMMSS` in `SessionKioskClient`, `App.jsx`; manual `setInterval` vs `useSessionTimer` | Medium | Shared `utils/time.ts` + reuse `useSessionTimer` in operator UI where applicable | S | Timer drift or inconsistent warnings between operator and customer displays |
+| 11 | **Duplicated timer logic** — **Reduced** — `utils/time.ts` + `useSessionTimer` in operator UI; kiosk uses `syncFromServer` via Socket; `App.jsx` still has inline `remainingLabel` formatting | Low | Extract shared time util to kiosk-app or shared package | S | Minor display inconsistency only; live timers now server-synced |
 | 12 | **Cross-app UI duplication** — `Button`, `cn()` in both apps | Low | Shared `packages/ui` or copy-once policy documented | M | Visual inconsistency between operator and customer apps over time |
 | 13 | **React version split** — React 19 (studio-kiosk) vs 18 (kiosk-app) | Low | Align on 18 or 19 when Electron supports it | S | Subtle hook/typing differences for contributors |
 
@@ -67,7 +69,7 @@ Inventory of known technical debt, prioritized for a single-studio LAN deploymen
 |---|----------------|----------|-----------------|--------|-----------------|
 | 18 | **Dual session UIs** — `SessionKioskClient` (browser) vs `kiosk-app` (Electron) with different capture behavior | High | Single source of truth: operator controls only; kiosk passive; remove duplicate capture from `/session` or document as dev-only | M | Operator may think browser preview equals customer experience — support confusion |
 | 19 | **`new-photo` Socket event unused** — gallery/session poll images instead | Medium | Subscribe in `GalleryClient` and/or `SessionKioskClient`; fallback poll | S | Delayed gallery refresh; extra API load from polling |
-| 20 | **Pause/resume/add-time APIs without UI** | Medium | Add operator buttons wired to existing endpoints | S | Staff cannot extend session when customer needs more time without workarounds |
+| 20 | ~~**Pause/resume/add-time APIs without UI**~~ — **Resolved** — Pause, Resume, +1 min, +5 min in `SessionKioskClient` via `session.service.ts` | — | — | — | — |
 | 21 | **`ai-photo` package is UI-only** — no AI pipeline | Medium | Remove package or implement real processing + honest copy | L | Customer expectation mismatch if marketed as AI |
 | 22 | **Print limit inconsistency** — register sets `printLimit: peopleCount`; `/api/print-limit` uses 2/3/5; print copies forced to `1` | Medium | Single rule in `customer.json` + api; restore people-based copies if intended | S | Customers may get wrong number of prints vs package promise |
 | 23 | **`RegisterForm` on home vs `/session`** — home register does not start session | Low | Unify flows or label clearly (“register only”) | S | Staff register on home then wonder why session did not start |
@@ -93,7 +95,7 @@ Inventory of known technical debt, prioritized for a single-studio LAN deploymen
 | 29 | **No automated tests** — api, kiosk-app, studio-kiosk | High | Supertest for api routes; Playwright for gallery/print E2E; unit tests for `printChunk`, `drawSmartCover` | L | Every release is manual QA only; regressions in session/print are costly |
 | 30 | **Legacy `renderer.js`** + committed **`bundle.js`** | Medium | Delete after confirming `App.jsx` + Vite build; remove from repo | S | Contributors edit wrong file; merge conflicts on bundle |
 | 31 | **`.gitignore` minimal** — only `node_modules` | Medium | Add `.next/`, `dist/`, `bundle.js`, `.env` | S | Bloated repo; risk of committing build artifacts |
-| 32 | **`SessionKioskClient.tsx` ~650 lines** | Medium | Extract `RegisterOrCheckScreen`, API module, timer hook | M | Hard to review session changes safely |
+| 32 | **`SessionKioskClient.tsx` ~750 lines** | Medium | **Partially done** — API in `session.service.ts`, timer in `useSessionTimer`; still large due to `RegisterOrCheckScreen` inline | M | Hard to review session changes safely |
 | 33 | **Debug logging in production paths** — e.g. config fetch, audio service | Low | Remove or gate behind `DEBUG` env | S | Noise in kiosk logs during sessions |
 | 34 | **Spurious api dependencies** — `lucide-react`, `child_process` npm package | Low | Remove unused deps from `api/package.json` | S | Confusion, slightly slower installs |
 | 35 | **`ImageData` type duplicated** in store, modal, export | Low | `types/photo.ts` shared import | S | Schema drift between gallery and print |
@@ -109,7 +111,7 @@ Inventory of known technical debt, prioritized for a single-studio LAN deploymen
 | Priority | Items | Why |
 |----------|-------|-----|
 | P0 | #14 Electron production load | Unblocks real customer display |
-| P0 | #8 Config key mismatch | Correct session timers |
+| P0 | ~~#8 Config key mismatch~~ | Done — session timers aligned |
 | P1 | #6 Env-based paths | Deploy on studio PC without fork |
 | P1 | #31 `.gitignore` | Stop artifact churn |
 | P1 | #30 Remove legacy renderer/bundle | Reduce confusion |
@@ -119,9 +121,9 @@ Inventory of known technical debt, prioritized for a single-studio LAN deploymen
 | Priority | Items | Why |
 |----------|-------|-----|
 | P1 | #7 Shared api-client | Every future feature benefits |
-| P2 | #11 Timer utilities | Consistent session UX |
+| P2 | ~~#11 Timer utilities~~ | Done — server-synced timers; minor kiosk label duplication remains |
 | P2 | #19 `new-photo` listener | Better gallery UX |
-| P2 | #20 Pause/resume UI | Operator workflow |
+| P2 | ~~#20 Pause/resume UI~~ | Done — operator Pause/Resume/+1/+5 min |
 
 ### Phase 3 — Reliability & print quality (3–4 weeks)
 
@@ -155,4 +157,4 @@ Revisit when: second studio location, untrusted network, or daily ops pain excee
 
 ---
 
-*Last updated from [PROJECT_GUIDE.md](./PROJECT_GUIDE.md) analysis. Update when items are resolved or new debt is introduced.*
+*Last updated after timer sync phases 1–18 (session-timer-update, operator pause/resume, flexible durations). See [PROJECT_GUIDE.md](./PROJECT_GUIDE.md) § Session timer authority.*

@@ -93,6 +93,37 @@ const CAPTURE_COUNTDOWN_SECONDS =
     ? Number(process.env.CAPTURE_COUNTDOWN_SECONDS)
     : 3;
 
+const TRIAL_DURATION_SECONDS =
+  process.env.TRIAL_DURATION_SECONDS &&
+  !Number.isNaN(Number(process.env.TRIAL_DURATION_SECONDS))
+    ? Number(process.env.TRIAL_DURATION_SECONDS)
+    : 60;
+
+const PACKAGE_DURATIONS = {
+  "self-photo": SESSION_DURATION_MINUTES,
+  "pas-photo": 5,
+  "ai-photo": SESSION_DURATION_MINUTES,
+};
+
+function buildSessionTimerUpdate(session) {
+  if (!session) return null;
+
+  return {
+    user: session.user,
+    endsAt: session.endsAt,
+    pausedAt: session.pausedAt,
+    remainingMs: session.pausedAt
+      ? session.remainingMs
+      : Math.max(0, session.endsAt - Date.now()),
+    phase: session.phase ?? null,
+  };
+}
+
+function emitSessionTimerUpdate(session = activeSession) {
+  const payload = buildSessionTimerUpdate(session);
+  if (payload) io.emit("session-timer-update", payload);
+}
+
 // ======================
 // REGISTER CUSTOMER
 // ======================
@@ -196,13 +227,19 @@ app.post("/api/session/start", (req, res) => {
 app.post("/api/kiosk/trial-start", (req, res) => {
   const { user, durationSeconds = 60 } = req.body || {};
   if (!user) return res.status(400).json({ error: "user required" });
+  if (!activeSession) return res.status(400).json({ error: "no active session" });
+
   const endsAt = Date.now() + durationSeconds * 1000;
+
+  activeSession.endsAt = endsAt;
+  activeSession.phase = "trial";
 
   io.emit("kiosk-trial-start", {
     user,
     durationMs: durationSeconds * 1000,
     endsAt,
   });
+  emitSessionTimerUpdate();
 
   res.json({ success: true, endsAt });
 });
@@ -221,7 +258,13 @@ app.post("/api/kiosk/main-start", (req, res) => {
     packageType = "self-photo",
   } = req.body || {};
   if (!user) return res.status(400).json({ error: "user required" });
+  if (!activeSession) return res.status(400).json({ error: "no active session" });
+
   const endsAt = Date.now() + durationSeconds * 1000;
+
+  activeSession.endsAt = endsAt;
+  activeSession.packageType = packageType;
+  activeSession.phase = "main";
 
   io.emit("kiosk-main-start", {
     user,
@@ -229,6 +272,7 @@ app.post("/api/kiosk/main-start", (req, res) => {
     endsAt,
     packageType,
   });
+  emitSessionTimerUpdate();
 
   res.json({ success: true, endsAt });
 });
@@ -238,6 +282,8 @@ app.get("/api/kiosk-config", (req, res) => {
   res.json({
     sessionDurationMinutes: SESSION_DURATION_MINUTES,
     captureCountdownSeconds: CAPTURE_COUNTDOWN_SECONDS,
+    trialDurationSeconds: TRIAL_DURATION_SECONDS,
+    packageDurations: PACKAGE_DURATIONS,
   });
 });
 
@@ -249,6 +295,7 @@ app.post("/api/session/pause", (req, res) => {
   activeSession.pausedAt = Date.now();
 
   io.emit("session-paused", { remainingMs: activeSession.remainingMs });
+  emitSessionTimerUpdate();
   res.json({ success: true });
 });
 
@@ -261,6 +308,7 @@ app.post("/api/session/resume", (req, res) => {
   activeSession.remainingMs = null;
 
   io.emit("session-resumed", activeSession);
+  emitSessionTimerUpdate();
   res.json({ success: true, session: activeSession });
 });
 
@@ -276,11 +324,13 @@ app.post("/api/session/add-time", (req, res) => {
     activeSession.endsAt += extraMs;
     io.emit("session-resumed", activeSession);
   }
+  emitSessionTimerUpdate();
 
   res.json({ success: true });
 });
 
 app.post("/api/session/stop", (req, res) => {
+  emitSessionTimerUpdate();
   activeSession = null;
   sessionLocked = true;
   io.emit("session-ended");
@@ -290,6 +340,7 @@ app.post("/api/session/stop", (req, res) => {
 // Auto-end session
 setInterval(() => {
   if (activeSession && !activeSession.pausedAt && Date.now() > activeSession.endsAt) {
+    emitSessionTimerUpdate();
     activeSession = null;
     sessionLocked = true;
     io.emit("session-ended");
@@ -547,7 +598,11 @@ chokidar
 // ======================
 io.on("connection", (socket) => {
   console.log("🟢 Kiosk connected");
-  socket.emit("session-state", { activeSession, sessionLocked });
+  socket.emit("session-state", {
+    activeSession,
+    sessionLocked,
+    timer: buildSessionTimerUpdate(activeSession),
+  });
 });
 
 // ======================

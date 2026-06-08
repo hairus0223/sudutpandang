@@ -99,6 +99,58 @@ export function App() {
       setSessionUser(null);
     });
 
+    socket.on("session-state", ({ activeSession, sessionLocked, timer }) => {
+      if (sessionLocked || !timer) return;
+
+      setSessionUser(timer.user);
+      sessionTimer.syncFromServer({
+        endsAt: timer.endsAt,
+        pausedAt: timer.pausedAt,
+        remainingMs: timer.remainingMs,
+      });
+
+      if (timer.phase === "trial") {
+        setScreen(Screen.TRIAL);
+        startCameraPreview();
+      } else if (timer.phase === "main") {
+        setScreen(Screen.MAIN);
+        if (activeSession?.packageType) {
+          setPackageType(activeSession.packageType);
+        }
+        startCameraPreview();
+      }
+    });
+
+    socket.on("session-timer-update", ({ user, endsAt, pausedAt, remainingMs, phase }) => {
+      setSessionUser(user);
+      sessionTimer.syncFromServer({ endsAt, pausedAt, remainingMs });
+
+      if (pausedAt) return;
+
+      if (phase === "trial") {
+        setScreen(Screen.TRIAL);
+        startCameraPreview();
+      } else if (phase === "main") {
+        setScreen(Screen.MAIN);
+        startCameraPreview();
+      }
+    });
+
+    socket.on("session-paused", ({ remainingMs }) => {
+      sessionTimer.syncFromServer({
+        pausedAt: Date.now(),
+        remainingMs,
+      });
+    });
+
+    socket.on("session-resumed", (session) => {
+      sessionTimer.syncFromServer({
+        endsAt: session.endsAt,
+        pausedAt: null,
+        remainingMs: Math.max(0, session.endsAt - Date.now()),
+      });
+    });
+
     return () => {
       socket.disconnect();
     };
