@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchKioskConfig, getApiBase } from "./config";
-import { fetchLatestImage, triggerBackendCapture } from "./services/api";
+import { fetchLatestImage, getPreviewUrl, triggerBackendCapture } from "./services/api";
 import { useKioskAudio } from "./services/audio";
 import { useSessionTimer } from "./hooks/useSessionTimer";
 import { useCameraPreview } from "./hooks/useCameraPreview";
@@ -27,7 +27,13 @@ export function App() {
   const [isReviewing, setIsReviewing] = useState(false);
   const [captureCount, setCaptureCount] = useState(0);
   const [lastImageUrl, setLastImageUrl] = useState(null);
+  const [lastImageProcessing, setLastImageProcessing] = useState(false);
   const [packageType, setPackageType] = useState("self-photo");
+
+  const sessionUserRef = useRef(sessionUser);
+  const packageTypeRef = useRef(packageType);
+  sessionUserRef.current = sessionUser;
+  packageTypeRef.current = packageType;
 
   const { videoRef, start: startCameraPreview, stop: stopCameraPreview, ready: cameraReady } = useCameraPreview();
 
@@ -68,6 +74,7 @@ export function App() {
       setScreen(Screen.TRIAL);
       setCaptureCount(0);
       setLastImageUrl(null);
+      setLastImageProcessing(false);
       sessionTimer.startWithEndsAt(endsAt);
       startCameraPreview();
     });
@@ -85,6 +92,7 @@ export function App() {
       setScreen(Screen.MAIN);
       setCaptureCount(0);
       setLastImageUrl(null);
+      setLastImageProcessing(false);
       setPackageType(pkg || "self-photo");
       sessionTimer.startWithEndsAt(endsAt);
       startCameraPreview();
@@ -151,6 +159,21 @@ export function App() {
       });
     });
 
+    socket.on("photo-processed", (payload) => {
+      const currentUser = sessionUserRef.current;
+      if (!currentUser || payload.user !== currentUser) return;
+
+      if (payload.status === "ready" && payload.subjectUrl) {
+        setLastImageUrl(payload.subjectUrl);
+        setLastImageProcessing(false);
+        return;
+      }
+
+      if (payload.status === "failed") {
+        setLastImageProcessing(false);
+      }
+    });
+
     return () => {
       socket.disconnect();
     };
@@ -179,7 +202,13 @@ export function App() {
     setCaptureCount((c) => c + 1);
     setTimeout(async () => {
       const latest = await fetchLatestImage(userSlug);
-      if (latest?.url) setLastImageUrl(latest.url);
+      const previewUrl = getPreviewUrl(latest, packageType);
+      if (previewUrl) setLastImageUrl(previewUrl);
+
+      const waitingForSubject =
+        (packageType === "ai-photo" || packageType === "pas-photo") &&
+        latest?.processingStatus !== "ready";
+      setLastImageProcessing(Boolean(waitingForSubject));
     }, 1500);
   }
 
@@ -215,6 +244,7 @@ export function App() {
     stopCameraPreview();
     sessionTimer.clear();
     setLastImageUrl(null);
+    setLastImageProcessing(false);
     setCaptureCount(0);
     setScreen(Screen.IDLE);
   }
@@ -269,9 +299,13 @@ export function App() {
             <div className="capture-overlay">
               <img src={lastImageUrl} alt="Foto terakhir" className="preview-video" />
               <div className="last-shot-label">
-                {isAiPhoto
-                  ? "Menghasilkan foto AI... harap tunggu sebentar"
-                  : "Menampilkan hasil foto... sesi lanjut sebentar lagi"}
+                {isAiPhoto && lastImageProcessing
+                  ? "Menghapus background... harap tunggu sebentar"
+                  : isAiPhoto
+                    ? "Foto AI siap... sesi lanjut sebentar lagi"
+                    : isPasPhoto && lastImageProcessing
+                      ? "Memproses pas foto... harap tunggu sebentar"
+                      : "Menampilkan hasil foto... sesi lanjut sebentar lagi"}
               </div>
             </div>
           )}

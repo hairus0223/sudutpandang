@@ -1,11 +1,14 @@
 {
+  "type": "module",
   "dependencies": {
+    "@imgly/background-removal-node": "^1.4.5",
     "child_process": "^1.0.2",
     "chokidar": "^5.0.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "lucide-react": "^0.555.0",
+    "multer": "^2.0.2",
     "pdfkit": "^0.17.2",
     "sharp": "^0.34.5",
     "socket.io": "^4.8.3"

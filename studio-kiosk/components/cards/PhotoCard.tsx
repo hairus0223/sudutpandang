@@ -2,26 +2,58 @@
 
 import { CheckSquare, Square } from "lucide-react";
 import { useGalleryStore } from "@/stores/useGalleryStore";
+import type { ProcessingStatus } from "@/lib/imageTypes";
 
 type PhotoCardProps = {
   src: string;
   filename: string;
   onClick: () => void;
-  hideFilename?: boolean;      // NEW: hide filename
-  hidePrintToggle?: boolean;   // NEW: hide print toggle
+  processingStatus?: ProcessingStatus;
+  hideFilename?: boolean;
+  hidePrintToggle?: boolean;
   style?: React.CSSProperties;
 };
+
+function getStatusLabel(status?: ProcessingStatus) {
+  switch (status) {
+    case "pending":
+    case "processing":
+      return "Memproses…";
+    case "ready":
+      return "Siap";
+    case "failed":
+      return "Gagal";
+    default:
+      return null;
+  }
+}
+
+function getStatusClass(status?: ProcessingStatus) {
+  switch (status) {
+    case "ready":
+      return "bg-green-600/80";
+    case "failed":
+      return "bg-red-600/80";
+    case "pending":
+    case "processing":
+      return "bg-amber-500/80";
+    default:
+      return "bg-black/60";
+  }
+}
 
 export function PhotoCard({
   src,
   filename,
   onClick,
+  processingStatus,
   hideFilename = false,
   hidePrintToggle = false,
   style,
 }: PhotoCardProps) {
   const { selectedForPrint, togglePrint } = useGalleryStore();
   const isSelected = selectedForPrint.includes(filename);
+  const statusLabel = getStatusLabel(processingStatus);
 
   return (
     <div
@@ -40,6 +72,14 @@ export function PhotoCard({
           ) : (
             <Square className="w-6 h-6 text-white" />
           )}
+        </div>
+      )}
+
+      {statusLabel && (
+        <div
+          className={`absolute top-3 right-3 z-20 rounded-full px-3 py-1 text-xs text-white backdrop-blur ${getStatusClass(processingStatus)}`}
+        >
+          {statusLabel}
         </div>
       )}
 

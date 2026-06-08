@@ -9,12 +9,40 @@ import sharp from "sharp";
 import { exec } from "child_process";
 import PDFDocument from "pdfkit";
 import { fileURLToPath } from "url";
+import multer from "multer";
+import {
+  PROCESSING_STATUS,
+  createPendingMeta,
+  readMeta,
+  saveOriginalFromCapture,
+  saveUploadedToCaptures,
+  updateStatus,
+} from "./services/imageStorage.js";
+import {
+  enqueueRemoveBackground,
+  recoverPendingJobs,
+} from "./services/imageProcessingQueue.js";
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
 const PORT = process.env.PORT || 4000;
+const PUBLIC_HOST = process.env.API_PUBLIC_HOST || `localhost:${PORT}`;
+const BG_REMOVAL_ENABLED = process.env.BG_REMOVAL_ENABLED !== "false";
+const UPLOAD_MAX_BYTES = Number(process.env.UPLOAD_MAX_BYTES) || 20 * 1024 * 1024;
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: UPLOAD_MAX_BYTES },
+  fileFilter: (_req, file, cb) => {
+    if (/^image\/(jpeg|jpg|png|webp)$/i.test(file.mimetype)) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error("invalid_file_type"));
+  },
+});
 
 // ======================
 // BASE DIRECTORY
@@ -45,6 +73,124 @@ function getTodayFolder() {
 
 // Konversi pixel → point untuk PDF
 const pxToPt = (px, dpi = 300) => (px / dpi) * 72;
+
+function buildPublicImageUrl(todayFolder, userSlug, relativePath, host = PUBLIC_HOST) {
+  const normalized = relativePath.split(path.sep).join("/");
+  return `http://${host}/images/${todayFolder}/${userSlug}/${normalized}`;
+}
+
+function buildVariantUrls(host, todayFolder, userSlug, meta) {
+  const variants = {};
+
+  if (meta?.variants?.original) {
+    variants.original = buildPublicImageUrl(
+      todayFolder,
+      userSlug,
+      String(meta.variants.original),
+      host
+    );
+  }
+
+  if (meta?.status === PROCESSING_STATUS.READY && meta?.variants?.subject) {
+    variants.subject = buildPublicImageUrl(
+      todayFolder,
+      userSlug,
+      String(meta.variants.subject),
+      host
+    );
+  }
+
+  return variants;
+}
+
+function getUserPathForToday(userSlug) {
+  return path.join(BASE_DIR, getTodayFolder(), userSlug);
+}
+
+function scheduleBackgroundRemoval({ userFolder, userSlug, imageId, todayFolder }) {
+  if (!BG_REMOVAL_ENABLED) return;
+
+  enqueueRemoveBackground({
+    userDir: userFolder,
+    imageId,
+    user: userSlug,
+    onComplete: (result) => {
+      emitPhotoProcessed({
+        user: userSlug,
+        imageId,
+        status: "ready",
+        todayFolder,
+        meta: result?.meta,
+      });
+    },
+    onError: (err) => {
+      emitPhotoProcessed({
+        user: userSlug,
+        imageId,
+        status: "failed",
+        todayFolder,
+        error: err.message,
+      });
+    },
+  });
+}
+
+function listUserImages(userPath, host, todayFolder, userSlug) {
+  const images = [];
+
+  if (fs.existsSync(userPath)) {
+    for (const filename of fs.readdirSync(userPath)) {
+      if (!/\.(jpg|jpeg|png)$/i.test(filename)) continue;
+      const imageId = path.basename(filename, path.extname(filename));
+      images.push({
+        filename,
+        url: `http://${host}/images/${todayFolder}/${userSlug}/${filename}`,
+        imageId,
+        processingStatus: "none",
+        variants: {
+          original: `http://${host}/images/${todayFolder}/${userSlug}/${filename}`,
+        },
+      });
+    }
+  }
+
+  const capturesDir = path.join(userPath, "captures");
+  if (fs.existsSync(capturesDir)) {
+    for (const filename of fs.readdirSync(capturesDir)) {
+      if (!/\.(jpg|jpeg|png)$/i.test(filename)) continue;
+      const imageId = path.basename(filename, path.extname(filename));
+      const meta = readMeta(userPath, imageId);
+      const variants = buildVariantUrls(host, todayFolder, userSlug, meta);
+      if (!variants.original) {
+        variants.original = `http://${host}/images/${todayFolder}/${userSlug}/captures/${filename}`;
+      }
+      images.push({
+        filename,
+        url: variants.original,
+        imageId,
+        processingStatus: meta?.status ?? "pending",
+        variants,
+      });
+    }
+  }
+
+  return images.sort((a, b) => a.filename.localeCompare(b.filename));
+}
+
+function emitPhotoProcessed({ user, imageId, status, todayFolder, meta, error }) {
+  const payload = { user, imageId, status };
+  if (status === "ready" && meta?.variants?.subject) {
+    payload.subjectUrl = buildPublicImageUrl(
+      todayFolder,
+      user,
+      String(meta.variants.subject)
+    );
+  }
+  if (status === "failed" && error) {
+    payload.error = error;
+  }
+  io.emit("photo-processed", payload);
+}
 
 // Ukuran 4R @300DPI
 const widthPx = 6 * 300; // 6 inch
@@ -399,15 +545,138 @@ app.get("/api/images/:user", (req, res) => {
   if (!fs.existsSync(userPath)) return res.json({ images: [] });
 
   const host = req.headers.host;
-  const images = fs
-    .readdirSync(userPath)
-    .filter((f) => /\.(jpg|jpeg|png)$/i.test(f))
-    .map((filename) => ({
-      filename,
-      url: `http://${host}/images/${todayFolder}/${user}/${filename}`,
-    }));
+  const images = listUserImages(userPath, host, todayFolder, user);
 
   res.json({ images });
+});
+
+app.get("/api/images/:user/:imageId/status", (req, res) => {
+  const { user, imageId } = req.params;
+  const todayFolder = getTodayFolder();
+  const userPath = path.join(BASE_DIR, todayFolder, user);
+
+  if (!fs.existsSync(userPath)) {
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  const meta = readMeta(userPath, imageId);
+  if (!meta) {
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  const host = req.headers.host;
+  res.json({
+    imageId,
+    status: meta.status,
+    variants: buildVariantUrls(host, todayFolder, user, meta),
+    error: meta.error ?? null,
+  });
+});
+
+app.post("/api/images/:user/upload", (req, res) => {
+  upload.single("file")(req, res, (uploadErr) => {
+    if (uploadErr) {
+      if (uploadErr.code === "LIMIT_FILE_SIZE") {
+        return res.status(413).json({ error: "file_too_large" });
+      }
+      if (uploadErr.message === "invalid_file_type") {
+        return res.status(400).json({ error: "invalid_file_type" });
+      }
+      return res.status(400).json({ error: "upload_failed" });
+    }
+
+    const { user } = req.params;
+    const todayFolder = getTodayFolder();
+    const userPath = getUserPathForToday(user);
+
+    if (!req.file) {
+      return res.status(400).json({ error: "file_required" });
+    }
+
+    try {
+      if (!fs.existsSync(userPath)) {
+        fs.mkdirSync(userPath, { recursive: true });
+      }
+
+      const { imageId, destPath, sourceFilename, ext } = saveUploadedToCaptures(
+        userPath,
+        req.file.buffer,
+        req.file.originalname
+      );
+
+      createPendingMeta({
+        userDir: userPath,
+        imageId,
+        sourceFilename,
+        ext,
+      });
+
+      io.emit("new-photo", {
+        user,
+        imageId,
+        filename: path.basename(destPath),
+        fullPath: destPath,
+      });
+
+      scheduleBackgroundRemoval({
+        userFolder: userPath,
+        userSlug: user,
+        imageId,
+        todayFolder,
+      });
+
+      res.status(201).json({
+        success: true,
+        imageId,
+        originalUrl: buildPublicImageUrl(
+          todayFolder,
+          user,
+          path.join("captures", path.basename(destPath)),
+          req.headers.host
+        ),
+        status: PROCESSING_STATUS.PENDING,
+      });
+    } catch (err) {
+      console.error("Upload failed:", err);
+      res.status(500).json({ error: "upload_failed" });
+    }
+  });
+});
+
+app.post("/api/images/:user/:imageId/process", (req, res) => {
+  const { user, imageId } = req.params;
+  const { operation = "remove-bg" } = req.body ?? {};
+
+  if (operation !== "remove-bg") {
+    return res.status(400).json({ error: "unsupported_operation" });
+  }
+
+  const todayFolder = getTodayFolder();
+  const userPath = path.join(BASE_DIR, todayFolder, user);
+
+  if (!fs.existsSync(userPath)) {
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  const meta = readMeta(userPath, imageId);
+  if (!meta) {
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, { error: null });
+
+  scheduleBackgroundRemoval({
+    userFolder: userPath,
+    userSlug: user,
+    imageId,
+    todayFolder,
+  });
+
+  res.json({
+    success: true,
+    imageId,
+    status: PROCESSING_STATUS.PENDING,
+  });
 });
 
 // API to get headline gallery
@@ -576,20 +845,34 @@ chokidar
 
     try {
       const todayFolder = getTodayFolder();
-      const userFolder = path.join(BASE_DIR, todayFolder, activeSession.user);
+      const userSlug = activeSession.user;
+      const userFolder = path.join(BASE_DIR, todayFolder, userSlug);
       if (!fs.existsSync(userFolder)) fs.mkdirSync(userFolder, { recursive: true });
 
-      const uniqueName = `${Date.now()}-${path.basename(filePath)}`;
-      const finalPath = path.join(userFolder, uniqueName);
+      const { imageId, destPath, sourceFilename, ext } = saveOriginalFromCapture(
+        userFolder,
+        filePath
+      );
 
-      // Pindahkan file dari D:\SudutPandangStudio\capture ke folder user
-      fs.renameSync(filePath, finalPath);
+      createPendingMeta({
+        userDir: userFolder,
+        imageId,
+        sourceFilename,
+        ext,
+      });
 
-      // Beri tahu front-end bahwa ada foto baru untuk user aktif
       io.emit("new-photo", {
-        user: activeSession.user,
-        filename: path.basename(finalPath),
-        fullPath: finalPath,
+        user: userSlug,
+        imageId,
+        filename: path.basename(destPath),
+        fullPath: destPath,
+      });
+
+      scheduleBackgroundRemoval({
+        userFolder,
+        userSlug,
+        imageId,
+        todayFolder,
       });
     } catch (err) {
       console.error("Image processing failed:", err);
@@ -613,5 +896,23 @@ io.on("connection", (socket) => {
 // START SERVER
 // ======================
 server.listen(PORT, "0.0.0.0", () => {
+  const todayFolder = getTodayFolder();
+  const recovered = recoverPendingJobs({
+    baseDir: BASE_DIR,
+    todayFolder,
+    onJob: ({ userDir, imageId, user }) => {
+      scheduleBackgroundRemoval({
+        userFolder: userDir,
+        userSlug: user,
+        imageId,
+        todayFolder,
+      });
+    },
+  });
+
+  if (recovered > 0) {
+    console.log(`♻️ Recovered ${recovered} pending image job(s)`);
+  }
+
   console.log(`🚀 Server running http://localhost:${PORT}`);
 });

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useNewPhotoSocket } from "@/hooks/useNewPhotoSocket";
+import { usePhotoProcessedSocket } from "@/hooks/usePhotoProcessedSocket";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchImages } from "@/services/image.service";
 import { useGalleryStore } from "@/stores/useGalleryStore";
@@ -41,6 +42,14 @@ export default function GalleryClient() {
     user,
     enabled: Boolean(user),
     onNewPhoto: () => {
+      void refreshGallery();
+    },
+  });
+
+  usePhotoProcessedSocket({
+    user,
+    enabled: Boolean(user),
+    onPhotoProcessed: () => {
       void refreshGallery();
     },
   });
@@ -87,6 +96,7 @@ export default function GalleryClient() {
             key={img.filename}
             src={img.url}
             filename={img.filename}
+            processingStatus={img.processingStatus}
             onClick={() => setActiveIndex(index)}
           />
         ))}
