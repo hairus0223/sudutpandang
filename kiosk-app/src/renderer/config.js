@@ -7,10 +7,29 @@ export function getApiBase() {
   return DEFAULT_API_BASE;
 }
 
+/** Shape consumed by App.jsx (useSessionTimer + capture countdown). */
 export const DEFAULT_KIOSK_CONFIG = {
-  sessionDurationSeconds: 600,
+  sessionDurationMinutes: 10,
   captureCountdownSeconds: 3,
 };
+
+function resolveSessionDurationMinutes(data) {
+  if (
+    data.sessionDurationMinutes != null &&
+    !Number.isNaN(Number(data.sessionDurationMinutes))
+  ) {
+    return Number(data.sessionDurationMinutes);
+  }
+
+  if (
+    data.sessionDurationSeconds != null &&
+    !Number.isNaN(Number(data.sessionDurationSeconds))
+  ) {
+    return Math.round(Number(data.sessionDurationSeconds) / 60);
+  }
+
+  return DEFAULT_KIOSK_CONFIG.sessionDurationMinutes;
+}
 
 export async function fetchKioskConfig() {
   try {
@@ -19,13 +38,8 @@ export async function fetchKioskConfig() {
 
     const data = await res.json();
 
-     // ✅ DEBUG DI SINI
-     console.log("FETCHED CONFIG FROM API:", data);
-
     return {
-      sessionDurationSeconds:
-        data.sessionDurationSeconds ??
-        DEFAULT_KIOSK_CONFIG.sessionDurationSeconds,
+      sessionDurationMinutes: resolveSessionDurationMinutes(data),
       captureCountdownSeconds:
         data.captureCountdownSeconds ??
         DEFAULT_KIOSK_CONFIG.captureCountdownSeconds,
@@ -34,4 +48,3 @@ export async function fetchKioskConfig() {
     return DEFAULT_KIOSK_CONFIG;
   }
 }
-
