@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { API_BASE_URL } from "@/lib/env";
 import { cn } from "@/lib/utils";
 import { msToMMSS } from "@/utils/time";
+import { useNewPhotoSocket } from "@/hooks/useNewPhotoSocket";
 import { useSessionTimer } from "@/hooks/useSessionTimer";
 import {
   type PackageType,
@@ -168,10 +169,16 @@ export function SessionKioskClient() {
 
   React.useEffect(() => {
     if (screen !== "preview" || !session?.user) return;
-    refreshLastImage();
-    const t = window.setInterval(() => refreshLastImage(), 2000);
-    return () => window.clearInterval(t);
+    void refreshLastImage();
   }, [refreshLastImage, screen, session?.user]);
+
+  useNewPhotoSocket({
+    user: session?.user ?? "",
+    enabled: screen === "preview" && Boolean(session?.user),
+    onNewPhoto: () => {
+      void refreshLastImage();
+    },
+  });
 
   React.useEffect(() => {
     if (screen !== "preview") return;

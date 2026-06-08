@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useNewPhotoSocket } from "@/hooks/useNewPhotoSocket";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchImages } from "@/services/image.service";
 import { useGalleryStore } from "@/stores/useGalleryStore";
@@ -22,13 +23,27 @@ export default function GalleryClient() {
   const { images, setImages, setAllowedPrint, setPrintTemplate } =
     useGalleryStore();
 
-  useEffect(() => {
+  const refreshGallery = useCallback(async () => {
     if (!user) return;
-
-    fetchImages(user)
-      .then((res) => setImages(res.images))
-      .catch(console.error);
+    try {
+      const res = await fetchImages(user);
+      setImages(res.images);
+    } catch (err) {
+      console.error(err);
+    }
   }, [user, setImages]);
+
+  useEffect(() => {
+    void refreshGallery();
+  }, [refreshGallery]);
+
+  useNewPhotoSocket({
+    user,
+    enabled: Boolean(user),
+    onNewPhoto: () => {
+      void refreshGallery();
+    },
+  });
 
   useEffect(() => {
     if (!user) return;

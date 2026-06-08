@@ -586,7 +586,11 @@ chokidar
       fs.renameSync(filePath, finalPath);
 
       // Beri tahu front-end bahwa ada foto baru untuk user aktif
-      io.emit("new-photo", { filename: path.basename(finalPath), fullPath: finalPath });
+      io.emit("new-photo", {
+        user: activeSession.user,
+        filename: path.basename(finalPath),
+        fullPath: finalPath,
+      });
     } catch (err) {
       console.error("Image processing failed:", err);
     }
