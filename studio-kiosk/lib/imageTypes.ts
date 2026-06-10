@@ -5,9 +5,13 @@ export type ProcessingStatus =
   | "ready"
   | "failed";
 
+export type PackageType = "self-photo" | "pas-photo" | "ai-photo";
+
 export type ImageVariants = {
   original?: string;
   subject?: string;
+  passport?: string;
+  themed?: string;
 };
 
 export type GalleryImageData = {

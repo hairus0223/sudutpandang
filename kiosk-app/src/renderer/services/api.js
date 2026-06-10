@@ -31,15 +31,21 @@ export async function stopSession() {
 export function getPreviewUrl(image, packageType = "self-photo") {
   if (!image) return null;
 
-  const preferSubject =
-    packageType === "ai-photo" || packageType === "pas-photo";
+  if (image.processingStatus === "ready") {
+    if (packageType === "pas-photo" && image.variants?.passport) {
+      return image.variants.passport;
+    }
 
-  if (
-    preferSubject &&
-    image.processingStatus === "ready" &&
-    image.variants?.subject
-  ) {
-    return image.variants.subject;
+    if (packageType === "ai-photo" && image.variants?.themed) {
+      return image.variants.themed;
+    }
+
+    if (
+      (packageType === "ai-photo" || packageType === "pas-photo") &&
+      image.variants?.subject
+    ) {
+      return image.variants.subject;
+    }
   }
 
   return image.url ?? null;

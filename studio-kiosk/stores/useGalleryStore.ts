@@ -1,5 +1,5 @@
 import { PRINT_TEMPLATES, PrintTemplate } from "@/lib/printTemplates";
-import type { GalleryImageData } from "@/lib/imageTypes";
+import type { GalleryImageData, PackageType } from "@/lib/imageTypes";
 import { FaceBox } from "@/utils/faceDetect";
 import { create } from "zustand";
 
@@ -31,9 +31,11 @@ type GalleryStore = {
     images: ImageData[];
     selectedForPrint: string[];
     allowedPrint: number;
+    packageType: PackageType;
 
     setImages: (images: ImageData[]) => void;
     setAllowedPrint: (n: number) => void;
+    setPackageType: (packageType: PackageType) => void;
     togglePrint: (filename: string) => void;
     resetSelection: () => void;
     reset: () => void;
@@ -57,9 +59,11 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
     images: [],
     selectedForPrint: [],
     allowedPrint: 0,
+    packageType: "self-photo",
 
     setImages: (images) => set({ images }),
     setAllowedPrint: (n) => set({ allowedPrint: n }),
+    setPackageType: (packageType) => set({ packageType }),
 
     togglePrint: (filename) => {
         const { selectedForPrint, allowedPrint } = get();
@@ -80,7 +84,13 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
     },
 
     resetSelection: () => set({ selectedForPrint: [] }),
-    reset: () => set({ images: [], selectedForPrint: [], allowedPrint: 0 }),
+    reset: () =>
+        set({
+            images: [],
+            selectedForPrint: [],
+            allowedPrint: 0,
+            packageType: "self-photo",
+        }),
 
     printTemplate:
         PRINT_TEMPLATES.find((t) => t.id === "4R") ?? PRINT_TEMPLATES[0],

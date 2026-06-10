@@ -12,6 +12,7 @@ import { PhotoModal } from "@/components/modals/PhotoModal";
 import { BottomPrintBar } from "@/components/bottom/BottomPrintBar";
 import { ScrollToTop } from "@/components/ui/ScrollToTop";
 import { API_BASE_URL } from "@/lib/env";
+import { resolveImageUrl } from "@/lib/resolveImageUrl";
 import { PRINT_TEMPLATES } from "@/lib/printTemplates";
 import { ArrowLeft } from "lucide-react";
 
@@ -24,8 +25,14 @@ export default function GalleryClient() {
   const [processingImageId, setProcessingImageId] = useState<string | null>(
     null
   );
-  const { images, setImages, setAllowedPrint, setPrintTemplate } =
-    useGalleryStore();
+  const {
+    images,
+    setImages,
+    setAllowedPrint,
+    setPrintTemplate,
+    setPackageType,
+    packageType,
+  } = useGalleryStore();
 
   const refreshGallery = useCallback(async () => {
     if (!user) return;
@@ -64,6 +71,9 @@ export default function GalleryClient() {
       .then((r) => r.json())
       .then((d) => {
         setAllowedPrint(d.allowedPrint);
+        if (d.packageType) {
+          setPackageType(d.packageType);
+        }
         const tpl = PRINT_TEMPLATES.find(
             (t) => t.id === d.templateId
         );
@@ -72,7 +82,7 @@ export default function GalleryClient() {
             setPrintTemplate(tpl);
         }
       });
-  }, [user]);
+  }, [user, setAllowedPrint, setPackageType, setPrintTemplate]);
 
   const handleRemoveBackground = useCallback(
     async (imageId: string) => {
@@ -124,7 +134,7 @@ export default function GalleryClient() {
         {images.map((img, index) => (
           <PhotoCard
             key={img.filename}
-            src={img.url}
+            src={resolveImageUrl(img, packageType, "gallery")}
             filename={img.filename}
             processingStatus={img.processingStatus}
             onRemoveBackground={
@@ -141,7 +151,10 @@ export default function GalleryClient() {
       <PhotoModal
         open={activeIndex !== null}
         index={activeIndex}
-        images={images}
+        images={images.map((img) => ({
+          ...img,
+          url: resolveImageUrl(img, packageType, "gallery"),
+        }))}
         onClose={() => setActiveIndex(null)}
         onChange={setActiveIndex}
       />

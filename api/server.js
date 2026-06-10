@@ -20,9 +20,20 @@ import {
   updateStatus,
 } from "./services/imageStorage.js";
 import {
+  normalizePassportColor,
+  readCustomerPackageType,
+  readCustomerThemeId,
+  readPassportBackgroundColor,
+} from "./services/customerConfig.js";
+import {
+  enqueueApplyPassportBg,
+  enqueueApplyTheme,
   enqueueRemoveBackground,
+  recoverIncompletePassportJobs,
+  recoverIncompleteThemeJobs,
   recoverPendingJobs,
 } from "./services/imageProcessingQueue.js";
+import { normalizeThemeId, THEME_PRESETS } from "./services/themePresets.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -92,11 +103,29 @@ function buildVariantUrls(host, todayFolder, userSlug, meta) {
     );
   }
 
-  if (meta?.status === PROCESSING_STATUS.READY && meta?.variants?.subject) {
+  if (meta?.variants?.subject) {
     variants.subject = buildPublicImageUrl(
       todayFolder,
       userSlug,
       String(meta.variants.subject),
+      host
+    );
+  }
+
+  if (meta?.status === PROCESSING_STATUS.READY && meta?.variants?.passport) {
+    variants.passport = buildPublicImageUrl(
+      todayFolder,
+      userSlug,
+      String(meta.variants.passport),
+      host
+    );
+  }
+
+  if (meta?.status === PROCESSING_STATUS.READY && meta?.variants?.themed) {
+    variants.themed = buildPublicImageUrl(
+      todayFolder,
+      userSlug,
+      String(meta.variants.themed),
       host
     );
   }
@@ -108,13 +137,110 @@ function getUserPathForToday(userSlug) {
   return path.join(BASE_DIR, getTodayFolder(), userSlug);
 }
 
-function scheduleBackgroundRemoval({ userFolder, userSlug, imageId, todayFolder }) {
+const PACKAGES_WITH_AUTO_BG = new Set(["ai-photo", "pas-photo"]);
+
+function shouldAutoRemoveBackground(packageType) {
+  return PACKAGES_WITH_AUTO_BG.has(packageType || "self-photo");
+}
+
+function scheduleBackgroundRemoval({
+  userFolder,
+  userSlug,
+  imageId,
+  todayFolder,
+  packageType,
+  passportColor,
+  themeId,
+  force = false,
+}) {
   if (!BG_REMOVAL_ENABLED) return;
+
+  const resolvedPackageType =
+    packageType ?? readCustomerPackageType(userFolder);
+  if (!force && !shouldAutoRemoveBackground(resolvedPackageType)) return;
+
+  const resolvedPassportColor =
+    passportColor ?? readPassportBackgroundColor(userFolder);
+  const resolvedThemeId = themeId ?? readCustomerThemeId(userFolder);
 
   enqueueRemoveBackground({
     userDir: userFolder,
     imageId,
     user: userSlug,
+    packageType: resolvedPackageType,
+    passportColor: resolvedPassportColor,
+    themeId: resolvedThemeId,
+    onComplete: (result) => {
+      emitPhotoProcessed({
+        user: userSlug,
+        imageId,
+        status: "ready",
+        todayFolder,
+        meta: result?.meta,
+      });
+    },
+    onError: (err) => {
+      emitPhotoProcessed({
+        user: userSlug,
+        imageId,
+        status: "failed",
+        todayFolder,
+        error: err.message,
+      });
+    },
+  });
+}
+
+function scheduleThemeGeneration({
+  userFolder,
+  userSlug,
+  imageId,
+  todayFolder,
+  themeId,
+}) {
+  const resolvedThemeId = themeId ?? readCustomerThemeId(userFolder);
+
+  enqueueApplyTheme({
+    userDir: userFolder,
+    imageId,
+    user: userSlug,
+    themeId: resolvedThemeId,
+    onComplete: (result) => {
+      emitPhotoProcessed({
+        user: userSlug,
+        imageId,
+        status: "ready",
+        todayFolder,
+        meta: result?.meta,
+      });
+    },
+    onError: (err) => {
+      emitPhotoProcessed({
+        user: userSlug,
+        imageId,
+        status: "failed",
+        todayFolder,
+        error: err.message,
+      });
+    },
+  });
+}
+
+function schedulePassportBackground({
+  userFolder,
+  userSlug,
+  imageId,
+  todayFolder,
+  passportColor,
+}) {
+  const resolvedPassportColor =
+    passportColor ?? readPassportBackgroundColor(userFolder);
+
+  enqueueApplyPassportBg({
+    userDir: userFolder,
+    imageId,
+    user: userSlug,
+    passportColor: resolvedPassportColor,
     onComplete: (result) => {
       emitPhotoProcessed({
         user: userSlug,
@@ -180,6 +306,20 @@ function listUserImages(userPath, host, todayFolder, userSlug) {
 
 function emitPhotoProcessed({ user, imageId, status, todayFolder, meta, error }) {
   const payload = { user, imageId, status };
+  if (status === "ready" && meta?.variants?.themed) {
+    payload.themedUrl = buildPublicImageUrl(
+      todayFolder,
+      user,
+      String(meta.variants.themed)
+    );
+  }
+  if (status === "ready" && meta?.variants?.passport) {
+    payload.passportUrl = buildPublicImageUrl(
+      todayFolder,
+      user,
+      String(meta.variants.passport)
+    );
+  }
   if (status === "ready" && meta?.variants?.subject) {
     payload.subjectUrl = buildPublicImageUrl(
       todayFolder,
@@ -281,6 +421,8 @@ app.post("/api/register", (req, res) => {
     peopleCount = 1,
     templateId = "4R",
     packageType = "self-photo",
+    passportBackgroundColor,
+    themeId,
   } = req.body;
 
   if (!name || typeof name !== "string" || name.trim() === "")
@@ -298,6 +440,12 @@ app.post("/api/register", (req, res) => {
     user: slugName,
     templateId,
     packageType,
+    passportBackgroundColor:
+      packageType === "pas-photo"
+        ? normalizePassportColor(passportBackgroundColor)
+        : null,
+    themeId:
+      packageType === "ai-photo" ? normalizeThemeId(themeId) : null,
     printLimit: people,
     folderPath: `/images/${todayFolder}/${slugName}`,
     registeredAt: new Date().toISOString(),
@@ -340,6 +488,14 @@ app.get("/api/print-config/:user", (req, res) => {
     templateId: data.templateId,
     name: data.name,
     packageType: data.packageType || "self-photo",
+    passportBackgroundColor: normalizePassportColor(data.passportBackgroundColor),
+    themeId: normalizeThemeId(data.themeId),
+  });
+});
+
+app.get("/api/themes", (_req, res) => {
+  res.json({
+    themes: THEME_PRESETS.map(({ id, label }) => ({ id, label })),
   });
 });
 
@@ -605,11 +761,17 @@ app.post("/api/images/:user/upload", (req, res) => {
         req.file.originalname
       );
 
+      const packageType = readCustomerPackageType(userPath);
+      const autoRemoveBg = shouldAutoRemoveBackground(packageType);
+
       createPendingMeta({
         userDir: userPath,
         imageId,
         sourceFilename,
         ext,
+        status: autoRemoveBg
+          ? PROCESSING_STATUS.PENDING
+          : PROCESSING_STATUS.NONE,
       });
 
       io.emit("new-photo", {
@@ -624,6 +786,7 @@ app.post("/api/images/:user/upload", (req, res) => {
         userSlug: user,
         imageId,
         todayFolder,
+        packageType,
       });
 
       res.status(201).json({
@@ -635,7 +798,9 @@ app.post("/api/images/:user/upload", (req, res) => {
           path.join("captures", path.basename(destPath)),
           req.headers.host
         ),
-        status: PROCESSING_STATUS.PENDING,
+        status: autoRemoveBg
+          ? PROCESSING_STATUS.PENDING
+          : PROCESSING_STATUS.NONE,
       });
     } catch (err) {
       console.error("Upload failed:", err);
@@ -646,9 +811,13 @@ app.post("/api/images/:user/upload", (req, res) => {
 
 app.post("/api/images/:user/:imageId/process", (req, res) => {
   const { user, imageId } = req.params;
-  const { operation = "remove-bg" } = req.body ?? {};
+  const { operation = "remove-bg", color, themeId } = req.body ?? {};
 
-  if (operation !== "remove-bg") {
+  if (
+    operation !== "remove-bg" &&
+    operation !== "apply-passport-bg" &&
+    operation !== "apply-theme"
+  ) {
     return res.status(400).json({ error: "unsupported_operation" });
   }
 
@@ -657,6 +826,55 @@ app.post("/api/images/:user/:imageId/process", (req, res) => {
 
   if (!fs.existsSync(userPath)) {
     return res.status(404).json({ error: "not_found" });
+  }
+
+  const passportColor = color ? normalizePassportColor(color) : undefined;
+  const resolvedThemeId = themeId ? normalizeThemeId(themeId) : undefined;
+
+  if (operation === "apply-theme") {
+    const meta = readMeta(userPath, imageId);
+    if (!meta) {
+      return res.status(404).json({ error: "not_found" });
+    }
+
+    updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, { error: null });
+
+    scheduleThemeGeneration({
+      userFolder: userPath,
+      userSlug: user,
+      imageId,
+      todayFolder,
+      themeId: resolvedThemeId,
+    });
+
+    return res.json({
+      success: true,
+      imageId,
+      status: PROCESSING_STATUS.PENDING,
+    });
+  }
+
+  if (operation === "apply-passport-bg") {
+    const meta = readMeta(userPath, imageId);
+    if (!meta) {
+      return res.status(404).json({ error: "not_found" });
+    }
+
+    updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, { error: null });
+
+    schedulePassportBackground({
+      userFolder: userPath,
+      userSlug: user,
+      imageId,
+      todayFolder,
+      passportColor,
+    });
+
+    return res.json({
+      success: true,
+      imageId,
+      status: PROCESSING_STATUS.PENDING,
+    });
   }
 
   let meta = readMeta(userPath, imageId);
@@ -675,6 +893,9 @@ app.post("/api/images/:user/:imageId/process", (req, res) => {
     userSlug: user,
     imageId,
     todayFolder,
+    force: true,
+    passportColor,
+    themeId: resolvedThemeId,
   });
 
   res.json({
@@ -859,11 +1080,17 @@ chokidar
         filePath
       );
 
+      const packageType = activeSession.packageType || "self-photo";
+      const autoRemoveBg = shouldAutoRemoveBackground(packageType);
+
       createPendingMeta({
         userDir: userFolder,
         imageId,
         sourceFilename,
         ext,
+        status: autoRemoveBg
+          ? PROCESSING_STATUS.PENDING
+          : PROCESSING_STATUS.NONE,
       });
 
       io.emit("new-photo", {
@@ -878,6 +1105,7 @@ chokidar
         userSlug,
         imageId,
         todayFolder,
+        packageType,
       });
     } catch (err) {
       console.error("Image processing failed:", err);
@@ -911,12 +1139,47 @@ server.listen(PORT, "0.0.0.0", () => {
         userSlug: user,
         imageId,
         todayFolder,
+        force: true,
       });
     },
   });
 
   if (recovered > 0) {
     console.log(`♻️ Recovered ${recovered} pending image job(s)`);
+  }
+
+  const passportRecovered = recoverIncompletePassportJobs({
+    baseDir: BASE_DIR,
+    todayFolder,
+    onJob: ({ userDir, imageId, user }) => {
+      schedulePassportBackground({
+        userFolder: userDir,
+        userSlug: user,
+        imageId,
+        todayFolder,
+      });
+    },
+  });
+
+  if (passportRecovered > 0) {
+    console.log(`♻️ Recovered ${passportRecovered} incomplete passport job(s)`);
+  }
+
+  const themeRecovered = recoverIncompleteThemeJobs({
+    baseDir: BASE_DIR,
+    todayFolder,
+    onJob: ({ userDir, imageId, user }) => {
+      scheduleThemeGeneration({
+        userFolder: userDir,
+        userSlug: user,
+        imageId,
+        todayFolder,
+      });
+    },
+  });
+
+  if (themeRecovered > 0) {
+    console.log(`♻️ Recovered ${themeRecovered} incomplete theme job(s)`);
   }
 
   console.log(`🚀 Server running http://localhost:${PORT}`);

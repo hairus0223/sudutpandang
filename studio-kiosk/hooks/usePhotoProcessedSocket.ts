@@ -8,6 +8,8 @@ export type PhotoProcessedPayload = {
   imageId: string;
   status: Extract<ProcessingStatus, "ready" | "failed">;
   subjectUrl?: string;
+  passportUrl?: string;
+  themedUrl?: string;
   error?: string;
 };
 

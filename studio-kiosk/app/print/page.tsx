@@ -5,17 +5,21 @@ import { useRouter } from "next/navigation";
 import { useGalleryStore } from "@/stores/useGalleryStore";
 import { PrintCanvas } from "@/components/print/PrintCanvas";
 import { PrintToolbar } from "@/components/print/PrintToolbar";
+import { resolveImageUrl } from "@/lib/resolveImageUrl";
 
 export default function PrintPage() {
   const router = useRouter();
-  const { images, selectedForPrint } = useGalleryStore();
+  const { images, selectedForPrint, packageType } = useGalleryStore();
 
   const selectedImages = useMemo(
     () =>
-      images.filter((img) =>
-        selectedForPrint.includes(img.filename)
-      ),
-    [images, selectedForPrint]
+      images
+        .filter((img) => selectedForPrint.includes(img.filename))
+        .map((img) => ({
+          ...img,
+          url: resolveImageUrl(img, packageType, "print"),
+        })),
+    [images, selectedForPrint, packageType]
   );
 
   useEffect(() => {

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { readCustomerPackageType } from "./customerConfig.js";
 
 /** @typedef {'none' | 'pending' | 'processing' | 'ready' | 'failed'} ProcessingStatus */
 
@@ -47,6 +48,22 @@ export function getMetaPath(userDir, imageId) {
  */
 export function getSubjectPath(userDir, imageId) {
   return path.join(getProcessedDir(userDir, imageId), "subject.png");
+}
+
+/**
+ * @param {string} userDir
+ * @param {string} imageId
+ */
+export function getPassportPath(userDir, imageId) {
+  return path.join(getProcessedDir(userDir, imageId), "passport.png");
+}
+
+/**
+ * @param {string} userDir
+ * @param {string} imageId
+ */
+export function getThemedPath(userDir, imageId) {
+  return path.join(getProcessedDir(userDir, imageId), "themed.png");
 }
 
 /**
@@ -104,20 +121,28 @@ export function writeMeta(userDir, imageId, meta) {
  * @param {string} params.sourceFilename
  * @param {string} [params.ext]
  */
-export function createPendingMeta({ userDir, imageId, sourceFilename, ext }) {
+export function createPendingMeta({
+  userDir,
+  imageId,
+  sourceFilename,
+  ext,
+  status = PROCESSING_STATUS.PENDING,
+}) {
   const fileExt = ext || path.extname(sourceFilename) || ".jpg";
   const relativeOriginal = path.join("captures", `${imageId}${fileExt}`);
 
   const meta = {
     imageId,
     sourceFilename,
-    status: PROCESSING_STATUS.PENDING,
+    status,
     operations: [],
     createdAt: new Date().toISOString(),
     processedAt: null,
     variants: {
       original: relativeOriginal.split(path.sep).join("/"),
       subject: null,
+      passport: null,
+      themed: null,
     },
     error: null,
   };
@@ -191,6 +216,118 @@ export function writeSubjectPng(userDir, imageId, buffer) {
   ensureDir(path.dirname(subjectPath));
   fs.writeFileSync(subjectPath, buffer);
   return subjectPath;
+}
+
+/**
+ * @param {string} userDir
+ * @param {string} imageId
+ * @param {'passport' | 'theme' | null} [awaitNextStep]
+ */
+export function updateAfterRemoveBg(userDir, imageId, awaitNextStep = null) {
+  const existing = readMeta(userDir, imageId) || { imageId, variants: {} };
+  const operations = Array.isArray(existing.operations) ? [...existing.operations] : [];
+
+  if (!operations.includes("remove-bg")) {
+    operations.push("remove-bg");
+  }
+
+  const variants = {
+    ...(typeof existing.variants === "object" && existing.variants ? existing.variants : {}),
+    subject: path.join("processed", imageId, "subject.png").split(path.sep).join("/"),
+  };
+
+  const status = awaitNextStep
+    ? PROCESSING_STATUS.PROCESSING
+    : PROCESSING_STATUS.READY;
+
+  const updated = {
+    ...existing,
+    imageId,
+    status,
+    operations,
+    variants,
+    processedAt: awaitNextStep ? null : new Date().toISOString(),
+    error: null,
+  };
+
+  writeMeta(userDir, imageId, updated);
+  return updated;
+}
+
+/**
+ * @param {string} userDir
+ * @param {string} imageId
+ * @param {string} passportColor
+ */
+export function updateAfterPassportBg(userDir, imageId, passportColor) {
+  const existing = readMeta(userDir, imageId) || { imageId, variants: {} };
+  const operations = Array.isArray(existing.operations) ? [...existing.operations] : [];
+
+  if (!operations.includes("apply-passport-bg")) {
+    operations.push("apply-passport-bg");
+  }
+
+  const variants = {
+    ...(typeof existing.variants === "object" && existing.variants ? existing.variants : {}),
+    passport: path.join("processed", imageId, "passport.png").split(path.sep).join("/"),
+  };
+
+  const pipeline = {
+    ...(typeof existing.pipeline === "object" && existing.pipeline ? existing.pipeline : {}),
+    passportColor,
+  };
+
+  const updated = {
+    ...existing,
+    imageId,
+    status: PROCESSING_STATUS.READY,
+    operations,
+    variants,
+    pipeline,
+    processedAt: new Date().toISOString(),
+    error: null,
+  };
+
+  writeMeta(userDir, imageId, updated);
+  return updated;
+}
+
+/**
+ * @param {string} userDir
+ * @param {string} imageId
+ * @param {string} themeId
+ */
+export function updateAfterTheme(userDir, imageId, themeId) {
+  const existing = readMeta(userDir, imageId) || { imageId, variants: {} };
+  const operations = Array.isArray(existing.operations) ? [...existing.operations] : [];
+
+  if (!operations.includes("apply-theme")) {
+    operations.push("apply-theme");
+  }
+
+  const variants = {
+    ...(typeof existing.variants === "object" && existing.variants ? existing.variants : {}),
+    themed: path.join("processed", imageId, "themed.png").split(path.sep).join("/"),
+  };
+
+  const pipeline = {
+    ...(typeof existing.pipeline === "object" && existing.pipeline ? existing.pipeline : {}),
+    themeId,
+  };
+
+  const updated = {
+    ...existing,
+    imageId,
+    status: PROCESSING_STATUS.READY,
+    operations,
+    variants,
+    pipeline,
+    processedAt: new Date().toISOString(),
+    error: null,
+  };
+
+  writeMeta(userDir, imageId, updated);
+  return updated;
 }
 
 /**
@@ -355,6 +492,86 @@ export function findRecoverableJobs(baseDir, todayFolder) {
         user: userSlug,
         status: String(meta.status),
       });
+    }
+  }
+
+  return jobs;
+}
+
+/**
+ * Jobs where remove-bg finished but passport composite did not.
+ * @param {string} baseDir
+ * @param {string} todayFolder
+ * @returns {Array<{ userDir: string, imageId: string, user: string }>}
+ */
+export function findIncompletePassportJobs(baseDir, todayFolder) {
+  const dayPath = path.join(baseDir, todayFolder);
+  if (!fs.existsSync(dayPath)) return [];
+
+  const jobs = [];
+
+  for (const userSlug of fs.readdirSync(dayPath)) {
+    const userDir = path.join(dayPath, userSlug);
+    if (!fs.statSync(userDir).isDirectory()) continue;
+
+    const processedRoot = path.join(userDir, "processed");
+    if (!fs.existsSync(processedRoot)) continue;
+
+    for (const imageId of fs.readdirSync(processedRoot)) {
+      const meta = readMeta(userDir, imageId);
+      if (!meta || meta.status !== PROCESSING_STATUS.PROCESSING) continue;
+
+      const operations = Array.isArray(meta.operations) ? meta.operations : [];
+      if (!operations.includes("remove-bg") || operations.includes("apply-passport-bg")) {
+        continue;
+      }
+
+      if (readCustomerPackageType(userDir) !== "pas-photo") continue;
+
+      const subjectPath = getSubjectPath(userDir, imageId);
+      if (!fs.existsSync(subjectPath)) continue;
+
+      jobs.push({ userDir, imageId, user: userSlug });
+    }
+  }
+
+  return jobs;
+}
+
+/**
+ * Jobs where remove-bg finished but theme composite did not.
+ * @param {string} baseDir
+ * @param {string} todayFolder
+ * @returns {Array<{ userDir: string, imageId: string, user: string }>}
+ */
+export function findIncompleteThemeJobs(baseDir, todayFolder) {
+  const dayPath = path.join(baseDir, todayFolder);
+  if (!fs.existsSync(dayPath)) return [];
+
+  const jobs = [];
+
+  for (const userSlug of fs.readdirSync(dayPath)) {
+    const userDir = path.join(dayPath, userSlug);
+    if (!fs.statSync(userDir).isDirectory()) continue;
+
+    const processedRoot = path.join(userDir, "processed");
+    if (!fs.existsSync(processedRoot)) continue;
+
+    for (const imageId of fs.readdirSync(processedRoot)) {
+      const meta = readMeta(userDir, imageId);
+      if (!meta || meta.status !== PROCESSING_STATUS.PROCESSING) continue;
+
+      const operations = Array.isArray(meta.operations) ? meta.operations : [];
+      if (!operations.includes("remove-bg") || operations.includes("apply-theme")) {
+        continue;
+      }
+
+      if (readCustomerPackageType(userDir) !== "ai-photo") continue;
+
+      const subjectPath = getSubjectPath(userDir, imageId);
+      if (!fs.existsSync(subjectPath)) continue;
+
+      jobs.push({ userDir, imageId, user: userSlug });
     }
   }
 

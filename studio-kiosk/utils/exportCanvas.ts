@@ -11,6 +11,18 @@ export type ImageData = {
   url: string;
 };
 
+/** Pastikan tidak ada pixel transparan — aman untuk PDF/cetak. */
+function flattenCanvasAlpha(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number
+) {
+  ctx.globalCompositeOperation = "destination-over";
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.globalCompositeOperation = "source-over";
+}
+
 /**
  * Export array of ImageData ke canvas PNG (offscreen)
  * Tidak menambahkan border slot aktif
@@ -62,6 +74,7 @@ export async function exportCanvasPrint(
       draw4RLayout(ctx, loadedImages, logo, transforms, faceBoxes);
     }
 
+    flattenCanvasAlpha(ctx, width, height);
     results.push(canvas.toDataURL("image/png", 1.0));
   }
 

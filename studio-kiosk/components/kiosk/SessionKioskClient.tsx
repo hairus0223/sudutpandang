@@ -25,6 +25,14 @@ import {
 } from "@/services/session.service";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import {
+  AI_THEME_OPTIONS,
+  DEFAULT_THEME_ID,
+} from "@/lib/aiThemes";
+import {
+  DEFAULT_PASSPORT_COLOR,
+  PASSPORT_COLOR_OPTIONS,
+} from "@/lib/passportColors";
 
 type Screen = "register" | "preview" | "end";
 
@@ -56,6 +64,8 @@ async function apiRegister(payload: {
   peopleCount: number;
   templateId: string;
   packageType: PackageType;
+  passportBackgroundColor?: string;
+  themeId?: string;
 }): Promise<Customer> {
   const res = await fetch(`${API_BASE_URL}/api/register`, {
     method: "POST",
@@ -271,13 +281,22 @@ export function SessionKioskClient() {
     return (
       <RegisterOrCheckScreen
         packageDurations={kioskConfig.packageDurations}
-        onRegister={async (name, phone, peopleCount, packageType) => {
+        onRegister={async (
+          name,
+          phone,
+          peopleCount,
+          packageType,
+          passportBackgroundColor,
+          themeId
+        ) => {
           const customer = await apiRegister({
             name,
             phone,
             peopleCount,
             templateId: "4R",
             packageType,
+            passportBackgroundColor,
+            themeId,
           });
           const s = await startSession({
             user: customer.user,
@@ -551,7 +570,9 @@ type RegisterOrCheckScreenProps = {
     name: string,
     phone: string,
     peopleCount: number,
-    packageType: PackageType
+    packageType: PackageType,
+    passportBackgroundColor?: string,
+    themeId?: string
   ) => Promise<void>;
   onCheckByName: (name: string) => Promise<void>;
   onBack: () => void;
@@ -567,6 +588,9 @@ function RegisterOrCheckScreen({
   const [checkName, setCheckName] = React.useState("");
   const [checkLoading, setCheckLoading] = React.useState(false);
   const [packageType, setPackageType] = React.useState<PackageType>("self-photo");
+  const [passportBackgroundColor, setPassportBackgroundColor] =
+    React.useState<string>(DEFAULT_PASSPORT_COLOR);
+  const [themeId, setThemeId] = React.useState<string>(DEFAULT_THEME_ID);
 
   const selfPhotoMinutes = packageDurations["self-photo"];
   const pasPhotoMinutes = packageDurations["pas-photo"];
@@ -621,7 +645,9 @@ function RegisterOrCheckScreen({
                     name,
                     phone,
                     Math.max(1, Math.min(8, peopleCount)),
-                    packageType
+                    packageType,
+                    packageType === "pas-photo" ? passportBackgroundColor : undefined,
+                    packageType === "ai-photo" ? themeId : undefined
                   );
                 } catch {
                   alert("Registrasi gagal. Hubungi staf.");
@@ -696,6 +722,62 @@ function RegisterOrCheckScreen({
                   </button>
                 </div>
               </div>
+              {packageType === "pas-photo" && (
+                <div className="space-y-2">
+                  <label className="text-xs tracking-[0.22em] text-white/60">
+                    WARNA LATAR PAS FOTO
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {PASSPORT_COLOR_OPTIONS.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setPassportBackgroundColor(option.value)}
+                        className={cn(
+                          "flex flex-col items-center gap-2 rounded-lg border px-2 py-3 text-xs transition",
+                          passportBackgroundColor === option.value
+                            ? "border-white bg-white/10 text-white"
+                            : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
+                        )}
+                      >
+                        <span
+                          className="h-8 w-8 rounded-full border border-white/30"
+                          style={{ backgroundColor: option.value }}
+                        />
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {packageType === "ai-photo" && (
+                <div className="space-y-2">
+                  <label className="text-xs tracking-[0.22em] text-white/60">
+                    TEMA AI
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {AI_THEME_OPTIONS.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setThemeId(option.id)}
+                        className={cn(
+                          "flex flex-col items-center gap-2 rounded-lg border px-2 py-3 text-xs transition",
+                          themeId === option.id
+                            ? "border-white bg-white/10 text-white"
+                            : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
+                        )}
+                      >
+                        <span
+                          className="h-8 w-full rounded-md border border-white/30"
+                          style={{ background: option.preview }}
+                        />
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex gap-3 pt-2">
                 <Button type="button" className="h-11 flex-1" onClick={onBack}>
                   Kembali

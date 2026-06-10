@@ -163,9 +163,13 @@ export function App() {
       const currentUser = sessionUserRef.current;
       if (!currentUser || payload.user !== currentUser) return;
 
-      if (payload.status === "ready" && payload.subjectUrl) {
-        setLastImageUrl(payload.subjectUrl);
-        setLastImageProcessing(false);
+      if (payload.status === "ready") {
+        const previewUrl =
+          payload.themedUrl || payload.passportUrl || payload.subjectUrl;
+        if (previewUrl) {
+          setLastImageUrl(previewUrl);
+          setLastImageProcessing(false);
+        }
         return;
       }
 

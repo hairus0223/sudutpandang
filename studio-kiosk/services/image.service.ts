@@ -35,14 +35,19 @@ export async function fetchImageStatus(
 export async function processImage(
   userId: string,
   imageId: string,
-  operation = "remove-bg"
+  operation = "remove-bg",
+  options?: { themeId?: string; color?: string }
 ): Promise<{ success: boolean; imageId: string; status: string }> {
   const res = await fetch(
     `${API_BASE_URL}/api/images/${encodeURIComponent(userId)}/${encodeURIComponent(imageId)}/process`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ operation }),
+      body: JSON.stringify({
+        operation,
+        themeId: options?.themeId,
+        color: options?.color,
+      }),
     }
   );
 
