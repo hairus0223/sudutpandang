@@ -4,14 +4,16 @@ import { loadBrandingLogo } from "@/utils/loadBrandingLogo";
 import { PhotoTransform } from "@/stores/useGalleryStore";
 import { FaceBox } from "./faceDetect";
 import { drawFull4RLayout } from "@/components/print/canvas/drawFull4RLayout";
-import type { PhotoSizePreset } from "@/lib/photoSizes";
 import { PrintTemplate } from "@/lib/printTemplates";
-import {
-  resolveSheetLayoutContext,
-  type SheetLayoutPreset,
-} from "@/lib/sheetLayouts";
+import type { SheetRecipe } from "@/lib/sheetRecipe";
+import { getPaperPreset } from "@/lib/paperSizes";
 import { drawSheetLayout } from "@/components/print/canvas/drawSheetLayout";
-import { getSheetLayoutGeometry } from "@/utils/sheetLayoutEngine";
+import type { SheetBindingMode } from "@/lib/sheetSlotBinding";
+import { buildSheetSlotDraws } from "@/utils/sheetRender";
+import {
+  packSheetRecipe,
+  type SheetGridAlign,
+} from "@/utils/sheetLayoutEngine";
 
 export type ImageData = {
   filename: string;
@@ -103,25 +105,33 @@ function loadImageElement(url: string): Promise<HTMLImageElement> {
  */
 export async function exportSheetPrint({
   images,
-  layout,
-  customPhoto,
+  recipe,
   transforms,
+  sheetSlotTransforms,
   faceBoxes,
+  bindingMode = "cycle",
+  sizeAssignments = {},
+  slotAssignments = {},
   includeCutLines = false,
   copies = 1,
+  align = "top-left",
 }: {
   images: ImageData[];
-  layout: SheetLayoutPreset;
-  customPhoto: PhotoSizePreset | null;
+  recipe: SheetRecipe;
   transforms: Record<string, PhotoTransform>;
+  sheetSlotTransforms: Record<number, PhotoTransform>;
   faceBoxes: Record<string, FaceBox[]>;
+  bindingMode?: SheetBindingMode;
+  sizeAssignments?: Record<string, string>;
+  slotAssignments?: Record<number, string>;
   includeCutLines?: boolean;
   copies?: number;
+  align?: SheetGridAlign;
 }): Promise<string[]> {
   if (!images.length) return [];
 
-  const { paper, photo } = resolveSheetLayoutContext(layout, customPhoto);
-  const geometry = getSheetLayoutGeometry(layout, paper, photo);
+  const paper = getPaperPreset(recipe.paperId);
+  const geometry = packSheetRecipe(recipe, paper, align);
 
   const loaded = await Promise.all(
     images.map(async (img) => ({
@@ -140,13 +150,19 @@ export async function exportSheetPrint({
     const ctx = canvas.getContext("2d");
     if (!ctx) continue;
 
-    const slotDraws = geometry.slots.map((slot) => {
-      const source = loaded[slot.index % loaded.length];
-      return {
-        image: source.element,
-        transform: transforms[source.filename],
-        faceBoxes: faceBoxes[source.filename] ?? [],
-      };
+    const slotDraws = buildSheetSlotDraws({
+      geometry,
+      images,
+      loaded: loaded.map((entry) => ({
+        filename: entry.filename,
+        img: entry.element,
+      })),
+      bindingMode,
+      sizeAssignments,
+      slotAssignments,
+      photoTransforms: transforms,
+      sheetSlotTransforms,
+      faceBoxes,
     });
 
     drawSheetLayout(ctx, {

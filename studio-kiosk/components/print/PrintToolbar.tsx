@@ -7,8 +7,8 @@ import { useGalleryStore, PhotoFilter } from "@/stores/useGalleryStore";
 import { SheetLayoutSelector } from "./SheetLayoutSelector";
 import { exportCanvasPrint, exportSheetPrint, ImageData } from "@/utils/exportCanvas";
 import { API_BASE_URL } from "@/lib/env";
-import { resolveSheetLayoutContext } from "@/lib/sheetLayouts";
-import { getSheetLayoutGeometry } from "@/utils/sheetLayoutEngine";
+import { getPaperPreset } from "@/lib/paperSizes";
+import { packSheetRecipe, validateSheetRecipe } from "@/utils/sheetLayoutEngine";
 
 const FILTERS: { id: PhotoFilter; label: string }[] = [
   { id: "none", label: "Normal" },
@@ -31,9 +31,13 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
     resetSelection,
     printTemplate,
     printMode,
-    sheetLayout,
-    customPhotoSize,
+    sheetRecipe,
     sheetCopies,
+    sheetAlign,
+    sheetBindingMode,
+    sheetSizeAssignments,
+    sheetSlotAssignments,
+    sheetSlotTransforms,
     photoTransforms,
     setPhotoTransform,
     faceBoxes,
@@ -77,19 +81,30 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
       setPrinting(true);
 
       if (printMode === "sheet") {
-        const { paper, photo } = resolveSheetLayoutContext(
-          sheetLayout,
-          customPhotoSize
-        );
-        const geometry = getSheetLayoutGeometry(sheetLayout, paper, photo);
+        const paper = getPaperPreset(sheetRecipe.paperId);
+        const validation = validateSheetRecipe(sheetRecipe, paper);
+
+        if (
+          !validation.rows.every((row) => row.fits) ||
+          !validation.fitsVertically
+        ) {
+          alert("Layout tidak muat di kertas. Perbaiki baris atau jumlah foto.");
+          return;
+        }
+
+        const geometry = packSheetRecipe(sheetRecipe, paper, sheetAlign);
 
         const pngs = await exportSheetPrint({
           images,
-          layout: sheetLayout,
-          customPhoto: customPhotoSize,
+          recipe: sheetRecipe,
           transforms: photoTransforms,
+          sheetSlotTransforms,
           faceBoxes,
+          bindingMode: sheetBindingMode,
+          sizeAssignments: sheetSizeAssignments,
+          slotAssignments: sheetSlotAssignments,
           copies: sheetCopies,
+          align: sheetAlign,
         });
 
         await fetch(`${API_BASE_URL}/api/print`, {
@@ -98,7 +113,10 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
           body: JSON.stringify({
             images: pngs,
             layoutType: "sheet",
-            paperId: sheetLayout.paperId,
+            paperId: sheetRecipe.paperId,
+            recipeId: sheetRecipe.id,
+            recipeLabel: sheetRecipe.label,
+            slotCount: validation.slotCount,
             pageWidthPx: geometry.paperWidthPx,
             pageHeightPx: geometry.paperHeightPx,
           }),
@@ -150,7 +168,7 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
 
       {/* CENTER */}
       <div className="flex flex-col items-center gap-2 order-last w-full sm:order-none sm:w-auto">
-        <SheetLayoutSelector />
+        <SheetLayoutSelector images={images} />
 
         {/* FILTER BUTTONS */}
         <div className="flex flex-wrap gap-1 sm:gap-2 justify-center">

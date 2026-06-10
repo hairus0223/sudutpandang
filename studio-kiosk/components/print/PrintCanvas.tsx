@@ -11,8 +11,12 @@ import { autoCenterTransform } from "@/utils/autoCenterPreset";
 import { detectFaces } from "@/utils/faceDetect";
 import { drawFull4RLayout } from "./canvas/drawFull4RLayout";
 import { drawSheetLayout } from "./canvas/drawSheetLayout";
-import { resolveSheetLayoutContext, type SheetLayoutPreset } from "@/lib/sheetLayouts";
-import { getSheetLayoutGeometry } from "@/utils/sheetLayoutEngine";
+import type { SheetRecipe } from "@/lib/sheetRecipe";
+import { countRecipeSlots } from "@/lib/sheetRecipe";
+import { getPaperPreset } from "@/lib/paperSizes";
+import { resolveSlotImage } from "@/lib/sheetSlotBinding";
+import { buildSheetSlotDraws } from "@/utils/sheetRender";
+import { packSheetRecipe } from "@/utils/sheetLayoutEngine";
 
 type ImageData = {
     filename: string;
@@ -22,7 +26,7 @@ type ImageData = {
 const SHEET_DISPLAY_MAX_WIDTH = 920;
 
 export function PrintCanvas({ images, isPrintMode = false }: { images: ImageData[]; isPrintMode?: boolean }) {
-    const { printTemplate, printMode, sheetLayout } = useGalleryStore();
+    const { printTemplate, printMode, sheetRecipe } = useGalleryStore();
 
     if (printMode === "sheet") {
         if (!images.length) {
@@ -36,7 +40,7 @@ export function PrintCanvas({ images, isPrintMode = false }: { images: ImageData
         return (
             <SheetCanvasPage
                 images={images}
-                layout={sheetLayout}
+                recipe={sheetRecipe}
                 isPrintMode={isPrintMode}
             />
         );
@@ -356,11 +360,11 @@ function CanvasPage({
  * ============================================================ */
 function SheetCanvasPage({
     images,
-    layout,
+    recipe,
     isPrintMode = false,
 }: {
     images: ImageData[];
-    layout: SheetLayoutPreset;
+    recipe: SheetRecipe;
     isPrintMode?: boolean;
 }) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -380,24 +384,39 @@ function SheetCanvasPage({
 
     const {
         photoTransforms,
-        setPhotoTransform,
         faceBoxes,
         setFaceBoxes,
         showCutLines,
-        customPhotoSize,
+        sheetAlign,
+        sheetBindingMode,
+        sheetSizeAssignments,
+        sheetSlotAssignments,
+        setSheetSlotAssignment,
+        sheetAssignImageFilename,
+        sheetSlotTransforms,
+        setSheetSlotTransform,
     } = useGalleryStore();
 
     const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(0);
-    const [activeFilename, setActiveFilename] = useState<string | null>(
-        images[0]?.filename ?? null
-    );
 
-    const { paper, photo } = resolveSheetLayoutContext(layout, customPhotoSize);
-    const geometry = getSheetLayoutGeometry(layout, paper, photo);
+    const paper = getPaperPreset(recipe.paperId);
+    const geometry = packSheetRecipe(recipe, paper, sheetAlign);
     const displayScale = SHEET_DISPLAY_MAX_WIDTH / geometry.paperWidthPx;
 
-    const slotImageAt = (slotIndex: number) =>
-        images[slotIndex % images.length];
+    const resolveImageForSlot = (slotIndex: number) => {
+        const slot = geometry.slots[slotIndex];
+        if (!slot) return images[0];
+
+        return resolveSlotImage({
+            slot,
+            slotIndex,
+            images,
+            mode: sheetBindingMode,
+            sizeAssignments: sheetSizeAssignments,
+            slotAssignments: sheetSlotAssignments,
+            slots: geometry.slots,
+        });
+    };
 
     useEffect(() => {
         if (!canvasRef.current) return;
@@ -409,7 +428,7 @@ function SheetCanvasPage({
         const firstSlot = geometry.slots[0];
         if (!firstSlot) return;
 
-        const firstImage = slotImageAt(firstSlot.index);
+        const firstImage = resolveImageForSlot(firstSlot.index);
         activeSlotRef.current = {
             x: firstSlot.x,
             y: firstSlot.y,
@@ -417,13 +436,25 @@ function SheetCanvasPage({
             h: firstSlot.h,
         };
         setActiveSlotIndex(0);
-        setActiveFilename(firstImage.filename);
 
         const cached = imageCacheRef.current.find(
             (entry) => entry.filename === firstImage.filename
         );
         if (cached) activeImageRef.current = cached.img;
-    }, [layout.id, geometry.slots, images]);
+
+        transformRef.current = sheetSlotTransforms[firstSlot.index] ?? {
+            scale: 1,
+            offsetX: 0,
+            offsetY: 0,
+        };
+    }, [
+        recipe.id,
+        geometry.slots,
+        images,
+        sheetBindingMode,
+        sheetSizeAssignments,
+        sheetSlotAssignments,
+    ]);
 
     const getClampRect = () => {
         const img = activeImageRef.current;
@@ -443,18 +474,18 @@ function SheetCanvasPage({
     };
 
     useEffect(() => {
-        if (!canvasRef.current || !activeFilename) return;
+        if (!canvasRef.current || activeSlotIndex === null) return;
 
         return useCanvasPanZoomPro(
             canvasRef.current,
             () => transformRef.current,
             (patch) => {
                 transformRef.current = { ...transformRef.current, ...patch };
-                setPhotoTransform(activeFilename, patch);
+                setSheetSlotTransform(activeSlotIndex, patch);
             },
             getClampRect
         );
-    }, [activeFilename, layout.id]);
+    }, [activeSlotIndex, recipe.id]);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -477,9 +508,15 @@ function SheetCanvasPage({
 
             if (!slot) return;
 
-            const slotImage = slotImageAt(slot.index);
+            if (
+                sheetBindingMode === "manual" &&
+                sheetAssignImageFilename
+            ) {
+                setSheetSlotAssignment(slot.index, sheetAssignImageFilename);
+            }
+
+            const slotImage = resolveImageForSlot(slot.index);
             setActiveSlotIndex(slot.index);
-            setActiveFilename(slotImage.filename);
             activeSlotRef.current = {
                 x: slot.x,
                 y: slot.y,
@@ -487,7 +524,7 @@ function SheetCanvasPage({
                 h: slot.h,
             };
 
-            transformRef.current = photoTransforms[slotImage.filename] ?? {
+            transformRef.current = sheetSlotTransforms[slot.index] ?? {
                 scale: 1,
                 offsetX: 0,
                 offsetY: 0,
@@ -501,17 +538,25 @@ function SheetCanvasPage({
 
         canvas.addEventListener("mousedown", onMouseDown, true);
         return () => canvas.removeEventListener("mousedown", onMouseDown, true);
-    }, [geometry, images, photoTransforms]);
+    }, [
+        geometry,
+        images,
+        sheetSlotTransforms,
+        sheetBindingMode,
+        sheetAssignImageFilename,
+        sheetSizeAssignments,
+        sheetSlotAssignments,
+    ]);
 
     useEffect(() => {
-        images.forEach((imgData) => {
-            if (photoTransforms[imgData.filename]) return;
+        geometry.slots.forEach((slot) => {
+            if (sheetSlotTransforms[slot.index]) return;
 
+            const imgData = resolveImageForSlot(slot.index);
             const cached = imageCacheRef.current.find(
                 (entry) => entry.filename === imgData.filename
             );
-            const slot = geometry.slots[0];
-            if (!cached?.img || !slot) return;
+            if (!cached?.img) return;
 
             const auto = autoCenterTransform(
                 cached.img.width,
@@ -521,12 +566,20 @@ function SheetCanvasPage({
                 "auto"
             );
 
-            if (imgData.filename === activeFilename) {
+            if (slot.index === activeSlotIndex) {
                 transformRef.current = auto;
             }
-            setPhotoTransform(imgData.filename, auto);
+            setSheetSlotTransform(slot.index, auto);
         });
-    }, [images, layout.id, geometry.slots, imageCacheRef.current.length]);
+    }, [
+        images,
+        recipe.id,
+        geometry.slots,
+        imageCacheRef.current.length,
+        sheetBindingMode,
+        sheetSizeAssignments,
+        sheetSlotAssignments,
+    ]);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -548,14 +601,16 @@ function SheetCanvasPage({
         ).then((loaded) => {
             imageCacheRef.current = loaded;
 
-            const slotDraws = geometry.slots.map((slot) => {
-                const imgData = slotImageAt(slot.index);
-                const cached = loaded.find((entry) => entry.filename === imgData.filename);
-                return {
-                    image: cached?.img as HTMLImageElement,
-                    transform: photoTransforms[imgData.filename],
-                    faceBoxes: faceBoxes[imgData.filename] ?? [],
-                };
+            const slotDraws = buildSheetSlotDraws({
+                geometry,
+                images,
+                loaded,
+                bindingMode: sheetBindingMode,
+                sizeAssignments: sheetSizeAssignments,
+                slotAssignments: sheetSlotAssignments,
+                photoTransforms,
+                sheetSlotTransforms,
+                faceBoxes,
             });
 
             drawSheetLayout(ctx, {
@@ -569,11 +624,16 @@ function SheetCanvasPage({
         images,
         geometry,
         photoTransforms,
+        sheetSlotTransforms,
         faceBoxes,
         showCutLines,
         activeSlotIndex,
         isPrintMode,
-        layout.id,
+        recipe.id,
+        sheetAlign,
+        sheetBindingMode,
+        sheetSizeAssignments,
+        sheetSlotAssignments,
     ]);
 
     useEffect(() => {
@@ -589,17 +649,21 @@ function SheetCanvasPage({
                 setFaceBoxes(imgData.filename, faces);
             });
         });
-    }, [images, layout.id, imageCacheRef.current.length]);
+    }, [images, recipe.id, imageCacheRef.current.length]);
 
-    const slotHint =
-        images.length === 1
-            ? `foto diulang ${geometry.slots.length}×`
-            : `${images.length} foto dirotasi ke ${geometry.slots.length} slot`;
+    const bindingHint =
+        sheetBindingMode === "manual"
+            ? "mode manual · klik slot untuk menempatkan foto"
+            : sheetBindingMode === "by-size"
+              ? "mode per ukuran"
+              : images.length === 1
+                ? `bergilir · foto diulang ${geometry.slots.length}×`
+                : `bergilir · ${images.length} foto ke ${geometry.slots.length} slot`;
 
     return (
         <div className="flex flex-col items-center gap-3">
             <p className="text-xs text-white/60">
-                {layout.label} · {slotHint}
+                {recipe.label} · {countRecipeSlots(recipe)} slot · {bindingHint}
             </p>
             <canvas
                 ref={canvasRef}

@@ -1,12 +1,12 @@
 import { PRINT_TEMPLATES, PrintTemplate } from "@/lib/printTemplates";
-import type { PhotoSizePreset } from "@/lib/photoSizes";
 import {
-  DEFAULT_SHEET_LAYOUT_ID,
-  getSheetLayoutPreset,
-  type SheetLayoutPreset,
-} from "@/lib/sheetLayouts";
+  createDefaultSheetRecipe,
+  type SheetRecipe,
+} from "@/lib/sheetRecipe";
 import type { GalleryImageData, PackageType } from "@/lib/imageTypes";
 import { FaceBox } from "@/utils/faceDetect";
+import type { SheetBindingMode } from "@/lib/sheetSlotBinding";
+import type { SheetGridAlign } from "@/utils/sheetLayoutEngine";
 import { create } from "zustand";
 
 /* ================= TYPES ================= */
@@ -53,16 +53,29 @@ type GalleryStore = {
 
     printMode: PrintMode;
     setPrintMode: (mode: PrintMode) => void;
-    sheetLayout: SheetLayoutPreset;
-    setSheetLayout: (layout: SheetLayoutPreset) => void;
-    selectedPaperId: string;
-    setSelectedPaperId: (paperId: string) => void;
-    customPhotoSize: PhotoSizePreset | null;
-    setCustomPhotoSize: (photo: PhotoSizePreset | null) => void;
+    sheetRecipe: SheetRecipe;
+    setSheetRecipe: (
+      recipe: SheetRecipe | ((prev: SheetRecipe) => SheetRecipe)
+    ) => void;
     sheetCopies: number;
     setSheetCopies: (copies: number) => void;
+    sheetAlign: SheetGridAlign;
+    setSheetAlign: (align: SheetGridAlign) => void;
     showCutLines: boolean;
     setShowCutLines: (show: boolean) => void;
+    sheetBindingMode: SheetBindingMode;
+    setSheetBindingMode: (mode: SheetBindingMode) => void;
+    sheetSizeAssignments: Record<string, string>;
+    setSheetSizeAssignment: (sizeKey: string, filename: string) => void;
+    sheetSlotAssignments: Record<number, string>;
+    setSheetSlotAssignment: (slotIndex: number, filename: string) => void;
+    sheetAssignImageFilename: string | null;
+    setSheetAssignImageFilename: (filename: string | null) => void;
+    sheetSlotTransforms: Record<number, PhotoTransform>;
+    setSheetSlotTransform: (
+        slotIndex: number,
+        patch: Partial<PhotoTransform>
+    ) => void;
 
     photoTransforms: Record<string, PhotoTransform>;
     setPhotoTransform: (
@@ -120,17 +133,57 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
 
     printMode: "classic",
     setPrintMode: (printMode) => set({ printMode }),
-    sheetLayout: getSheetLayoutPreset(DEFAULT_SHEET_LAYOUT_ID),
-    setSheetLayout: (sheetLayout) => set({ sheetLayout }),
-    selectedPaperId: "A4",
-    setSelectedPaperId: (selectedPaperId) => set({ selectedPaperId }),
-    customPhotoSize: null,
-    setCustomPhotoSize: (customPhotoSize) => set({ customPhotoSize }),
+    sheetRecipe: createDefaultSheetRecipe(),
+    setSheetRecipe: (recipe) =>
+      set((state) => ({
+        sheetRecipe:
+          typeof recipe === "function" ? recipe(state.sheetRecipe) : recipe,
+      })),
     sheetCopies: 1,
     setSheetCopies: (sheetCopies) =>
       set({ sheetCopies: Math.max(1, Math.min(10, sheetCopies)) }),
+    sheetAlign: "top-left",
+    setSheetAlign: (sheetAlign) => set({ sheetAlign }),
     showCutLines: true,
     setShowCutLines: (showCutLines) => set({ showCutLines }),
+    sheetBindingMode: "cycle",
+    setSheetBindingMode: (sheetBindingMode) => set({ sheetBindingMode }),
+    sheetSizeAssignments: {},
+    setSheetSizeAssignment: (sizeKey, filename) =>
+        set((state) => ({
+            sheetSizeAssignments: {
+                ...state.sheetSizeAssignments,
+                [sizeKey]: filename,
+            },
+        })),
+    sheetSlotAssignments: {},
+    setSheetSlotAssignment: (slotIndex, filename) =>
+        set((state) => ({
+            sheetSlotAssignments: {
+                ...state.sheetSlotAssignments,
+                [slotIndex]: filename,
+            },
+        })),
+    sheetAssignImageFilename: null,
+    setSheetAssignImageFilename: (sheetAssignImageFilename) =>
+        set({ sheetAssignImageFilename }),
+    sheetSlotTransforms: {},
+    setSheetSlotTransform: (slotIndex, patch) =>
+        set((state) => {
+            const prev: PhotoTransform = state.sheetSlotTransforms[slotIndex] ?? {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+                filter: "none",
+            };
+
+            return {
+                sheetSlotTransforms: {
+                    ...state.sheetSlotTransforms,
+                    [slotIndex]: { ...prev, ...patch },
+                },
+            };
+        }),
 
     photoTransforms: {},
 

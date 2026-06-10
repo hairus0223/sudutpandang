@@ -977,12 +977,21 @@ app.post("/api/print", async (req, res) => {
     pageWidthPx,
     pageHeightPx,
     paperId,
+    recipeId,
+    recipeLabel,
+    slotCount,
   } = req.body;
 
   if (!Array.isArray(images) || images.length === 0)
     return res.status(400).json({ error: "No images" });
 
   const isSheetPrint = layoutType === "sheet";
+
+  if (isSheetPrint) {
+    console.log(
+      `[print] sheet ${paperId ?? "?"} · ${recipeLabel ?? recipeId ?? "custom"} · ${slotCount ?? "?"} slots · ${images.length} page(s)`
+    );
+  }
 
   // Folder print
   const printDir = path.join(BASE_DIR, "print");
