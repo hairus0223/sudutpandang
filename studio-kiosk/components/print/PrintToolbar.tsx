@@ -4,9 +4,11 @@ import { ArrowLeft, Printer } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useGalleryStore, PhotoFilter } from "@/stores/useGalleryStore";
-import { TemplateSelector } from "./TemplateSelector";
-import { exportCanvasPrint, ImageData } from "@/utils/exportCanvas";
+import { SheetLayoutSelector } from "./SheetLayoutSelector";
+import { exportCanvasPrint, exportSheetPrint, ImageData } from "@/utils/exportCanvas";
 import { API_BASE_URL } from "@/lib/env";
+import { resolveSheetLayoutContext } from "@/lib/sheetLayouts";
+import { getSheetLayoutGeometry } from "@/utils/sheetLayoutEngine";
 
 const FILTERS: { id: PhotoFilter; label: string }[] = [
   { id: "none", label: "Normal" },
@@ -28,6 +30,10 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
   const {
     resetSelection,
     printTemplate,
+    printMode,
+    sheetLayout,
+    customPhotoSize,
+    sheetCopies,
     photoTransforms,
     setPhotoTransform,
     faceBoxes,
@@ -70,20 +76,49 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
     try {
       setPrinting(true);
 
-      const pngs = await exportCanvasPrint(
-        images,
-        printTemplate.width,
-        printTemplate.height,
-        photoTransforms,
-        faceBoxes,
-        printTemplate.id
-      );
+      if (printMode === "sheet") {
+        const { paper, photo } = resolveSheetLayoutContext(
+          sheetLayout,
+          customPhotoSize
+        );
+        const geometry = getSheetLayoutGeometry(sheetLayout, paper, photo);
 
-      await fetch(`${API_BASE_URL}/api/print`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ images: pngs, templateId: printTemplate.id }),
-      });
+        const pngs = await exportSheetPrint({
+          images,
+          layout: sheetLayout,
+          customPhoto: customPhotoSize,
+          transforms: photoTransforms,
+          faceBoxes,
+          copies: sheetCopies,
+        });
+
+        await fetch(`${API_BASE_URL}/api/print`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            images: pngs,
+            layoutType: "sheet",
+            paperId: sheetLayout.paperId,
+            pageWidthPx: geometry.paperWidthPx,
+            pageHeightPx: geometry.paperHeightPx,
+          }),
+        });
+      } else {
+        const pngs = await exportCanvasPrint(
+          images,
+          printTemplate.width,
+          printTemplate.height,
+          photoTransforms,
+          faceBoxes,
+          printTemplate.id
+        );
+
+        await fetch(`${API_BASE_URL}/api/print`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ images: pngs, templateId: printTemplate.id }),
+        });
+      }
 
       resetSelection();
 
@@ -115,7 +150,7 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
 
       {/* CENTER */}
       <div className="flex flex-col items-center gap-2 order-last w-full sm:order-none sm:w-auto">
-        <TemplateSelector />
+        <SheetLayoutSelector />
 
         {/* FILTER BUTTONS */}
         <div className="flex flex-wrap gap-1 sm:gap-2 justify-center">
@@ -170,7 +205,11 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
         `}
       >
         <Printer className={`w-4 h-4 sm:w-5 sm:h-5 ${printing ? "animate-pulse" : ""}`} />
-        {printing ? "Sedang mencetak..." : "Print"}
+        {printing
+          ? "Sedang mencetak..."
+          : printMode === "sheet"
+            ? "Cetak Lembar"
+            : "Print"}
       </button>
     </div>
   );

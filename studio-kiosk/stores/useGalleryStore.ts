@@ -1,4 +1,10 @@
 import { PRINT_TEMPLATES, PrintTemplate } from "@/lib/printTemplates";
+import type { PhotoSizePreset } from "@/lib/photoSizes";
+import {
+  DEFAULT_SHEET_LAYOUT_ID,
+  getSheetLayoutPreset,
+  type SheetLayoutPreset,
+} from "@/lib/sheetLayouts";
 import type { GalleryImageData, PackageType } from "@/lib/imageTypes";
 import { FaceBox } from "@/utils/faceDetect";
 import { create } from "zustand";
@@ -16,6 +22,8 @@ export type PhotoFilter =
   | "warm"
   | "cool"
   | "drama";
+
+export type PrintMode = "classic" | "sheet";
 
 export type PhotoTransform = {
     scale: number;
@@ -42,6 +50,19 @@ type GalleryStore = {
 
     printTemplate: PrintTemplate;
     setPrintTemplate: (tpl: PrintTemplate) => void;
+
+    printMode: PrintMode;
+    setPrintMode: (mode: PrintMode) => void;
+    sheetLayout: SheetLayoutPreset;
+    setSheetLayout: (layout: SheetLayoutPreset) => void;
+    selectedPaperId: string;
+    setSelectedPaperId: (paperId: string) => void;
+    customPhotoSize: PhotoSizePreset | null;
+    setCustomPhotoSize: (photo: PhotoSizePreset | null) => void;
+    sheetCopies: number;
+    setSheetCopies: (copies: number) => void;
+    showCutLines: boolean;
+    setShowCutLines: (show: boolean) => void;
 
     photoTransforms: Record<string, PhotoTransform>;
     setPhotoTransform: (
@@ -96,6 +117,20 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
         PRINT_TEMPLATES.find((t) => t.id === "4R") ?? PRINT_TEMPLATES[0],
 
     setPrintTemplate: (tpl) => set({ printTemplate: tpl }),
+
+    printMode: "classic",
+    setPrintMode: (printMode) => set({ printMode }),
+    sheetLayout: getSheetLayoutPreset(DEFAULT_SHEET_LAYOUT_ID),
+    setSheetLayout: (sheetLayout) => set({ sheetLayout }),
+    selectedPaperId: "A4",
+    setSelectedPaperId: (selectedPaperId) => set({ selectedPaperId }),
+    customPhotoSize: null,
+    setCustomPhotoSize: (customPhotoSize) => set({ customPhotoSize }),
+    sheetCopies: 1,
+    setSheetCopies: (sheetCopies) =>
+      set({ sheetCopies: Math.max(1, Math.min(10, sheetCopies)) }),
+    showCutLines: true,
+    setShowCutLines: (showCutLines) => set({ showCutLines }),
 
     photoTransforms: {},
 

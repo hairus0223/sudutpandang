@@ -10,14 +10,37 @@ import { useCanvasPanZoomPro } from "@/stores/useCanvasPanZoom";
 import { autoCenterTransform } from "@/utils/autoCenterPreset";
 import { detectFaces } from "@/utils/faceDetect";
 import { drawFull4RLayout } from "./canvas/drawFull4RLayout";
+import { drawSheetLayout } from "./canvas/drawSheetLayout";
+import { resolveSheetLayoutContext, type SheetLayoutPreset } from "@/lib/sheetLayouts";
+import { getSheetLayoutGeometry } from "@/utils/sheetLayoutEngine";
 
 type ImageData = {
     filename: string;
     url: string;
 };
 
+const SHEET_DISPLAY_MAX_WIDTH = 920;
+
 export function PrintCanvas({ images, isPrintMode = false }: { images: ImageData[]; isPrintMode?: boolean }) {
-    const { printTemplate } = useGalleryStore();
+    const { printTemplate, printMode, sheetLayout } = useGalleryStore();
+
+    if (printMode === "sheet") {
+        if (!images.length) {
+            return (
+                <p className="text-center text-sm text-white/70">
+                    Pilih minimal 1 foto untuk preview lembar.
+                </p>
+            );
+        }
+
+        return (
+            <SheetCanvasPage
+                images={images}
+                layout={sheetLayout}
+                isPrintMode={isPrintMode}
+            />
+        );
+    }
 
     const chunkSize =
         printTemplate.id === "4R_FULL"
@@ -325,5 +348,268 @@ function CanvasPage({
                 cursor: "grab",
             }}
         />
+    );
+}
+
+/* ============================================================
+ * SHEET CANVAS (A4 multi-slot preview)
+ * ============================================================ */
+function SheetCanvasPage({
+    images,
+    layout,
+    isPrintMode = false,
+}: {
+    images: ImageData[];
+    layout: SheetLayoutPreset;
+    isPrintMode?: boolean;
+}) {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const imageCacheRef = useRef<{ filename: string; img: HTMLImageElement }[]>([]);
+    const activeImageRef = useRef<HTMLImageElement | null>(null);
+    const transformRef = useRef<PhotoTransform>({
+        scale: 1,
+        offsetX: 0,
+        offsetY: 0,
+    });
+    const activeSlotRef = useRef<{
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+    } | null>(null);
+
+    const {
+        photoTransforms,
+        setPhotoTransform,
+        faceBoxes,
+        setFaceBoxes,
+        showCutLines,
+        customPhotoSize,
+    } = useGalleryStore();
+
+    const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(0);
+    const [activeFilename, setActiveFilename] = useState<string | null>(
+        images[0]?.filename ?? null
+    );
+
+    const { paper, photo } = resolveSheetLayoutContext(layout, customPhotoSize);
+    const geometry = getSheetLayoutGeometry(layout, paper, photo);
+    const displayScale = SHEET_DISPLAY_MAX_WIDTH / geometry.paperWidthPx;
+
+    const slotImageAt = (slotIndex: number) =>
+        images[slotIndex % images.length];
+
+    useEffect(() => {
+        if (!canvasRef.current) return;
+        canvasRef.current.width = geometry.paperWidthPx;
+        canvasRef.current.height = geometry.paperHeightPx;
+    }, [geometry.paperWidthPx, geometry.paperHeightPx]);
+
+    useEffect(() => {
+        const firstSlot = geometry.slots[0];
+        if (!firstSlot) return;
+
+        const firstImage = slotImageAt(firstSlot.index);
+        activeSlotRef.current = {
+            x: firstSlot.x,
+            y: firstSlot.y,
+            w: firstSlot.w,
+            h: firstSlot.h,
+        };
+        setActiveSlotIndex(0);
+        setActiveFilename(firstImage.filename);
+
+        const cached = imageCacheRef.current.find(
+            (entry) => entry.filename === firstImage.filename
+        );
+        if (cached) activeImageRef.current = cached.img;
+    }, [layout.id, geometry.slots, images]);
+
+    const getClampRect = () => {
+        const img = activeImageRef.current;
+        const rect = activeSlotRef.current;
+        if (!img || !rect) {
+            return { boxW: 0, boxH: 0, imgW: 0, imgH: 0 };
+        }
+
+        return {
+            boxW: rect.w,
+            boxH: rect.h,
+            imgW: img.width,
+            imgH: img.height,
+            offsetX: rect.x,
+            offsetY: rect.y,
+        };
+    };
+
+    useEffect(() => {
+        if (!canvasRef.current || !activeFilename) return;
+
+        return useCanvasPanZoomPro(
+            canvasRef.current,
+            () => transformRef.current,
+            (patch) => {
+                transformRef.current = { ...transformRef.current, ...patch };
+                setPhotoTransform(activeFilename, patch);
+            },
+            getClampRect
+        );
+    }, [activeFilename, layout.id]);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const onMouseDown = (e: MouseEvent) => {
+            const rect = canvas.getBoundingClientRect();
+            const x =
+                ((e.clientX - rect.left) / rect.width) * geometry.paperWidthPx;
+            const y =
+                ((e.clientY - rect.top) / rect.height) * geometry.paperHeightPx;
+
+            const slot = geometry.slots.find(
+                (s) =>
+                    x >= s.x &&
+                    x <= s.x + s.w &&
+                    y >= s.y &&
+                    y <= s.y + s.h
+            );
+
+            if (!slot) return;
+
+            const slotImage = slotImageAt(slot.index);
+            setActiveSlotIndex(slot.index);
+            setActiveFilename(slotImage.filename);
+            activeSlotRef.current = {
+                x: slot.x,
+                y: slot.y,
+                w: slot.w,
+                h: slot.h,
+            };
+
+            transformRef.current = photoTransforms[slotImage.filename] ?? {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+            };
+
+            const cached = imageCacheRef.current.find(
+                (entry) => entry.filename === slotImage.filename
+            );
+            if (cached) activeImageRef.current = cached.img;
+        };
+
+        canvas.addEventListener("mousedown", onMouseDown, true);
+        return () => canvas.removeEventListener("mousedown", onMouseDown, true);
+    }, [geometry, images, photoTransforms]);
+
+    useEffect(() => {
+        images.forEach((imgData) => {
+            if (photoTransforms[imgData.filename]) return;
+
+            const cached = imageCacheRef.current.find(
+                (entry) => entry.filename === imgData.filename
+            );
+            const slot = geometry.slots[0];
+            if (!cached?.img || !slot) return;
+
+            const auto = autoCenterTransform(
+                cached.img.width,
+                cached.img.height,
+                slot.w,
+                slot.h,
+                "auto"
+            );
+
+            if (imgData.filename === activeFilename) {
+                transformRef.current = auto;
+            }
+            setPhotoTransform(imgData.filename, auto);
+        });
+    }, [images, layout.id, geometry.slots, imageCacheRef.current.length]);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        Promise.all(
+            images.map(
+                (imgData) =>
+                    new Promise<{ filename: string; img: HTMLImageElement }>((res) => {
+                        const img = new Image();
+                        img.crossOrigin = "anonymous";
+                        img.src = imgData.url;
+                        img.onload = () => res({ filename: imgData.filename, img });
+                    })
+            )
+        ).then((loaded) => {
+            imageCacheRef.current = loaded;
+
+            const slotDraws = geometry.slots.map((slot) => {
+                const imgData = slotImageAt(slot.index);
+                const cached = loaded.find((entry) => entry.filename === imgData.filename);
+                return {
+                    image: cached?.img as HTMLImageElement,
+                    transform: photoTransforms[imgData.filename],
+                    faceBoxes: faceBoxes[imgData.filename] ?? [],
+                };
+            });
+
+            drawSheetLayout(ctx, {
+                slots: geometry.slots,
+                slotDraws,
+                showCutLines: showCutLines && !isPrintMode,
+                activeSlotIndex: isPrintMode ? null : activeSlotIndex,
+            });
+        });
+    }, [
+        images,
+        geometry,
+        photoTransforms,
+        faceBoxes,
+        showCutLines,
+        activeSlotIndex,
+        isPrintMode,
+        layout.id,
+    ]);
+
+    useEffect(() => {
+        images.forEach((imgData) => {
+            if (faceBoxes[imgData.filename]) return;
+
+            const cached = imageCacheRef.current.find(
+                (entry) => entry.filename === imgData.filename
+            );
+            if (!cached) return;
+
+            detectFaces(cached.img).then((faces) => {
+                setFaceBoxes(imgData.filename, faces);
+            });
+        });
+    }, [images, layout.id, imageCacheRef.current.length]);
+
+    const slotHint =
+        images.length === 1
+            ? `foto diulang ${geometry.slots.length}×`
+            : `${images.length} foto dirotasi ke ${geometry.slots.length} slot`;
+
+    return (
+        <div className="flex flex-col items-center gap-3">
+            <p className="text-xs text-white/60">
+                {layout.label} · {slotHint}
+            </p>
+            <canvas
+                ref={canvasRef}
+                className="bg-white shadow-xl mx-auto"
+                style={{
+                    width: geometry.paperWidthPx * displayScale,
+                    height: geometry.paperHeightPx * displayScale,
+                    cursor: "grab",
+                }}
+            />
+        </div>
     );
 }

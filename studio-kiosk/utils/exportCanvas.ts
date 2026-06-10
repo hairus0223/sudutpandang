@@ -4,7 +4,14 @@ import { loadBrandingLogo } from "@/utils/loadBrandingLogo";
 import { PhotoTransform } from "@/stores/useGalleryStore";
 import { FaceBox } from "./faceDetect";
 import { drawFull4RLayout } from "@/components/print/canvas/drawFull4RLayout";
+import type { PhotoSizePreset } from "@/lib/photoSizes";
 import { PrintTemplate } from "@/lib/printTemplates";
+import {
+  resolveSheetLayoutContext,
+  type SheetLayoutPreset,
+} from "@/lib/sheetLayouts";
+import { drawSheetLayout } from "@/components/print/canvas/drawSheetLayout";
+import { getSheetLayoutGeometry } from "@/utils/sheetLayoutEngine";
 
 export type ImageData = {
   filename: string;
@@ -75,6 +82,81 @@ export async function exportCanvasPrint(
     }
 
     flattenCanvasAlpha(ctx, width, height);
+    results.push(canvas.toDataURL("image/png", 1.0));
+  }
+
+  return results;
+}
+
+function loadImageElement(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = `${url}${url.includes("?") ? "&" : "?"}print=${Date.now()}`;
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Failed to load image for sheet export"));
+  });
+}
+
+/**
+ * Export full paper sheet PNG(s) for sheet print mode.
+ */
+export async function exportSheetPrint({
+  images,
+  layout,
+  customPhoto,
+  transforms,
+  faceBoxes,
+  includeCutLines = false,
+  copies = 1,
+}: {
+  images: ImageData[];
+  layout: SheetLayoutPreset;
+  customPhoto: PhotoSizePreset | null;
+  transforms: Record<string, PhotoTransform>;
+  faceBoxes: Record<string, FaceBox[]>;
+  includeCutLines?: boolean;
+  copies?: number;
+}): Promise<string[]> {
+  if (!images.length) return [];
+
+  const { paper, photo } = resolveSheetLayoutContext(layout, customPhoto);
+  const geometry = getSheetLayoutGeometry(layout, paper, photo);
+
+  const loaded = await Promise.all(
+    images.map(async (img) => ({
+      filename: img.filename,
+      element: await loadImageElement(img.url),
+    }))
+  );
+
+  const results: string[] = [];
+  const sheetCopies = Math.max(1, Math.min(10, copies));
+
+  for (let copy = 0; copy < sheetCopies; copy += 1) {
+    const canvas = document.createElement("canvas");
+    canvas.width = geometry.paperWidthPx;
+    canvas.height = geometry.paperHeightPx;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) continue;
+
+    const slotDraws = geometry.slots.map((slot) => {
+      const source = loaded[slot.index % loaded.length];
+      return {
+        image: source.element,
+        transform: transforms[source.filename],
+        faceBoxes: faceBoxes[source.filename] ?? [],
+      };
+    });
+
+    drawSheetLayout(ctx, {
+      slots: geometry.slots,
+      slotDraws,
+      showCutLines: includeCutLines,
+      activeSlotIndex: null,
+    });
+
+    flattenCanvasAlpha(ctx, geometry.paperWidthPx, geometry.paperHeightPx);
     results.push(canvas.toDataURL("image/png", 1.0));
   }
 

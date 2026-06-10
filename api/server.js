@@ -969,22 +969,39 @@ function silentPrint(filePath, printerName = null) {
 
 
 app.post("/api/print", async (req, res) => {
-  const { images, printerName, templateId = "4R" } = req.body; // templateId opsional
+  const {
+    images,
+    printerName,
+    templateId = "4R",
+    layoutType = "classic",
+    pageWidthPx,
+    pageHeightPx,
+    paperId,
+  } = req.body;
 
   if (!Array.isArray(images) || images.length === 0)
     return res.status(400).json({ error: "No images" });
+
+  const isSheetPrint = layoutType === "sheet";
 
   // Folder print
   const printDir = path.join(BASE_DIR, "print");
   if (!fs.existsSync(printDir)) fs.mkdirSync(printDir, { recursive: true });
 
-  // Tentukan ukuran PDF sesuai template
+  // Tentukan ukuran PDF sesuai template atau sheet
   let widthPx = 6 * 300; // default 4R Landscape
   let heightPx = 4 * 300;
-  // if (templateId === "4R_FULL") {
-  //   widthPx = 4 * 300; // portrait
-  //   heightPx = 6 * 300;
-  // }
+
+  if (isSheetPrint) {
+    if (!pageWidthPx || !pageHeightPx) {
+      return res
+        .status(400)
+        .json({ error: "Sheet print requires pageWidthPx and pageHeightPx" });
+    }
+    widthPx = Math.round(Number(pageWidthPx));
+    heightPx = Math.round(Number(pageHeightPx));
+  }
+
   const pdfWidthPt = pxToPt(widthPx);
   const pdfHeightPt = pxToPt(heightPx);
 
@@ -1015,16 +1032,22 @@ app.post("/api/print", async (req, res) => {
       // Proses gambar dengan Sharp
       let processedBuffer = sharp(buffer).rotate();
 
-      if (templateId === "4R_FULL") {
-        // paksa portrait, jika original landscape
-        processedBuffer = processedBuffer.rotate(90);
-      }
+      if (isSheetPrint) {
+        processedBuffer = await processedBuffer
+          .withMetadata({ density: 300, ...(hasIcc ? { icc: iccPath } : {}) })
+          .jpeg({ quality: 100 })
+          .toBuffer();
+      } else {
+        if (templateId === "4R_FULL") {
+          processedBuffer = processedBuffer.rotate(90);
+        }
 
-      processedBuffer = await processedBuffer
-        .resize(widthPx, heightPx, { fit: "cover", position: "centre" })
-        .withMetadata({ density: 300, ...(hasIcc ? { icc: iccPath } : {}) })
-        .jpeg({ quality: 100 })
-        .toBuffer();
+        processedBuffer = await processedBuffer
+          .resize(widthPx, heightPx, { fit: "cover", position: "centre" })
+          .withMetadata({ density: 300, ...(hasIcc ? { icc: iccPath } : {}) })
+          .jpeg({ quality: 100 })
+          .toBuffer();
+      }
 
       // Tambahkan page di PDF
       doc.addPage({ size: [pdfWidthPt, pdfHeightPt] });
