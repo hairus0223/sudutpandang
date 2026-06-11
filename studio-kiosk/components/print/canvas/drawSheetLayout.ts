@@ -1,6 +1,7 @@
 import type { PhotoTransform } from "@/stores/useGalleryStore";
 import type { FaceBox } from "@/utils/faceDetect";
 import type { SlotRect } from "@/utils/sheetLayoutEngine";
+import { drawPassportGuide } from "./drawPassportGuide";
 import { drawSmartCover } from "./drawSmartCover";
 
 export type SheetSlotDraw = {
@@ -14,6 +15,7 @@ type DrawSheetLayoutOptions = {
   slotDraws: SheetSlotDraw[];
   showCutLines?: boolean;
   activeSlotIndex?: number | null;
+  showPassportGuide?: boolean;
 };
 
 export function drawSheetLayout(
@@ -23,6 +25,7 @@ export function drawSheetLayout(
     slotDraws,
     showCutLines = true,
     activeSlotIndex = null,
+    showPassportGuide = false,
   }: DrawSheetLayoutOptions
 ) {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -48,6 +51,10 @@ export function drawSheetLayout(
     }
 
     if (activeSlotIndex === slot.index) {
+      if (showPassportGuide) {
+        drawPassportGuide(ctx, slot.x, slot.y, slot.w, slot.h);
+      }
+
       ctx.save();
       ctx.strokeStyle = "#2563eb";
       ctx.lineWidth = 3;

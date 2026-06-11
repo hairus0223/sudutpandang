@@ -258,8 +258,16 @@ export function updateAfterRemoveBg(userDir, imageId, awaitNextStep = null) {
  * @param {string} userDir
  * @param {string} imageId
  * @param {string} passportColor
+ * @param {string} [passportSizeId]
+ * @param {{ widthPx?: number, heightPx?: number, widthMm?: number, heightMm?: number, dpi?: number }} [dimensions]
  */
-export function updateAfterPassportBg(userDir, imageId, passportColor) {
+export function updateAfterPassportBg(
+  userDir,
+  imageId,
+  passportColor,
+  passportSizeId,
+  dimensions = {}
+) {
   const existing = readMeta(userDir, imageId) || { imageId, variants: {} };
   const operations = Array.isArray(existing.operations) ? [...existing.operations] : [];
 
@@ -275,6 +283,8 @@ export function updateAfterPassportBg(userDir, imageId, passportColor) {
   const pipeline = {
     ...(typeof existing.pipeline === "object" && existing.pipeline ? existing.pipeline : {}),
     passportColor,
+    passportSizeId,
+    passportDimensions: dimensions,
   };
 
   const updated = {

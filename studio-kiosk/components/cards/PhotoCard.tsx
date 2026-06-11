@@ -9,6 +9,7 @@ type PhotoCardProps = {
   filename: string;
   onClick: () => void;
   processingStatus?: ProcessingStatus;
+  processingError?: string | null;
   onRemoveBackground?: () => void;
   removeBackgroundLoading?: boolean;
   hideFilename?: boolean;
@@ -53,6 +54,7 @@ export function PhotoCard({
   filename,
   onClick,
   processingStatus,
+  processingError,
   onRemoveBackground,
   removeBackgroundLoading = false,
   hideFilename = false,
@@ -62,9 +64,14 @@ export function PhotoCard({
   const { selectedForPrint, togglePrint } = useGalleryStore();
   const isSelected = selectedForPrint.includes(filename);
   const statusLabel = getStatusLabel(processingStatus);
+  const showRetry =
+    processingStatus === "failed" &&
+    Boolean(onRemoveBackground) &&
+    !removeBackgroundLoading;
   const showRemoveBg =
     Boolean(onRemoveBackground) &&
     canRemoveBackground(processingStatus) &&
+    processingStatus !== "failed" &&
     !removeBackgroundLoading;
 
   return (
@@ -95,6 +102,12 @@ export function PhotoCard({
         </div>
       )}
 
+      {processingStatus === "failed" && processingError && (
+        <div className="absolute left-3 right-3 top-12 z-20 rounded-lg bg-red-950/85 px-3 py-2 text-[11px] leading-snug text-red-100 backdrop-blur">
+          {processingError}
+        </div>
+      )}
+
       {showRemoveBg && (
         <button
           type="button"
@@ -107,6 +120,21 @@ export function PhotoCard({
                      hover:bg-violet-500 transition"
         >
           Hapus BG
+        </button>
+      )}
+
+      {showRetry && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemoveBackground?.();
+          }}
+          className="absolute bottom-3 left-3 z-20 rounded-full bg-amber-600/90
+                     px-3 py-1 text-xs text-white backdrop-blur
+                     hover:bg-amber-500 transition"
+        >
+          Coba lagi
         </button>
       )}
 

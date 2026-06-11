@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useGalleryStore } from "@/stores/useGalleryStore";
 import { PrintCanvas } from "@/components/print/PrintCanvas";
 import { PrintToolbar } from "@/components/print/PrintToolbar";
@@ -9,7 +9,14 @@ import { resolveImageUrl } from "@/lib/resolveImageUrl";
 
 export default function PrintPage() {
   const router = useRouter();
-  const { images, selectedForPrint, packageType } = useGalleryStore();
+  const params = useSearchParams();
+  const galleryUser = params.get("user");
+  const {
+    images,
+    selectedForPrint,
+    packageType,
+    loadPersistedSheetTransforms,
+  } = useGalleryStore();
 
   const selectedImages = useMemo(
     () =>
@@ -21,6 +28,12 @@ export default function PrintPage() {
         })),
     [images, selectedForPrint, packageType]
   );
+
+  useEffect(() => {
+    if (galleryUser) {
+      loadPersistedSheetTransforms(galleryUser);
+    }
+  }, [galleryUser, loadPersistedSheetTransforms]);
 
   useEffect(() => {
     if (selectedImages.length === 0) {

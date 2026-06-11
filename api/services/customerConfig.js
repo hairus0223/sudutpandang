@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { normalizePassportSizeId } from "./passportSizes.js";
 import { normalizeThemeId } from "./themePresets.js";
 
 /** @type {Record<string, string>} */
@@ -62,4 +63,12 @@ export function readPassportBackgroundColor(userFolder) {
 export function readCustomerThemeId(userFolder) {
   const data = readCustomerJson(userFolder);
   return normalizeThemeId(data?.themeId);
+}
+
+/**
+ * @param {string} userFolder
+ */
+export function readPassportSizeId(userFolder) {
+  const data = readCustomerJson(userFolder);
+  return normalizePassportSizeId(data?.passportSizeId);
 }

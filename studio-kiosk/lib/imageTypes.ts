@@ -19,6 +19,7 @@ export type GalleryImageData = {
   url: string;
   imageId?: string;
   processingStatus?: ProcessingStatus;
+  processingError?: string | null;
   variants?: ImageVariants;
 };
 

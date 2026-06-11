@@ -4,6 +4,7 @@ import { ArrowLeft, Printer } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useGalleryStore, PhotoFilter } from "@/stores/useGalleryStore";
+import { SheetAdjustToolbar } from "./SheetAdjustToolbar";
 import { SheetLayoutSelector } from "./SheetLayoutSelector";
 import { exportCanvasPrint, exportSheetPrint, ImageData } from "@/utils/exportCanvas";
 import { API_BASE_URL } from "@/lib/env";
@@ -41,6 +42,7 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
     photoTransforms,
     setPhotoTransform,
     faceBoxes,
+    persistSheetTransforms,
   } = useGalleryStore();
 
   /* =========================
@@ -94,6 +96,8 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
 
         const geometry = packSheetRecipe(sheetRecipe, paper, sheetAlign);
 
+        persistSheetTransforms();
+
         const pngs = await exportSheetPrint({
           images,
           recipe: sheetRecipe,
@@ -103,6 +107,7 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
           bindingMode: sheetBindingMode,
           sizeAssignments: sheetSizeAssignments,
           slotAssignments: sheetSlotAssignments,
+          includeCutLines: false,
           copies: sheetCopies,
           align: sheetAlign,
         });
@@ -169,6 +174,7 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
       {/* CENTER */}
       <div className="flex flex-col items-center gap-2 order-last w-full sm:order-none sm:w-auto">
         <SheetLayoutSelector images={images} />
+        <SheetAdjustToolbar />
 
         {/* FILTER BUTTONS */}
         <div className="flex flex-wrap gap-1 sm:gap-2 justify-center">

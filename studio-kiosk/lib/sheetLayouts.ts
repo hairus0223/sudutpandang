@@ -15,17 +15,17 @@ export type SheetLayoutPreset = {
 
 export const SHEET_LAYOUT_PRESETS: SheetLayoutPreset[] = [
   {
-    id: "A4_2x3_x6",
-    label: "A4 · 2×3\" · 6 foto",
+    id: "A4_2x3_x24",
+    label: "A4 · 2×3 cm · 24 foto",
     paperId: "A4",
     photoSizeId: "2x3",
-    cols: 3,
-    rows: 2,
+    cols: 4,
+    rows: 6,
     cutGapMm: 2,
   },
   {
     id: "A4_3x4_x8",
-    label: "A4 · 3×4\" · 8 foto",
+    label: "A4 · 3×4 cm · 8 foto",
     paperId: "A4",
     photoSizeId: "3x4",
     cols: 2,
@@ -33,12 +33,12 @@ export const SHEET_LAYOUT_PRESETS: SheetLayoutPreset[] = [
     cutGapMm: 2,
   },
   {
-    id: "A4_4x6_x2",
-    label: "A4 · 4×6\" · 2 foto",
+    id: "A4_4x6_x8",
+    label: "A4 · 4×6 cm · 8 foto",
     paperId: "A4",
     photoSizeId: "4x6",
-    cols: 1,
-    rows: 2,
+    cols: 2,
+    rows: 4,
     cutGapMm: 2,
   },
   {
@@ -51,17 +51,17 @@ export const SHEET_LAYOUT_PRESETS: SheetLayoutPreset[] = [
     cutGapMm: 2,
   },
   {
-    id: "Letter_2x3_x6",
-    label: "Letter · 2×3\" · 6 foto",
+    id: "Letter_2x3_x24",
+    label: "Letter · 2×3 cm · 24 foto",
     paperId: "Letter",
     photoSizeId: "2x3",
-    cols: 3,
-    rows: 2,
+    cols: 4,
+    rows: 6,
     cutGapMm: 2,
   },
   {
     id: "Letter_3x4_x8",
-    label: "Letter · 3×4\" · 8 foto",
+    label: "Letter · 3×4 cm · 8 foto",
     paperId: "Letter",
     photoSizeId: "3x4",
     cols: 2,
@@ -69,21 +69,22 @@ export const SHEET_LAYOUT_PRESETS: SheetLayoutPreset[] = [
     cutGapMm: 2,
   },
   {
-    id: "Letter_4x6_x2",
-    label: "Letter · 4×6\" · 2 foto",
+    id: "Letter_4x6_x8",
+    label: "Letter · 4×6 cm · 8 foto",
     paperId: "Letter",
     photoSizeId: "4x6",
-    cols: 1,
-    rows: 2,
+    cols: 2,
+    rows: 4,
     cutGapMm: 2,
   },
 ];
 
-export const DEFAULT_SHEET_LAYOUT_ID = SHEET_LAYOUT_PRESETS[0].id;
+export const DEFAULT_SHEET_LAYOUT_ID = "A4_3x4_x8";
 
 export function getSheetLayoutPreset(id: string): SheetLayoutPreset {
   return (
     SHEET_LAYOUT_PRESETS.find((preset) => preset.id === id) ??
+    SHEET_LAYOUT_PRESETS.find((preset) => preset.id === DEFAULT_SHEET_LAYOUT_ID) ??
     SHEET_LAYOUT_PRESETS[0]
   );
 }
