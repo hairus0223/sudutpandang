@@ -119,7 +119,7 @@ export async function exportSheetPrint({
   images: ImageData[];
   recipe: SheetRecipe;
   transforms: Record<string, PhotoTransform>;
-  sheetSlotTransforms: Record<number, PhotoTransform>;
+  sheetSlotTransforms: Record<string, PhotoTransform>;
   faceBoxes: Record<string, FaceBox[]>;
   bindingMode?: SheetBindingMode;
   sizeAssignments?: Record<string, string>;

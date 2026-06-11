@@ -1,11 +1,12 @@
 import fs from "fs";
 import { removeImageBackground } from "./backgroundRemoval.js";
-import { compositeSubject } from "./imageComposite.js";
 import {
   readCustomerPackageType,
   readCustomerThemeId,
   readPassportBackgroundColor,
+  readPassportSizeId,
 } from "./customerConfig.js";
+import { compositePassportPhoto } from "./passportComposite.js";
 import {
   applyThemeToSubject,
   THEME_GENERATION_ENABLED,
@@ -83,11 +84,23 @@ class ImageProcessingQueue {
           continue;
         }
 
+        const startedAt = Date.now();
+        console.log(
+          `[image-queue] start ${job.operation} imageId=${job.imageId} userDir=${job.userDir}`
+        );
+
         try {
           const result = await handler(job);
+          console.log(
+            `[image-queue] done ${job.operation} imageId=${job.imageId} ${Date.now() - startedAt}ms`
+          );
           job.onComplete?.(result);
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
+          console.error(
+            `[image-queue] failed ${job.operation} imageId=${job.imageId} ${Date.now() - startedAt}ms:`,
+            err.message
+          );
           markFailed(job.userDir, job.imageId, err.message);
           job.onError?.(err);
         }
@@ -105,17 +118,25 @@ export const imageProcessingQueue = new ImageProcessingQueue();
  * @param {string} imageId
  * @param {string} passportColor
  */
-async function runPassportComposite(userDir, imageId, passportColor) {
+async function runPassportComposite(userDir, imageId, passportColor, passportSizeId) {
   const subjectPath = getSubjectPath(userDir, imageId);
   const outputPath = getPassportPath(userDir, imageId);
+  const resolvedSizeId = passportSizeId ?? readPassportSizeId(userDir);
 
-  await compositeSubject({
+  const dimensions = await compositePassportPhoto({
     subjectPath,
     outputPath,
-    background: { type: "solid", color: passportColor },
+    backgroundColor: passportColor,
+    sizeId: resolvedSizeId,
   });
 
-  return updateAfterPassportBg(userDir, imageId, passportColor);
+  return updateAfterPassportBg(
+    userDir,
+    imageId,
+    passportColor,
+    dimensions.sizeId,
+    dimensions
+  );
 }
 
 /**
@@ -155,7 +176,14 @@ export function registerImageProcessingHandlers() {
       updateAfterRemoveBg(userDir, imageId, "passport");
       const passportColor =
         job.passportColor ?? readPassportBackgroundColor(userDir);
-      const meta = await runPassportComposite(userDir, imageId, passportColor);
+      const passportSizeId =
+        job.passportSizeId ?? readPassportSizeId(userDir);
+      const meta = await runPassportComposite(
+        userDir,
+        imageId,
+        passportColor,
+        passportSizeId
+      );
       return { subjectPath, meta };
     }
 
@@ -182,7 +210,14 @@ export function registerImageProcessingHandlers() {
 
     const passportColor =
       job.passportColor ?? readPassportBackgroundColor(userDir);
-    const meta = await runPassportComposite(userDir, imageId, passportColor);
+    const passportSizeId =
+      job.passportSizeId ?? readPassportSizeId(userDir);
+    const meta = await runPassportComposite(
+      userDir,
+      imageId,
+      passportColor,
+      passportSizeId
+    );
     return { meta };
   });
 

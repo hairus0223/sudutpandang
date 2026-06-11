@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import path, { dirname } from "path";
@@ -21,6 +22,7 @@ import {
 } from "./services/imageStorage.js";
 import {
   normalizePassportColor,
+  readCustomerJson,
   readCustomerPackageType,
   readCustomerThemeId,
   readPassportBackgroundColor,
@@ -34,6 +36,12 @@ import {
   recoverPendingJobs,
 } from "./services/imageProcessingQueue.js";
 import { normalizeThemeId, THEME_PRESETS } from "./services/themePresets.js";
+import {
+  DEFAULT_PASSPORT_SIZE_ID,
+  normalizePassportSizeId,
+  PASSPORT_SIZE_PRESETS,
+} from "./services/passportSizes.js";
+import { bootstrapStudioDirs, resolveBaseDir } from "./services/studioPaths.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -59,12 +67,10 @@ const upload = multer({
 // ======================
 // BASE DIRECTORY
 // ======================
-// Semua foto final dan struktur tanggal/user akan disimpan di sini.
-// Di Windows ini berarti D:\SudutPandangStudio
-const BASE_DIR = "D:\\SudutPandangStudio";
-// const BASE_DIR = "/Users/hairus/Documents/Studio456";
+const BASE_DIR = resolveBaseDir();
+bootstrapStudioDirs(BASE_DIR);
 
-// Folder INPUT dari Imaging Edge: D:\SudutPandangStudio\capture
+// Folder INPUT dari Imaging Edge
 const CAPTURE_DIR = path.join(BASE_DIR, "capture");
 
 // ======================
@@ -135,6 +141,19 @@ function buildVariantUrls(host, todayFolder, userSlug, meta) {
 
 function getUserPathForToday(userSlug) {
   return path.join(BASE_DIR, getTodayFolder(), userSlug);
+}
+
+function readCustomerSessionMeta(userSlug) {
+  const userFolder = getUserPathForToday(userSlug);
+  const data = readCustomerJson(userFolder);
+  if (!data) return null;
+
+  return {
+    packageType: data.packageType || "self-photo",
+    passportBackgroundColor: normalizePassportColor(data.passportBackgroundColor),
+    passportSizeId: normalizePassportSizeId(data.passportSizeId),
+    themeId: normalizeThemeId(data.themeId),
+  };
 }
 
 const PACKAGES_WITH_AUTO_BG = new Set(["ai-photo", "pas-photo"]);
@@ -296,6 +315,7 @@ function listUserImages(userPath, host, todayFolder, userSlug) {
         url: variants.original,
         imageId,
         processingStatus: meta?.status ?? "pending",
+        processingError: meta?.error ?? null,
         variants,
       });
     }
@@ -422,6 +442,7 @@ app.post("/api/register", (req, res) => {
     templateId = "4R",
     packageType = "self-photo",
     passportBackgroundColor,
+    passportSizeId,
     themeId,
   } = req.body;
 
@@ -443,6 +464,10 @@ app.post("/api/register", (req, res) => {
     passportBackgroundColor:
       packageType === "pas-photo"
         ? normalizePassportColor(passportBackgroundColor)
+        : null,
+    passportSizeId:
+      packageType === "pas-photo"
+        ? normalizePassportSizeId(passportSizeId)
         : null,
     themeId:
       packageType === "ai-photo" ? normalizeThemeId(themeId) : null,
@@ -489,7 +514,20 @@ app.get("/api/print-config/:user", (req, res) => {
     name: data.name,
     packageType: data.packageType || "self-photo",
     passportBackgroundColor: normalizePassportColor(data.passportBackgroundColor),
+    passportSizeId: normalizePassportSizeId(data.passportSizeId),
     themeId: normalizeThemeId(data.themeId),
+  });
+});
+
+app.get("/api/passport-sizes", (_req, res) => {
+  res.json({
+    sizes: PASSPORT_SIZE_PRESETS.map(({ id, label, widthMm, heightMm }) => ({
+      id,
+      label,
+      widthMm,
+      heightMm,
+    })),
+    defaultSizeId: DEFAULT_PASSPORT_SIZE_ID,
   });
 });
 
@@ -537,10 +575,14 @@ app.post("/api/kiosk/trial-start", (req, res) => {
   activeSession.endsAt = endsAt;
   activeSession.phase = "trial";
 
+  const customerMeta = readCustomerSessionMeta(user);
+
   io.emit("kiosk-trial-start", {
     user,
     durationMs: durationSeconds * 1000,
     endsAt,
+    packageType: customerMeta?.packageType ?? activeSession.packageType ?? "self-photo",
+    passportSizeId: customerMeta?.passportSizeId ?? DEFAULT_PASSPORT_SIZE_ID,
   });
   emitSessionTimerUpdate();
 
@@ -569,11 +611,14 @@ app.post("/api/kiosk/main-start", (req, res) => {
   activeSession.packageType = packageType;
   activeSession.phase = "main";
 
+  const customerMeta = readCustomerSessionMeta(user);
+
   io.emit("kiosk-main-start", {
     user,
     durationMs: durationSeconds * 1000,
     endsAt,
-    packageType,
+    packageType: customerMeta?.packageType ?? packageType,
+    passportSizeId: customerMeta?.passportSizeId ?? DEFAULT_PASSPORT_SIZE_ID,
   });
   emitSessionTimerUpdate();
 
@@ -1042,7 +1087,19 @@ app.post("/api/print", async (req, res) => {
       let processedBuffer = sharp(buffer).rotate();
 
       if (isSheetPrint) {
-        processedBuffer = await processedBuffer
+        const sheetMeta = await sharp(buffer).metadata();
+        let sheetPipeline = sharp(buffer).rotate();
+
+        if (sheetMeta.width !== widthPx || sheetMeta.height !== heightPx) {
+          console.warn(
+            `[print] sheet page resized ${sheetMeta.width}x${sheetMeta.height} -> ${widthPx}x${heightPx}`
+          );
+          sheetPipeline = sheetPipeline.resize(widthPx, heightPx, {
+            fit: "fill",
+          });
+        }
+
+        processedBuffer = await sheetPipeline
           .withMetadata({ density: 300, ...(hasIcc ? { icc: iccPath } : {}) })
           .jpeg({ quality: 100 })
           .toBuffer();
@@ -1215,4 +1272,6 @@ server.listen(PORT, "0.0.0.0", () => {
   }
 
   console.log(`🚀 Server running http://localhost:${PORT}`);
+  console.log(`📁 BASE_DIR: ${BASE_DIR}`);
+  console.log(`🎭 BG removal: ${BG_REMOVAL_ENABLED ? "enabled" : "disabled"}`);
 });

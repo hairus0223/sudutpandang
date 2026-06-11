@@ -7,14 +7,17 @@ import { draw4RLayout } from "./canvas/draw4Rlayout";
 import type { PrintTemplate } from "@/lib/printTemplates";
 import { loadBrandingLogo } from "@/utils/loadBrandingLogo";
 import { useCanvasPanZoomPro } from "@/stores/useCanvasPanZoom";
+import { getPhotoSizePreset } from "@/lib/photoSizes";
 import { autoCenterTransform } from "@/utils/autoCenterPreset";
+import { autoCenterFromFaces } from "@/utils/autoCenterFromFaces";
 import { detectFaces } from "@/utils/faceDetect";
 import { drawFull4RLayout } from "./canvas/drawFull4RLayout";
 import { drawSheetLayout } from "./canvas/drawSheetLayout";
 import type { SheetRecipe } from "@/lib/sheetRecipe";
 import { countRecipeSlots } from "@/lib/sheetRecipe";
 import { getPaperPreset } from "@/lib/paperSizes";
-import { resolveSlotImage } from "@/lib/sheetSlotBinding";
+import { getSlotSizeKey, resolveSlotImage } from "@/lib/sheetSlotBinding";
+import { buildSlotTransformKey } from "@/lib/slotTransformKey";
 import { buildSheetSlotDraws } from "@/utils/sheetRender";
 import { packSheetRecipe } from "@/utils/sheetLayoutEngine";
 
@@ -394,10 +397,41 @@ function SheetCanvasPage({
         setSheetSlotAssignment,
         sheetAssignImageFilename,
         sheetSlotTransforms,
+        getSheetSlotTransform,
         setSheetSlotTransform,
+        setActiveAdjustSlotIndex,
+        setActiveAdjustMeta,
+        packageType,
     } = useGalleryStore();
 
     const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(0);
+
+    const updateActiveSlot = (
+        slotIndex: number,
+        slotImage: ImageData,
+        sizeKey: string
+    ) => {
+        setActiveSlotIndex(slotIndex);
+        setActiveAdjustSlotIndex(slotIndex);
+        setActiveAdjustMeta({
+            slotIndex,
+            filename: slotImage.filename,
+            sizeKey,
+            label: getPhotoSizePreset(sizeKey).label,
+        });
+    };
+
+    const readSlotTransform = (
+        filename: string,
+        sizeKey: string,
+        slotIndex: number
+    ) => {
+        const key = buildSlotTransformKey(filename, sizeKey, slotIndex);
+        return (
+            sheetSlotTransforms[key] ??
+            getSheetSlotTransform(filename, sizeKey, slotIndex)
+        );
+    };
 
     const paper = getPaperPreset(recipe.paperId);
     const geometry = packSheetRecipe(recipe, paper, sheetAlign);
@@ -429,24 +463,25 @@ function SheetCanvasPage({
         if (!firstSlot) return;
 
         const firstImage = resolveImageForSlot(firstSlot.index);
+        const firstSizeKey = getSlotSizeKey(firstSlot);
         activeSlotRef.current = {
             x: firstSlot.x,
             y: firstSlot.y,
             w: firstSlot.w,
             h: firstSlot.h,
         };
-        setActiveSlotIndex(0);
+        updateActiveSlot(firstSlot.index, firstImage, firstSizeKey);
 
         const cached = imageCacheRef.current.find(
             (entry) => entry.filename === firstImage.filename
         );
         if (cached) activeImageRef.current = cached.img;
 
-        transformRef.current = sheetSlotTransforms[firstSlot.index] ?? {
-            scale: 1,
-            offsetX: 0,
-            offsetY: 0,
-        };
+        transformRef.current = readSlotTransform(
+            firstImage.filename,
+            firstSizeKey,
+            firstSlot.index
+        );
     }, [
         recipe.id,
         geometry.slots,
@@ -476,16 +511,27 @@ function SheetCanvasPage({
     useEffect(() => {
         if (!canvasRef.current || activeSlotIndex === null) return;
 
+        const slot = geometry.slots[activeSlotIndex];
+        if (!slot) return;
+
+        const slotImage = resolveImageForSlot(activeSlotIndex);
+        const sizeKey = getSlotSizeKey(slot);
+
         return useCanvasPanZoomPro(
             canvasRef.current,
             () => transformRef.current,
             (patch) => {
                 transformRef.current = { ...transformRef.current, ...patch };
-                setSheetSlotTransform(activeSlotIndex, patch);
+                setSheetSlotTransform(
+                    slotImage.filename,
+                    sizeKey,
+                    activeSlotIndex,
+                    patch
+                );
             },
             getClampRect
         );
-    }, [activeSlotIndex, recipe.id]);
+    }, [activeSlotIndex, recipe.id, geometry.slots, images]);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -516,7 +562,8 @@ function SheetCanvasPage({
             }
 
             const slotImage = resolveImageForSlot(slot.index);
-            setActiveSlotIndex(slot.index);
+            const sizeKey = getSlotSizeKey(slot);
+            updateActiveSlot(slot.index, slotImage, sizeKey);
             activeSlotRef.current = {
                 x: slot.x,
                 y: slot.y,
@@ -524,11 +571,11 @@ function SheetCanvasPage({
                 h: slot.h,
             };
 
-            transformRef.current = sheetSlotTransforms[slot.index] ?? {
-                scale: 1,
-                offsetX: 0,
-                offsetY: 0,
-            };
+            transformRef.current = readSlotTransform(
+                slotImage.filename,
+                sizeKey,
+                slot.index
+            );
 
             const cached = imageCacheRef.current.find(
                 (entry) => entry.filename === slotImage.filename
@@ -550,26 +597,39 @@ function SheetCanvasPage({
 
     useEffect(() => {
         geometry.slots.forEach((slot) => {
-            if (sheetSlotTransforms[slot.index]) return;
-
             const imgData = resolveImageForSlot(slot.index);
+            const sizeKey = getSlotSizeKey(slot);
+            const transformKey = buildSlotTransformKey(
+                imgData.filename,
+                sizeKey,
+                slot.index
+            );
+
+            if (sheetSlotTransforms[transformKey]) return;
+
             const cached = imageCacheRef.current.find(
                 (entry) => entry.filename === imgData.filename
             );
             if (!cached?.img) return;
 
-            const auto = autoCenterTransform(
+            const faces = faceBoxes[imgData.filename] ?? [];
+            const auto = autoCenterFromFaces(
                 cached.img.width,
                 cached.img.height,
                 slot.w,
                 slot.h,
-                "auto"
+                faces
             );
 
             if (slot.index === activeSlotIndex) {
                 transformRef.current = auto;
             }
-            setSheetSlotTransform(slot.index, auto);
+            setSheetSlotTransform(
+                imgData.filename,
+                sizeKey,
+                slot.index,
+                auto
+            );
         });
     }, [
         images,
@@ -579,6 +639,8 @@ function SheetCanvasPage({
         sheetBindingMode,
         sheetSizeAssignments,
         sheetSlotAssignments,
+        faceBoxes,
+        packageType,
     ]);
 
     useEffect(() => {
@@ -618,6 +680,8 @@ function SheetCanvasPage({
                 slotDraws,
                 showCutLines: showCutLines && !isPrintMode,
                 activeSlotIndex: isPrintMode ? null : activeSlotIndex,
+                showPassportGuide:
+                    packageType === "pas-photo" && !isPrintMode,
             });
         });
     }, [
@@ -634,6 +698,7 @@ function SheetCanvasPage({
         sheetBindingMode,
         sheetSizeAssignments,
         sheetSlotAssignments,
+        packageType,
     ]);
 
     useEffect(() => {
@@ -662,8 +727,11 @@ function SheetCanvasPage({
 
     return (
         <div className="flex flex-col items-center gap-3">
-            <p className="text-xs text-white/60">
+            <p className="text-xs text-white/60 text-center max-w-xl">
                 {recipe.label} · {countRecipeSlots(recipe)} slot · {bindingHint}
+                {packageType === "pas-photo" && (
+                    <> · klik slot, lalu geser atau pinch untuk menyesuaikan</>
+                )}
             </p>
             <canvas
                 ref={canvasRef}

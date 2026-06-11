@@ -33,6 +33,10 @@ import {
   DEFAULT_PASSPORT_COLOR,
   PASSPORT_COLOR_OPTIONS,
 } from "@/lib/passportColors";
+import {
+  DEFAULT_PASSPORT_SIZE_ID,
+  PHOTO_SIZE_PRESETS,
+} from "@/lib/photoSizes";
 
 type Screen = "register" | "preview" | "end";
 
@@ -65,6 +69,7 @@ async function apiRegister(payload: {
   templateId: string;
   packageType: PackageType;
   passportBackgroundColor?: string;
+  passportSizeId?: string;
   themeId?: string;
 }): Promise<Customer> {
   const res = await fetch(`${API_BASE_URL}/api/register`, {
@@ -287,6 +292,7 @@ export function SessionKioskClient() {
           peopleCount,
           packageType,
           passportBackgroundColor,
+          passportSizeId,
           themeId
         ) => {
           const customer = await apiRegister({
@@ -296,6 +302,7 @@ export function SessionKioskClient() {
             templateId: "4R",
             packageType,
             passportBackgroundColor,
+            passportSizeId,
             themeId,
           });
           const s = await startSession({
@@ -572,6 +579,7 @@ type RegisterOrCheckScreenProps = {
     peopleCount: number,
     packageType: PackageType,
     passportBackgroundColor?: string,
+    passportSizeId?: string,
     themeId?: string
   ) => Promise<void>;
   onCheckByName: (name: string) => Promise<void>;
@@ -590,7 +598,13 @@ function RegisterOrCheckScreen({
   const [packageType, setPackageType] = React.useState<PackageType>("self-photo");
   const [passportBackgroundColor, setPassportBackgroundColor] =
     React.useState<string>(DEFAULT_PASSPORT_COLOR);
+  const [passportSizeId, setPassportSizeId] =
+    React.useState<string>(DEFAULT_PASSPORT_SIZE_ID);
   const [themeId, setThemeId] = React.useState<string>(DEFAULT_THEME_ID);
+
+  const passportSizeOptions = PHOTO_SIZE_PRESETS.filter((preset) =>
+    ["2x3", "3x4", "4x6"].includes(preset.id)
+  );
 
   const selfPhotoMinutes = packageDurations["self-photo"];
   const pasPhotoMinutes = packageDurations["pas-photo"];
@@ -647,6 +661,7 @@ function RegisterOrCheckScreen({
                     Math.max(1, Math.min(8, peopleCount)),
                     packageType,
                     packageType === "pas-photo" ? passportBackgroundColor : undefined,
+                    packageType === "pas-photo" ? passportSizeId : undefined,
                     packageType === "ai-photo" ? themeId : undefined
                   );
                 } catch {
@@ -723,32 +738,62 @@ function RegisterOrCheckScreen({
                 </div>
               </div>
               {packageType === "pas-photo" && (
-                <div className="space-y-2">
-                  <label className="text-xs tracking-[0.22em] text-white/60">
-                    WARNA LATAR PAS FOTO
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {PASSPORT_COLOR_OPTIONS.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => setPassportBackgroundColor(option.value)}
-                        className={cn(
-                          "flex flex-col items-center gap-2 rounded-lg border px-2 py-3 text-xs transition",
-                          passportBackgroundColor === option.value
-                            ? "border-white bg-white/10 text-white"
-                            : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
-                        )}
-                      >
-                        <span
-                          className="h-8 w-8 rounded-full border border-white/30"
-                          style={{ backgroundColor: option.value }}
-                        />
-                        {option.label}
-                      </button>
-                    ))}
+                <>
+                  <div className="space-y-2">
+                    <label className="text-xs tracking-[0.22em] text-white/60">
+                      UKURAN PAS FOTO
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {passportSizeOptions.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => setPassportSizeId(option.id)}
+                          className={cn(
+                            "flex flex-col items-center gap-2 rounded-lg border px-2 py-3 text-xs transition",
+                            passportSizeId === option.id
+                              ? "border-white bg-white/10 text-white"
+                              : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
+                          )}
+                        >
+                          <span
+                            className="w-8 rounded-sm border border-white/30 bg-white/10"
+                            style={{
+                              aspectRatio: `${option.widthMm} / ${option.heightMm}`,
+                            }}
+                          />
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                  <div className="space-y-2">
+                    <label className="text-xs tracking-[0.22em] text-white/60">
+                      WARNA LATAR PAS FOTO
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {PASSPORT_COLOR_OPTIONS.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => setPassportBackgroundColor(option.value)}
+                          className={cn(
+                            "flex flex-col items-center gap-2 rounded-lg border px-2 py-3 text-xs transition",
+                            passportBackgroundColor === option.value
+                              ? "border-white bg-white/10 text-white"
+                              : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
+                          )}
+                        >
+                          <span
+                            className="h-8 w-8 rounded-full border border-white/30"
+                            style={{ backgroundColor: option.value }}
+                          />
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
               )}
               {packageType === "ai-photo" && (
                 <div className="space-y-2">

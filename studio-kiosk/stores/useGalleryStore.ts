@@ -7,6 +7,11 @@ import type { GalleryImageData, PackageType } from "@/lib/imageTypes";
 import { FaceBox } from "@/utils/faceDetect";
 import type { SheetBindingMode } from "@/lib/sheetSlotBinding";
 import type { SheetGridAlign } from "@/utils/sheetLayoutEngine";
+import { buildSlotTransformKey } from "@/lib/slotTransformKey";
+import {
+  loadSheetSlotTransforms,
+  saveSheetSlotTransforms,
+} from "@/lib/transformPersistence";
 import { create } from "zustand";
 
 /* ================= TYPES ================= */
@@ -40,8 +45,10 @@ type GalleryStore = {
     selectedForPrint: string[];
     allowedPrint: number;
     packageType: PackageType;
+    galleryUser: string | null;
 
     setImages: (images: ImageData[]) => void;
+    setGalleryUser: (user: string | null) => void;
     setAllowedPrint: (n: number) => void;
     setPackageType: (packageType: PackageType) => void;
     togglePrint: (filename: string) => void;
@@ -71,11 +78,41 @@ type GalleryStore = {
     setSheetSlotAssignment: (slotIndex: number, filename: string) => void;
     sheetAssignImageFilename: string | null;
     setSheetAssignImageFilename: (filename: string | null) => void;
-    sheetSlotTransforms: Record<number, PhotoTransform>;
+    sheetSlotTransforms: Record<string, PhotoTransform>;
+    activeAdjustSlotIndex: number | null;
+    activeAdjustMeta: {
+        slotIndex: number;
+        filename: string;
+        sizeKey: string;
+        label: string;
+    } | null;
+    setActiveAdjustSlotIndex: (slotIndex: number | null) => void;
+    setActiveAdjustMeta: (
+        meta: {
+            slotIndex: number;
+            filename: string;
+            sizeKey: string;
+            label: string;
+        } | null
+    ) => void;
+    getSheetSlotTransform: (
+        filename: string,
+        sizeKey: string,
+        slotIndex: number
+    ) => PhotoTransform;
     setSheetSlotTransform: (
+        filename: string,
+        sizeKey: string,
         slotIndex: number,
         patch: Partial<PhotoTransform>
     ) => void;
+    resetSheetSlotTransform: (
+        filename: string,
+        sizeKey: string,
+        slotIndex: number
+    ) => void;
+    loadPersistedSheetTransforms: (user: string) => void;
+    persistSheetTransforms: () => void;
 
     photoTransforms: Record<string, PhotoTransform>;
     setPhotoTransform: (
@@ -94,8 +131,10 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
     selectedForPrint: [],
     allowedPrint: 0,
     packageType: "self-photo",
+    galleryUser: null,
 
     setImages: (images) => set({ images }),
+    setGalleryUser: (galleryUser) => set({ galleryUser }),
     setAllowedPrint: (n) => set({ allowedPrint: n }),
     setPackageType: (packageType) => set({ packageType }),
 
@@ -124,6 +163,10 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
             selectedForPrint: [],
             allowedPrint: 0,
             packageType: "self-photo",
+            galleryUser: null,
+            sheetSlotTransforms: {},
+            activeAdjustSlotIndex: null,
+            activeAdjustMeta: null,
         }),
 
     printTemplate:
@@ -168,22 +211,70 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
     setSheetAssignImageFilename: (sheetAssignImageFilename) =>
         set({ sheetAssignImageFilename }),
     sheetSlotTransforms: {},
-    setSheetSlotTransform: (slotIndex, patch) =>
+    activeAdjustSlotIndex: null,
+    activeAdjustMeta: null,
+    setActiveAdjustSlotIndex: (activeAdjustSlotIndex) =>
+        set({ activeAdjustSlotIndex }),
+    setActiveAdjustMeta: (activeAdjustMeta) => set({ activeAdjustMeta }),
+
+    getSheetSlotTransform: (filename, sizeKey, slotIndex) => {
+        const key = buildSlotTransformKey(filename, sizeKey, slotIndex);
+        return (
+            get().sheetSlotTransforms[key] ?? {
+                scale: 1,
+                offsetX: 0,
+                offsetY: 0,
+                filter: "none",
+            }
+        );
+    },
+
+    setSheetSlotTransform: (filename, sizeKey, slotIndex, patch) =>
         set((state) => {
-            const prev: PhotoTransform = state.sheetSlotTransforms[slotIndex] ?? {
+            const key = buildSlotTransformKey(filename, sizeKey, slotIndex);
+            const prev: PhotoTransform = state.sheetSlotTransforms[key] ?? {
                 scale: 1,
                 offsetX: 0,
                 offsetY: 0,
                 filter: "none",
             };
 
-            return {
-                sheetSlotTransforms: {
-                    ...state.sheetSlotTransforms,
-                    [slotIndex]: { ...prev, ...patch },
-                },
+            const nextTransforms = {
+                ...state.sheetSlotTransforms,
+                [key]: { ...prev, ...patch },
             };
+
+            if (state.galleryUser) {
+                saveSheetSlotTransforms(state.galleryUser, nextTransforms);
+            }
+
+            return { sheetSlotTransforms: nextTransforms };
         }),
+
+    resetSheetSlotTransform: (filename, sizeKey, slotIndex) =>
+        set((state) => {
+            const key = buildSlotTransformKey(filename, sizeKey, slotIndex);
+            const nextTransforms = { ...state.sheetSlotTransforms };
+            delete nextTransforms[key];
+
+            if (state.galleryUser) {
+                saveSheetSlotTransforms(state.galleryUser, nextTransforms);
+            }
+
+            return { sheetSlotTransforms: nextTransforms };
+        }),
+
+    loadPersistedSheetTransforms: (user) =>
+        set({
+            galleryUser: user,
+            sheetSlotTransforms: loadSheetSlotTransforms(user),
+        }),
+
+    persistSheetTransforms: () => {
+        const { galleryUser, sheetSlotTransforms } = get();
+        if (!galleryUser) return;
+        saveSheetSlotTransforms(galleryUser, sheetSlotTransforms);
+    },
 
     photoTransforms: {},
 

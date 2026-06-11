@@ -1,7 +1,8 @@
 import type { SheetSlotDraw } from "@/components/print/canvas/drawSheetLayout";
 import type { ImageData, PhotoTransform } from "@/stores/useGalleryStore";
+import { buildSlotTransformKey } from "@/lib/slotTransformKey";
 import type { SheetBindingMode } from "@/lib/sheetSlotBinding";
-import { resolveSlotImage } from "@/lib/sheetSlotBinding";
+import { getSlotSizeKey, resolveSlotImage } from "@/lib/sheetSlotBinding";
 import type { FaceBox } from "@/utils/faceDetect";
 import type { SheetLayoutGeometry } from "@/utils/sheetLayoutEngine";
 
@@ -23,7 +24,7 @@ export function buildSheetSlotDraws({
   sizeAssignments: Record<string, string>;
   slotAssignments: Record<number, string>;
   photoTransforms: Record<string, PhotoTransform>;
-  sheetSlotTransforms: Record<number, PhotoTransform>;
+  sheetSlotTransforms: Record<string, PhotoTransform>;
   faceBoxes: Record<string, FaceBox[]>;
 }): SheetSlotDraw[] {
   return geometry.slots.map((slot) => {
@@ -38,12 +39,18 @@ export function buildSheetSlotDraws({
     });
 
     const cached = loaded.find((entry) => entry.filename === imgData.filename);
+    const sizeKey = getSlotSizeKey(slot);
+    const transformKey = buildSlotTransformKey(
+      imgData.filename,
+      sizeKey,
+      slot.index
+    );
 
     return {
       image: cached?.img as HTMLImageElement,
       transform: {
         ...photoTransforms[imgData.filename],
-        ...sheetSlotTransforms[slot.index],
+        ...sheetSlotTransforms[transformKey],
       },
       faceBoxes: faceBoxes[imgData.filename] ?? [],
     };

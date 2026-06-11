@@ -76,8 +76,8 @@ export function getPaperDimensionsPx(paper: PaperPreset) {
 
 export function getPhotoDimensionsPx(photo: PhotoSizePreset, dpi: number) {
   return {
-    width: inchToPx(photo.widthInch, dpi),
-    height: inchToPx(photo.heightInch, dpi),
+    width: mmToPx(photo.widthMm, dpi),
+    height: mmToPx(photo.heightMm, dpi),
   };
 }
 

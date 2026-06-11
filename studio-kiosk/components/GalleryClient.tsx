@@ -14,6 +14,7 @@ import { ScrollToTop } from "@/components/ui/ScrollToTop";
 import { API_BASE_URL } from "@/lib/env";
 import { resolveImageUrl } from "@/lib/resolveImageUrl";
 import { PRINT_TEMPLATES } from "@/lib/printTemplates";
+import { configurePasPhotoPrintDefaults } from "@/lib/passportPrint";
 import { ArrowLeft } from "lucide-react";
 
 export default function GalleryClient() {
@@ -31,6 +32,9 @@ export default function GalleryClient() {
     setAllowedPrint,
     setPrintTemplate,
     setPackageType,
+    setPrintMode,
+    setSheetRecipe,
+    loadPersistedSheetTransforms,
     packageType,
   } = useGalleryStore();
 
@@ -47,6 +51,11 @@ export default function GalleryClient() {
   useEffect(() => {
     void refreshGallery();
   }, [refreshGallery]);
+
+  useEffect(() => {
+    if (!user) return;
+    loadPersistedSheetTransforms(user);
+  }, [user, loadPersistedSheetTransforms]);
 
   useNewPhotoSocket({
     user,
@@ -71,18 +80,29 @@ export default function GalleryClient() {
       .then((r) => r.json())
       .then((d) => {
         setAllowedPrint(d.allowedPrint);
-        if (d.packageType) {
-          setPackageType(d.packageType);
-        }
-        const tpl = PRINT_TEMPLATES.find(
-            (t) => t.id === d.templateId
-        );
+        const resolvedPackageType = d.packageType || "self-photo";
+        setPackageType(resolvedPackageType);
 
+        configurePasPhotoPrintDefaults({
+          packageType: resolvedPackageType,
+          passportSizeId: d.passportSizeId,
+          setPrintMode,
+          setSheetRecipe,
+        });
+
+        const tpl = PRINT_TEMPLATES.find((t) => t.id === d.templateId);
         if (tpl) {
-            setPrintTemplate(tpl);
+          setPrintTemplate(tpl);
         }
       });
-  }, [user, setAllowedPrint, setPackageType, setPrintTemplate]);
+  }, [
+    user,
+    setAllowedPrint,
+    setPackageType,
+    setPrintTemplate,
+    setPrintMode,
+    setSheetRecipe,
+  ]);
 
   const handleRemoveBackground = useCallback(
     async (imageId: string) => {
@@ -137,6 +157,7 @@ export default function GalleryClient() {
             src={resolveImageUrl(img, packageType, "gallery")}
             filename={img.filename}
             processingStatus={img.processingStatus}
+            processingError={img.processingError}
             onRemoveBackground={
               img.imageId
                 ? () => void handleRemoveBackground(img.imageId!)
@@ -159,7 +180,11 @@ export default function GalleryClient() {
         onChange={setActiveIndex}
       />
 
-      <BottomPrintBar onContinue={() => router.push("/print")} />
+      <BottomPrintBar
+        onContinue={() =>
+          router.push(`/print?user=${encodeURIComponent(user)}`)
+        }
+      />
       <ScrollToTop />
     </main>
   );

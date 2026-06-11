@@ -29,6 +29,7 @@ export function App() {
   const [lastImageUrl, setLastImageUrl] = useState(null);
   const [lastImageProcessing, setLastImageProcessing] = useState(false);
   const [packageType, setPackageType] = useState("self-photo");
+  const [passportSizeId, setPassportSizeId] = useState("3x4");
 
   const sessionUserRef = useRef(sessionUser);
   const packageTypeRef = useRef(packageType);
@@ -69,12 +70,14 @@ export function App() {
       transports: ["websocket"],
     });
 
-    socket.on("kiosk-trial-start", ({ user, endsAt }) => {
+    socket.on("kiosk-trial-start", ({ user, endsAt, packageType: pkg, passportSizeId: sizeId }) => {
       setSessionUser(user);
       setScreen(Screen.TRIAL);
       setCaptureCount(0);
       setLastImageUrl(null);
       setLastImageProcessing(false);
+      if (pkg) setPackageType(pkg);
+      if (sizeId) setPassportSizeId(sizeId);
       sessionTimer.startWithEndsAt(endsAt);
       startCameraPreview();
     });
@@ -87,13 +90,14 @@ export function App() {
       }
     });
 
-    socket.on("kiosk-main-start", ({ user, endsAt, packageType: pkg }) => {
+    socket.on("kiosk-main-start", ({ user, endsAt, packageType: pkg, passportSizeId: sizeId }) => {
       setSessionUser(user);
       setScreen(Screen.MAIN);
       setCaptureCount(0);
       setLastImageUrl(null);
       setLastImageProcessing(false);
       setPackageType(pkg || "self-photo");
+      if (sizeId) setPassportSizeId(sizeId);
       sessionTimer.startWithEndsAt(endsAt);
       startCameraPreview();
     });
@@ -271,6 +275,12 @@ export function App() {
     const phaseLabel = screen === Screen.TRIAL ? "Trial Session:" : "Halo,";
     const isPasPhoto = packageType === "pas-photo";
     const isAiPhoto = packageType === "ai-photo";
+    const passportAspect =
+      passportSizeId === "2x3"
+        ? "2 / 3"
+        : passportSizeId === "4x6"
+          ? "4 / 6"
+          : "3 / 4";
     return (
       <div className="screen screen--preview">
         <div className="preview-wrapper">
@@ -294,7 +304,10 @@ export function App() {
               />
               {isPasPhoto && (
                 <div className="pas-photo-frame">
-                  <div className="pas-photo-inner" />
+                  <div
+                    className="pas-photo-inner"
+                    style={{ aspectRatio: passportAspect }}
+                  />
                 </div>
               )}
             </div>

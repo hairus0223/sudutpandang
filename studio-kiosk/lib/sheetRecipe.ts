@@ -101,7 +101,7 @@ export function recipeFromUniformLayout(layout: SheetLayoutPreset): SheetRecipe 
 }
 
 export function createDefaultSheetRecipe(): SheetRecipe {
-  return recipeFromUniformLayout(getSheetLayoutPreset("A4_2x3_x6"));
+  return recipeFromUniformLayout(getSheetLayoutPreset("A4_3x4_x8"));
 }
 
 export function createEmptyRow(): SheetRow {
@@ -118,12 +118,12 @@ export function createEmptyRow(): SheetRow {
 }
 
 export const SHEET_RECIPE_PRESETS: SheetRecipe[] = [
-  recipeFromUniformLayout(getSheetLayoutPreset("A4_2x3_x6")),
+  recipeFromUniformLayout(getSheetLayoutPreset("A4_2x3_x24")),
   recipeFromUniformLayout(getSheetLayoutPreset("A4_3x4_x8")),
-  recipeFromUniformLayout(getSheetLayoutPreset("A4_4x6_x2")),
+  recipeFromUniformLayout(getSheetLayoutPreset("A4_4x6_x8")),
   {
     id: "A4_mixed_pas",
-    label: 'A4 · Pas foto campuran (3×2×3" + 2×3×4")',
+    label: "A4 · Pas foto campuran (3×2×3 cm + 2×3×4 cm)",
     paperId: "A4",
     cutGapMm: 2,
     rowGapMm: 2,
@@ -137,7 +137,7 @@ export const SHEET_RECIPE_PRESETS: SheetRecipe[] = [
       },
     ],
   },
-  recipeFromUniformLayout(getSheetLayoutPreset("Letter_2x3_x6")),
+  recipeFromUniformLayout(getSheetLayoutPreset("Letter_2x3_x24")),
   recipeFromUniformLayout(getSheetLayoutPreset("Letter_3x4_x8")),
 ];
 
