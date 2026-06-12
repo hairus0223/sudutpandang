@@ -31,17 +31,44 @@ import {
   enqueueApplyPassportBg,
   enqueueApplyTheme,
   enqueueRemoveBackground,
+  imageProcessingQueue,
   recoverIncompletePassportJobs,
   recoverIncompleteThemeJobs,
   recoverPendingJobs,
 } from "./services/imageProcessingQueue.js";
-import { normalizeThemeId, THEME_PRESETS } from "./services/themePresets.js";
+import {
+  BG_REMOVAL_ENABLED,
+  BG_REMOVAL_PREWARM,
+  checkBackgroundRemovalHealth,
+  getRemovalModel,
+  prewarmBackgroundRemoval,
+  validateBackgroundRemovalAssets,
+} from "./services/backgroundRemoval.js";
+import { THEME_GENERATION_ENABLED } from "./services/themeGeneration.js";
+import {
+  listThemeCategoriesForApi,
+  listThemesForApi,
+  normalizeThemeId,
+  resolveDefaultThemeId,
+  validateClassicThemeAssets,
+  validateWorldCupThemeAssets,
+} from "./services/themePresets.js";
+import { getThemeSourceStats } from "./services/themeSourceStats.js";
 import {
   DEFAULT_PASSPORT_SIZE_ID,
   normalizePassportSizeId,
   PASSPORT_SIZE_PRESETS,
 } from "./services/passportSizes.js";
 import { bootstrapStudioDirs, resolveBaseDir } from "./services/studioPaths.js";
+import {
+  getPublicStudioConfig,
+  logStartupValidation,
+  validateStudioConfig,
+} from "./services/studioConfig.js";
+import {
+  checkManualProcessAllowed,
+  getProcessRateLimitConfig,
+} from "./services/processRateLimit.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -49,7 +76,6 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 const PORT = process.env.PORT || 4000;
 const PUBLIC_HOST = process.env.API_PUBLIC_HOST || `localhost:${PORT}`;
-const BG_REMOVAL_ENABLED = process.env.BG_REMOVAL_ENABLED !== "false";
 const UPLOAD_MAX_BYTES = Number(process.env.UPLOAD_MAX_BYTES) || 20 * 1024 * 1024;
 
 const upload = multer({
@@ -69,6 +95,23 @@ const upload = multer({
 // ======================
 const BASE_DIR = resolveBaseDir();
 bootstrapStudioDirs(BASE_DIR);
+
+const STUDIO_PUBLIC_CONFIG = getPublicStudioConfig({
+  baseDir: BASE_DIR,
+  publicHost: PUBLIC_HOST,
+  port: PORT,
+});
+
+const STARTUP_VALIDATION = validateStudioConfig({
+  baseDir: BASE_DIR,
+  publicHost: PUBLIC_HOST,
+  port: PORT,
+});
+
+logStartupValidation({
+  validation: STARTUP_VALIDATION,
+  config: STUDIO_PUBLIC_CONFIG,
+});
 
 // Folder INPUT dari Imaging Edge
 const CAPTURE_DIR = path.join(BASE_DIR, "capture");
@@ -153,6 +196,23 @@ function readCustomerSessionMeta(userSlug) {
     passportBackgroundColor: normalizePassportColor(data.passportBackgroundColor),
     passportSizeId: normalizePassportSizeId(data.passportSizeId),
     themeId: normalizeThemeId(data.themeId),
+  };
+}
+
+/**
+ * Package/theme fields for kiosk socket sync (customer.json is source of truth).
+ * @param {string} userSlug
+ * @param {{ packageType?: string }} [fallback]
+ */
+function buildKioskSyncFields(userSlug, fallback = {}) {
+  const customerMeta = readCustomerSessionMeta(userSlug);
+
+  return {
+    packageType:
+      customerMeta?.packageType ?? fallback.packageType ?? "self-photo",
+    passportSizeId:
+      customerMeta?.passportSizeId ?? DEFAULT_PASSPORT_SIZE_ID,
+    themeId: customerMeta?.themeId ?? null,
   };
 }
 
@@ -315,7 +375,9 @@ function listUserImages(userPath, host, todayFolder, userSlug) {
         url: variants.original,
         imageId,
         processingStatus: meta?.status ?? "pending",
+        processingPhase: meta?.processingPhase ?? null,
         processingError: meta?.error ?? null,
+        themeBackgroundSource: meta?.pipeline?.themeBackgroundSource ?? null,
         variants,
       });
     }
@@ -415,6 +477,10 @@ const PACKAGE_DURATIONS = {
 function buildSessionTimerUpdate(session) {
   if (!session) return null;
 
+  const kioskFields = buildKioskSyncFields(session.user, {
+    packageType: session.packageType,
+  });
+
   return {
     user: session.user,
     endsAt: session.endsAt,
@@ -423,6 +489,9 @@ function buildSessionTimerUpdate(session) {
       ? session.remainingMs
       : Math.max(0, session.endsAt - Date.now()),
     phase: session.phase ?? null,
+    packageType: kioskFields.packageType,
+    passportSizeId: kioskFields.passportSizeId,
+    themeId: kioskFields.themeId,
   };
 }
 
@@ -533,7 +602,69 @@ app.get("/api/passport-sizes", (_req, res) => {
 
 app.get("/api/themes", (_req, res) => {
   res.json({
-    themes: THEME_PRESETS.map(({ id, label }) => ({ id, label })),
+    defaultThemeId: resolveDefaultThemeId(),
+    themes: listThemesForApi(),
+    categories: listThemeCategoriesForApi(),
+  });
+});
+
+app.get("/api/health", async (_req, res) => {
+  const backgroundRemoval = await checkBackgroundRemovalHealth();
+  const queue = {
+    pending: imageProcessingQueue.pendingCount,
+    queued: imageProcessingQueue.queuedCount,
+    processing: imageProcessingQueue.isProcessing,
+  };
+
+  const themeSourceStats = getThemeSourceStats();
+  const ok =
+    STARTUP_VALIDATION.ok &&
+    (!BG_REMOVAL_ENABLED || backgroundRemoval.ok) &&
+    STUDIO_PUBLIC_CONFIG.bundledThemeAssetsReady;
+
+  res.status(ok ? 200 : 503).json({
+    ok,
+    uptimeSec: Math.floor(process.uptime()),
+    config: STUDIO_PUBLIC_CONFIG,
+    validation: {
+      warnings: STARTUP_VALIDATION.warnings,
+      errors: STARTUP_VALIDATION.errors,
+    },
+    backgroundRemoval,
+    themeGenerationEnabled: THEME_GENERATION_ENABLED,
+    themeSourceStats,
+    queue,
+    rateLimit: getProcessRateLimitConfig(),
+  });
+});
+
+app.get("/api/health/image-processing", async (req, res) => {
+  const deep = req.query.deep === "1" || req.query.deep === "true";
+  const backgroundRemoval = await checkBackgroundRemovalHealth({ deep });
+  const queue = {
+    pending: imageProcessingQueue.pendingCount,
+    queued: imageProcessingQueue.queuedCount,
+    processing: imageProcessingQueue.isProcessing,
+  };
+
+  const ok =
+    (!BG_REMOVAL_ENABLED || backgroundRemoval.ok) &&
+    STUDIO_PUBLIC_CONFIG.bundledThemeAssetsReady;
+
+  res.status(ok ? 200 : 503).json({
+    ok,
+    backgroundRemoval,
+    themeGenerationEnabled: THEME_GENERATION_ENABLED,
+    themeSourceStats: getThemeSourceStats(),
+    config: {
+      wc2026AssetsReady: STUDIO_PUBLIC_CONFIG.wc2026AssetsReady,
+      classicAssetsReady: STUDIO_PUBLIC_CONFIG.classicAssetsReady,
+      bundledThemeAssetsReady: STUDIO_PUBLIC_CONFIG.bundledThemeAssetsReady,
+      externalThemeApiConfigured:
+        STUDIO_PUBLIC_CONFIG.externalThemeApiConfigured,
+      themeBackgroundCache: STUDIO_PUBLIC_CONFIG.themeBackgroundCache,
+    },
+    queue,
   });
 });
 
@@ -575,14 +706,17 @@ app.post("/api/kiosk/trial-start", (req, res) => {
   activeSession.endsAt = endsAt;
   activeSession.phase = "trial";
 
-  const customerMeta = readCustomerSessionMeta(user);
+  const kioskFields = buildKioskSyncFields(user, {
+    packageType: activeSession.packageType,
+  });
 
   io.emit("kiosk-trial-start", {
     user,
     durationMs: durationSeconds * 1000,
     endsAt,
-    packageType: customerMeta?.packageType ?? activeSession.packageType ?? "self-photo",
-    passportSizeId: customerMeta?.passportSizeId ?? DEFAULT_PASSPORT_SIZE_ID,
+    packageType: kioskFields.packageType,
+    passportSizeId: kioskFields.passportSizeId,
+    themeId: kioskFields.themeId,
   });
   emitSessionTimerUpdate();
 
@@ -611,14 +745,15 @@ app.post("/api/kiosk/main-start", (req, res) => {
   activeSession.packageType = packageType;
   activeSession.phase = "main";
 
-  const customerMeta = readCustomerSessionMeta(user);
+  const kioskFields = buildKioskSyncFields(user, { packageType });
 
   io.emit("kiosk-main-start", {
     user,
     durationMs: durationSeconds * 1000,
     endsAt,
-    packageType: customerMeta?.packageType ?? packageType,
-    passportSizeId: customerMeta?.passportSizeId ?? DEFAULT_PASSPORT_SIZE_ID,
+    packageType: kioskFields.packageType,
+    passportSizeId: kioskFields.passportSizeId,
+    themeId: kioskFields.themeId,
   });
   emitSessionTimerUpdate();
 
@@ -770,8 +905,10 @@ app.get("/api/images/:user/:imageId/status", (req, res) => {
   res.json({
     imageId,
     status: meta.status,
+    processingPhase: meta.processingPhase ?? null,
     variants: buildVariantUrls(host, todayFolder, user, meta),
     error: meta.error ?? null,
+    themeBackgroundSource: meta.pipeline?.themeBackgroundSource ?? null,
   });
 });
 
@@ -873,6 +1010,17 @@ app.post("/api/images/:user/:imageId/process", (req, res) => {
     return res.status(404).json({ error: "not_found" });
   }
 
+  const rateCheck = checkManualProcessAllowed(user, () =>
+    imageProcessingQueue.countJobsForUserDir(userPath)
+  );
+
+  if (!rateCheck.allowed) {
+    return res.status(rateCheck.status).json({
+      error: rateCheck.error,
+      message: rateCheck.message,
+    });
+  }
+
   const passportColor = color ? normalizePassportColor(color) : undefined;
   const resolvedThemeId = themeId ? normalizeThemeId(themeId) : undefined;
 
@@ -882,7 +1030,10 @@ app.post("/api/images/:user/:imageId/process", (req, res) => {
       return res.status(404).json({ error: "not_found" });
     }
 
-    updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, { error: null });
+    updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, {
+      error: null,
+      processingPhase: "apply-theme",
+    });
 
     scheduleThemeGeneration({
       userFolder: userPath,
@@ -905,7 +1056,10 @@ app.post("/api/images/:user/:imageId/process", (req, res) => {
       return res.status(404).json({ error: "not_found" });
     }
 
-    updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, { error: null });
+    updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, {
+      error: null,
+      processingPhase: "apply-passport-bg",
+    });
 
     schedulePassportBackground({
       userFolder: userPath,
@@ -930,7 +1084,10 @@ app.post("/api/images/:user/:imageId/process", (req, res) => {
     }
     meta = readMeta(userPath, imageId);
   } else {
-    updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, { error: null });
+    updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, {
+      error: null,
+      processingPhase: "remove-bg",
+    });
   }
 
   scheduleBackgroundRemoval({
@@ -1169,7 +1326,10 @@ chokidar
         filePath
       );
 
-      const packageType = activeSession.packageType || "self-photo";
+      const packageType =
+        activeSession.packageType ||
+        readCustomerPackageType(userFolder) ||
+        "self-photo";
       const autoRemoveBg = shouldAutoRemoveBackground(packageType);
 
       createPendingMeta({
@@ -1217,61 +1377,103 @@ io.on("connection", (socket) => {
 // ======================
 // START SERVER
 // ======================
+validateBackgroundRemovalAssets();
+
+const wcThemeAssets = validateWorldCupThemeAssets();
+if (wcThemeAssets.missing.length > 0) {
+  console.warn(
+    `[theme] Missing WC2026 assets (${wcThemeAssets.missing.join(", ")}). Run: npm run generate:wc2026-assets — API/cache/gradient fallback until assets exist.`
+  );
+} else {
+  console.log(`[theme] WC2026 assets OK (${wcThemeAssets.dir})`);
+}
+
+const classicThemeAssets = validateClassicThemeAssets();
+if (classicThemeAssets.missing.length > 0) {
+  console.warn(
+    `[theme] Missing classic assets (${classicThemeAssets.missing.join(", ")}). Run: npm run generate:classic-assets — API/cache/gradient fallback until assets exist.`
+  );
+} else {
+  console.log(`[theme] Classic assets OK (${classicThemeAssets.dir})`);
+}
+
 server.listen(PORT, "0.0.0.0", () => {
   const todayFolder = getTodayFolder();
-  const recovered = recoverPendingJobs({
-    baseDir: BASE_DIR,
-    todayFolder,
-    onJob: ({ userDir, imageId, user }) => {
-      scheduleBackgroundRemoval({
-        userFolder: userDir,
-        userSlug: user,
-        imageId,
-        todayFolder,
-        force: true,
-      });
-    },
-  });
-
-  if (recovered > 0) {
-    console.log(`♻️ Recovered ${recovered} pending image job(s)`);
-  }
-
-  const passportRecovered = recoverIncompletePassportJobs({
-    baseDir: BASE_DIR,
-    todayFolder,
-    onJob: ({ userDir, imageId, user }) => {
-      schedulePassportBackground({
-        userFolder: userDir,
-        userSlug: user,
-        imageId,
-        todayFolder,
-      });
-    },
-  });
-
-  if (passportRecovered > 0) {
-    console.log(`♻️ Recovered ${passportRecovered} incomplete passport job(s)`);
-  }
-
-  const themeRecovered = recoverIncompleteThemeJobs({
-    baseDir: BASE_DIR,
-    todayFolder,
-    onJob: ({ userDir, imageId, user }) => {
-      scheduleThemeGeneration({
-        userFolder: userDir,
-        userSlug: user,
-        imageId,
-        todayFolder,
-      });
-    },
-  });
-
-  if (themeRecovered > 0) {
-    console.log(`♻️ Recovered ${themeRecovered} incomplete theme job(s)`);
-  }
 
   console.log(`🚀 Server running http://localhost:${PORT}`);
   console.log(`📁 BASE_DIR: ${BASE_DIR}`);
-  console.log(`🎭 BG removal: ${BG_REMOVAL_ENABLED ? "enabled" : "disabled"}`);
+  console.log(`🌐 Public host: ${PUBLIC_HOST}`);
+  console.log(
+    `🎭 BG removal: ${BG_REMOVAL_ENABLED ? "enabled" : "disabled"} (model=${getRemovalModel()})`
+  );
+  console.log(`🎨 Default theme: ${resolveDefaultThemeId()}`);
+  console.log(
+    `📊 Image queue: pending=${imageProcessingQueue.pendingCount} (rate limit ${getProcessRateLimitConfig().maxJobsPerUser}/user)`
+  );
+  console.log(`❤️  Health: GET /api/health · GET /api/health/image-processing`);
+
+  if (BG_REMOVAL_PREWARM) {
+    void prewarmBackgroundRemoval();
+  } else {
+    console.log("[bg-removal] pre-warm skipped (set BG_REMOVAL_PREWARM=true to enable)");
+  }
+
+  if (process.platform === "win32" && BG_REMOVAL_ENABLED) {
+    console.log("[bg-removal] Windows worker isolation enabled for remove-bg jobs");
+  }
+
+  // Defer job recovery so HTTP/Socket.IO accept connections first.
+  setTimeout(() => {
+    const recovered = recoverPendingJobs({
+      baseDir: BASE_DIR,
+      todayFolder,
+      onJob: ({ userDir, imageId, user }) => {
+        scheduleBackgroundRemoval({
+          userFolder: userDir,
+          userSlug: user,
+          imageId,
+          todayFolder,
+          force: true,
+        });
+      },
+    });
+
+    if (recovered > 0) {
+      console.log(`♻️ Recovered ${recovered} pending image job(s)`);
+    }
+
+    const passportRecovered = recoverIncompletePassportJobs({
+      baseDir: BASE_DIR,
+      todayFolder,
+      onJob: ({ userDir, imageId, user }) => {
+        schedulePassportBackground({
+          userFolder: userDir,
+          userSlug: user,
+          imageId,
+          todayFolder,
+        });
+      },
+    });
+
+    if (passportRecovered > 0) {
+      console.log(`♻️ Recovered ${passportRecovered} incomplete passport job(s)`);
+    }
+
+    const themeRecovered = recoverIncompleteThemeJobs({
+      baseDir: BASE_DIR,
+      todayFolder,
+      onJob: ({ userDir, imageId, user }) => {
+        scheduleThemeGeneration({
+          userFolder: userDir,
+          userSlug: user,
+          imageId,
+          todayFolder,
+        });
+      },
+    });
+
+    if (themeRecovered > 0) {
+      console.log(`♻️ Recovered ${themeRecovered} incomplete theme job(s)`);
+    }
+  }, 1500);
 });

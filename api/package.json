@@ -1,5 +1,14 @@
 {
   "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "generate:wc2026-assets": "node scripts/generate-wc2026-assets.js",
+    "generate:classic-assets": "node scripts/generate-classic-assets.js",
+    "generate:theme-assets": "node scripts/generate-theme-assets.js",
+    "validate:theme-assets": "node scripts/validate-theme-assets.js",
+    "event:preflight": "node scripts/validate-theme-assets.js --event",
+    "smoke-test": "node scripts/smoke-test.js"
+  },
   "dependencies": {
     "@imgly/background-removal-node": "^1.4.5",
     "child_process": "^1.0.2",

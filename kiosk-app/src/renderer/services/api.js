@@ -2,6 +2,10 @@ import { getApiBase } from "../config";
 
 const API_BASE = getApiBase();
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function registerCustomer(payload) {
   const res = await fetch(`${API_BASE}/api/register`, {
     method: "POST",
@@ -51,6 +55,18 @@ export function getPreviewUrl(image, packageType = "self-photo") {
   return image.url ?? null;
 }
 
+export function isAwaitingProcessedPreview(image, packageType = "self-photo") {
+  if (!image) return false;
+  if (packageType !== "ai-photo" && packageType !== "pas-photo") return false;
+
+  return (
+    image.processingStatus === "pending" ||
+    image.processingStatus === "processing"
+  );
+}
+
+export { getKioskProcessingMessage } from "../lib/processingLabels.js";
+
 export async function fetchLatestImage(userSlug) {
   const res = await fetch(`${API_BASE}/api/images/${encodeURIComponent(userSlug)}`);
   if (!res.ok) return null;
@@ -59,7 +75,62 @@ export async function fetchLatestImage(userSlug) {
   return data.images[data.images.length - 1];
 }
 
-// Optional backend-triggered capture hook (e.g. to call camera SDK/CLI)
+export async function fetchImageStatus(userSlug, imageId) {
+  const res = await fetch(
+    `${API_BASE}/api/images/${encodeURIComponent(userSlug)}/${encodeURIComponent(imageId)}/status`
+  );
+  if (!res.ok) return null;
+  return res.json();
+}
+
+/**
+ * Poll until image reaches ready/failed or timeout.
+ * @param {object} params
+ * @param {string} params.userSlug
+ * @param {string} params.imageId
+ * @param {number} [params.intervalMs]
+ * @param {number} [params.maxMs]
+ * @param {AbortSignal} [params.signal]
+ */
+export async function pollImageUntilSettled({
+  userSlug,
+  imageId,
+  intervalMs = 2000,
+  maxMs = 120000,
+  signal,
+}) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < maxMs) {
+    if (signal?.aborted) {
+      throw new Error("poll_aborted");
+    }
+
+    const status = await fetchImageStatus(userSlug, imageId);
+    if (!status) {
+      await sleep(intervalMs);
+      continue;
+    }
+
+    if (status.status === "ready" || status.status === "failed") {
+      return status;
+    }
+
+    await sleep(intervalMs);
+  }
+
+  throw new Error("poll_timeout");
+}
+
+export async function refreshLatestPreview(userSlug, packageType) {
+  const latest = await fetchLatestImage(userSlug);
+  return {
+    image: latest,
+    previewUrl: getPreviewUrl(latest, packageType),
+    isProcessing: isAwaitingProcessedPreview(latest, packageType),
+  };
+}
+
 export async function triggerBackendCapture(userSlug) {
   const res = await fetch(`${API_BASE}/api/capture`, {
     method: "POST",
@@ -70,3 +141,8 @@ export async function triggerBackendCapture(userSlug) {
   return res.json();
 }
 
+export function applyKioskSyncFields(setters, fields = {}) {
+  if (fields.packageType) setters.setPackageType(fields.packageType);
+  if (fields.passportSizeId) setters.setPassportSizeId(fields.passportSizeId);
+  if (fields.themeId) setters.setThemeId(fields.themeId);
+}

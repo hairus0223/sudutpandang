@@ -1,6 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchKioskConfig, getApiBase } from "./config";
-import { fetchLatestImage, getPreviewUrl, triggerBackendCapture } from "./services/api";
+import {
+  applyKioskSyncFields,
+  triggerBackendCapture,
+} from "./services/api";
+import { getKioskProcessingMessage } from "./lib/processingLabels";
+import { useKioskPreview } from "./hooks/useKioskPreview";
 import { useKioskAudio } from "./services/audio";
 import { useSessionTimer } from "./hooks/useSessionTimer";
 import { useCameraPreview } from "./hooks/useCameraPreview";
@@ -12,6 +17,16 @@ const Screen = {
   MAIN: "main",
   END: "end",
 };
+
+const PACKAGE_LABELS = {
+  "self-photo": "Self Photo",
+  "pas-photo": "Pas Photo",
+  "ai-photo": "AI Photo",
+};
+
+function syncKioskFields(fields, setters) {
+  applyKioskSyncFields(setters, fields);
+}
 
 export function App() {
   const { play } = useKioskAudio();
@@ -28,21 +43,50 @@ export function App() {
   const [captureCount, setCaptureCount] = useState(0);
   const [lastImageUrl, setLastImageUrl] = useState(null);
   const [lastImageProcessing, setLastImageProcessing] = useState(false);
+  const [processingError, setProcessingError] = useState(null);
   const [packageType, setPackageType] = useState("self-photo");
   const [passportSizeId, setPassportSizeId] = useState("3x4");
+  const [themeId, setThemeId] = useState(null);
+  const [themeLabels, setThemeLabels] = useState({});
+  const [latestPreviewImage, setLatestPreviewImage] = useState(null);
 
   const sessionUserRef = useRef(sessionUser);
   const packageTypeRef = useRef(packageType);
   sessionUserRef.current = sessionUser;
   packageTypeRef.current = packageType;
 
-  const { videoRef, start: startCameraPreview, stop: stopCameraPreview, ready: cameraReady } = useCameraPreview();
+  const kioskSetters = useMemo(
+    () => ({ setPackageType, setPassportSizeId, setThemeId }),
+    []
+  );
+
+  const handlePreviewUpdate = useCallback(({ previewUrl, isProcessing, failed, error, image }) => {
+    if (previewUrl) setLastImageUrl(previewUrl);
+    if (image) setLatestPreviewImage(image);
+    if (typeof isProcessing === "boolean") setLastImageProcessing(isProcessing);
+    if (failed) {
+      setProcessingError(error || "Proses foto gagal.");
+    } else if (!isProcessing) {
+      setProcessingError(null);
+    }
+  }, []);
+
+  const { refreshPreview, waitForImageProcessing, handlePhotoProcessed, cancelPoll } =
+    useKioskPreview({
+      userSlug: sessionUser,
+      packageType,
+      enabled: screen === Screen.TRIAL || screen === Screen.MAIN,
+      onPreviewUpdate: handlePreviewUpdate,
+    });
+
+  const { videoRef, start: startCameraPreview, stop: stopCameraPreview } = useCameraPreview();
 
   const sessionTimer = useSessionTimer({
     durationMs: kioskConfig.sessionDurationMinutes * 60 * 1000,
     onExpire: () => {
       play("sessionEnd");
       stopCameraPreview();
+      cancelPoll();
       setScreen(Screen.END);
       setSessionUser(null);
     },
@@ -59,53 +103,78 @@ export function App() {
     return `${m}:${s}`;
   }, [remainingMs]);
 
-  // Fetch kiosk config from API on first mount
+  const processingMessage = useMemo(
+    () =>
+      getKioskProcessingMessage(
+        packageType,
+        lastImageProcessing,
+        latestPreviewImage,
+        isReviewing
+      ),
+    [packageType, lastImageProcessing, latestPreviewImage, isReviewing]
+  );
+
+  const themeLabel = themeId ? themeLabels[themeId] ?? null : null;
+
   useEffect(() => {
     fetchKioskConfig().then(setKioskConfig).catch(() => {});
   }, []);
 
-  // Socket.IO: dengar event dari API yang dikontrol studio-kiosk
+  useEffect(() => {
+    fetch(`${getApiBase()}/api/themes`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data?.themes) return;
+        const labels = {};
+        for (const theme of data.themes) {
+          labels[theme.id] = theme.label;
+        }
+        setThemeLabels(labels);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     const socket = io(getApiBase(), {
       transports: ["websocket"],
     });
 
-    socket.on("kiosk-trial-start", ({ user, endsAt, packageType: pkg, passportSizeId: sizeId }) => {
+    socket.on("kiosk-trial-start", ({ user, endsAt, ...fields }) => {
       setSessionUser(user);
       setScreen(Screen.TRIAL);
       setCaptureCount(0);
       setLastImageUrl(null);
       setLastImageProcessing(false);
-      if (pkg) setPackageType(pkg);
-      if (sizeId) setPassportSizeId(sizeId);
+      setProcessingError(null);
+      syncKioskFields(fields, kioskSetters);
       sessionTimer.startWithEndsAt(endsAt);
       startCameraPreview();
     });
 
     socket.on("kiosk-trial-skip", ({ user }) => {
       if (!sessionUser || sessionUser === user) {
-        // Kembali ke idle menunggu sesi utama
         sessionTimer.clear();
+        cancelPoll();
         setScreen(Screen.IDLE);
       }
     });
 
-    socket.on("kiosk-main-start", ({ user, endsAt, packageType: pkg, passportSizeId: sizeId }) => {
+    socket.on("kiosk-main-start", ({ user, endsAt, ...fields }) => {
       setSessionUser(user);
       setScreen(Screen.MAIN);
       setCaptureCount(0);
       setLastImageUrl(null);
       setLastImageProcessing(false);
-      setPackageType(pkg || "self-photo");
-      if (sizeId) setPassportSizeId(sizeId);
+      setProcessingError(null);
+      syncKioskFields(fields, kioskSetters);
       sessionTimer.startWithEndsAt(endsAt);
       startCameraPreview();
     });
 
     socket.on("session-ended", () => {
-      console.log("session-ended");
       play("sessionEnd");
       stopCameraPreview();
+      cancelPoll();
       sessionTimer.clear();
       setScreen(Screen.END);
       setSessionUser(null);
@@ -115,6 +184,11 @@ export function App() {
       if (sessionLocked || !timer) return;
 
       setSessionUser(timer.user);
+      syncKioskFields(timer, kioskSetters);
+      if (activeSession?.packageType && !timer.packageType) {
+        setPackageType(activeSession.packageType);
+      }
+
       sessionTimer.syncFromServer({
         endsAt: timer.endsAt,
         pausedAt: timer.pausedAt,
@@ -126,32 +200,33 @@ export function App() {
         startCameraPreview();
       } else if (timer.phase === "main") {
         setScreen(Screen.MAIN);
-        if (activeSession?.packageType) {
-          setPackageType(activeSession.packageType);
+        startCameraPreview();
+      }
+    });
+
+    socket.on(
+      "session-timer-update",
+      ({ user, endsAt, pausedAt, remainingMs: remaining, phase, ...fields }) => {
+        setSessionUser(user);
+        syncKioskFields(fields, kioskSetters);
+        sessionTimer.syncFromServer({ endsAt, pausedAt, remainingMs: remaining });
+
+        if (pausedAt) return;
+
+        if (phase === "trial") {
+          setScreen(Screen.TRIAL);
+          startCameraPreview();
+        } else if (phase === "main") {
+          setScreen(Screen.MAIN);
+          startCameraPreview();
         }
-        startCameraPreview();
       }
-    });
+    );
 
-    socket.on("session-timer-update", ({ user, endsAt, pausedAt, remainingMs, phase }) => {
-      setSessionUser(user);
-      sessionTimer.syncFromServer({ endsAt, pausedAt, remainingMs });
-
-      if (pausedAt) return;
-
-      if (phase === "trial") {
-        setScreen(Screen.TRIAL);
-        startCameraPreview();
-      } else if (phase === "main") {
-        setScreen(Screen.MAIN);
-        startCameraPreview();
-      }
-    });
-
-    socket.on("session-paused", ({ remainingMs }) => {
+    socket.on("session-paused", ({ remainingMs: remaining }) => {
       sessionTimer.syncFromServer({
         pausedAt: Date.now(),
-        remainingMs,
+        remainingMs: remaining,
       });
     });
 
@@ -163,24 +238,7 @@ export function App() {
       });
     });
 
-    socket.on("photo-processed", (payload) => {
-      const currentUser = sessionUserRef.current;
-      if (!currentUser || payload.user !== currentUser) return;
-
-      if (payload.status === "ready") {
-        const previewUrl =
-          payload.themedUrl || payload.passportUrl || payload.subjectUrl;
-        if (previewUrl) {
-          setLastImageUrl(previewUrl);
-          setLastImageProcessing(false);
-        }
-        return;
-      }
-
-      if (payload.status === "failed") {
-        setLastImageProcessing(false);
-      }
-    });
+    socket.on("photo-processed", handlePhotoProcessed);
 
     return () => {
       socket.disconnect();
@@ -191,15 +249,14 @@ export function App() {
   async function handleCapture() {
     if (!sessionUser) return;
     const userSlug = sessionUser;
+    const pkg = packageTypeRef.current;
 
-    // 1) Ask backend to run camera command (if configured)
     try {
       await triggerBackendCapture(userSlug);
     } catch (e) {
       console.warn("Backend capture trigger failed or not configured", e);
     }
 
-    // 2) Optionally also call Electron IPC camera, if implemented
     if (window.kiosk?.camera) {
       await window.kiosk.camera.capture({
         userSlug,
@@ -208,15 +265,21 @@ export function App() {
     }
 
     setCaptureCount((c) => c + 1);
-    setTimeout(async () => {
-      const latest = await fetchLatestImage(userSlug);
-      const previewUrl = getPreviewUrl(latest, packageType);
-      if (previewUrl) setLastImageUrl(previewUrl);
+    setProcessingError(null);
 
-      const waitingForSubject =
-        (packageType === "ai-photo" || packageType === "pas-photo") &&
-        latest?.processingStatus !== "ready";
-      setLastImageProcessing(Boolean(waitingForSubject));
+    window.setTimeout(async () => {
+      const result = await refreshPreview();
+      const latest = result?.image;
+      const waitingForProcessed =
+        pkg === "ai-photo" || pkg === "pas-photo"
+          ? latest?.processingStatus !== "ready"
+          : false;
+
+      setLastImageProcessing(Boolean(waitingForProcessed));
+
+      if (waitingForProcessed && latest?.imageId) {
+        void waitForImageProcessing(latest.imageId);
+      }
     }, 1500);
   }
 
@@ -227,17 +290,15 @@ export function App() {
     setCaptureCountdown(total);
 
     let localCount = total;
-    const timer = setInterval(async () => {
+    const timer = window.setInterval(async () => {
       if (localCount <= 1) {
-        clearInterval(timer);
+        window.clearInterval(timer);
         play("shutter");
         await handleCapture();
         setIsCapturing(false);
         setIsReviewing(true);
-        // Tampilkan preview penuh selama 3 detik lalu kembali ke live view
-        setTimeout(() => {
+        window.setTimeout(() => {
           setIsReviewing(false);
-          // Pastikan live preview kamera aktif kembali (beberapa kamera freeze saat capture)
           startCameraPreview();
         }, 3000);
         return;
@@ -248,24 +309,15 @@ export function App() {
     }, 1000);
   }
 
-  function handleBackToIdle() {
-    stopCameraPreview();
-    sessionTimer.clear();
-    setLastImageUrl(null);
-    setLastImageProcessing(false);
-    setCaptureCount(0);
-    setScreen(Screen.IDLE);
-  }
-
-  // Screens
   if (screen === Screen.IDLE) {
     return (
       <div className="screen screen--idle">
-        <img src="/logo-light.png" height={150} />
+        <img src="/logo-light.png" height={150} alt="Sudut Pandang" />
         <div className="pill">Self Photo Session</div>
         <p className="subheadline text-center">
-          Menunggu sesi dari operator.<br/> Registrasi dan kontrol sesi
-          dilakukan dari operator kiosk.
+          Menunggu sesi dari operator.
+          <br />
+          Registrasi dan kontrol sesi dilakukan dari operator kiosk.
         </p>
       </div>
     );
@@ -281,27 +333,33 @@ export function App() {
         : passportSizeId === "4x6"
           ? "4 / 6"
           : "3 / 4";
+
     return (
       <div className="screen screen--preview">
         <div className="preview-wrapper">
           <div className="preview-header flex flex-row justify-between items-center gap-2">
-            <div className="pill">{phaseLabel} {sessionUser ?? "-"}</div>
-            {/* <div className="pill">Shots: {captureCount}</div> */}
+            <div className="pill">
+              {phaseLabel} {sessionUser ?? "-"}
+            </div>
+            <div className="flex flex-wrap gap-2 justify-end">
+              <div className="pill pill--package">{PACKAGE_LABELS[packageType] ?? packageType}</div>
+              {isAiPhoto && themeId && (
+                <div className="pill pill--theme">
+                  Tema: {themeLabel ?? "AI Photo"}
+                </div>
+              )}
+            </div>
           </div>
-          
+
           {isCapturing && (
             <div className="capture-overlay">
               <div className="capture-overlay-number">{captureCountdown}</div>
             </div>
           )}
+
           {!isReviewing && (
             <div className="preview-video-wrapper">
-              <video
-                className="preview-video"
-                ref={videoRef}
-                playsInline
-                muted
-              />
+              <video className="preview-video" ref={videoRef} playsInline muted />
               {isPasPhoto && (
                 <div className="pas-photo-frame">
                   <div
@@ -310,49 +368,75 @@ export function App() {
                   />
                 </div>
               )}
-            </div>
-          )}
-          {isReviewing && lastImageUrl && (
-            <div className="capture-overlay">
-              <img src={lastImageUrl} alt="Foto terakhir" className="preview-video" />
-              <div className="last-shot-label">
-                {isAiPhoto && lastImageProcessing
-                  ? "Menghapus background... harap tunggu sebentar"
-                  : isAiPhoto
-                    ? "Foto AI siap... sesi lanjut sebentar lagi"
-                    : isPasPhoto && lastImageProcessing
-                      ? "Memproses pas foto... harap tunggu sebentar"
-                      : "Menampilkan hasil foto... sesi lanjut sebentar lagi"}
-              </div>
-            </div>
-          )}
-          {!isReviewing && lastImageUrl && (
-            <div className="last-shot-thumb">
-              <img src={lastImageUrl} alt="Foto terakhir" />
-              <div className="last-shot-label">Foto terakhir</div>
+              {isAiPhoto && (
+                <div className="ai-photo-badge">Mode AI Photo</div>
+              )}
             </div>
           )}
 
-          <div className="preview-toolbar">
-            <div className="pill-big">
-              {remainingLabel}
+          {isReviewing && lastImageUrl && (
+            <div className="capture-overlay">
+              <img src={lastImageUrl} alt="Foto terakhir" className="preview-video" />
+              {lastImageProcessing && (
+                <div className="processing-overlay">
+                  <div className="processing-spinner" />
+                </div>
+              )}
+              <div className="last-shot-label">
+                {processingMessage ||
+                  (isAiPhoto
+                    ? "Foto AI siap"
+                    : "Menampilkan hasil foto… sesi lanjut sebentar lagi")}
+              </div>
             </div>
+          )}
+
+          {!isReviewing && lastImageUrl && (
+            <div
+              className={`last-shot-thumb${lastImageProcessing ? " last-shot-thumb--processing" : ""}`}
+            >
+              <img src={lastImageUrl} alt="Foto terakhir" />
+              {lastImageProcessing && (
+                <div className="last-shot-thumb-overlay">
+                  <div className="processing-spinner processing-spinner--sm" />
+                </div>
+              )}
+              <div className="last-shot-label">
+                {lastImageProcessing
+                  ? processingMessage || "Memproses…"
+                  : "Foto terakhir"}
+              </div>
+            </div>
+          )}
+
+          {processingError && (
+            <div className="kiosk-processing-error">{processingError}</div>
+          )}
+
+          <div className="preview-toolbar">
+            <div className="pill-big">{remainingLabel}</div>
+            <button
+              type="button"
+              className="primary-button preview-capture-button"
+              onClick={startCaptureCountdown}
+              disabled={isCapturing || isReviewing || !sessionUser}
+            >
+              Ambil Foto
+            </button>
           </div>
         </div>
       </div>
     );
   }
 
-  // END screen
   return (
     <div className="screen screen--idle">
       <div className="headline">Terima kasih</div>
       <p className="subheadline">
-        Foto Anda sedang diproses.<br/> Silakan hubungi tim studio bila ingin
-        melihat atau mencetak lebih banyak.
+        Foto Anda sedang diproses.
+        <br />
+        Silakan hubungi tim studio bila ingin melihat atau mencetak lebih banyak.
       </p>
-      {/* <Button onClick={handleBackToIdle}>Kembali ke layar awal</Button> */}
     </div>
   );
 }
-

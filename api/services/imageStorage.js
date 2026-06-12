@@ -135,6 +135,7 @@ export function createPendingMeta({
     imageId,
     sourceFilename,
     status,
+    processingPhase: status === PROCESSING_STATUS.PENDING ? "remove-bg" : null,
     operations: [],
     createdAt: new Date().toISOString(),
     processedAt: null,
@@ -223,6 +224,16 @@ export function writeSubjectPng(userDir, imageId, buffer) {
  * @param {string} imageId
  * @param {'passport' | 'theme' | null} [awaitNextStep]
  */
+/**
+ * @param {'passport' | 'theme' | null} awaitNextStep
+ * @returns {'apply-passport-bg' | 'apply-theme' | null}
+ */
+function resolveProcessingPhase(awaitNextStep) {
+  if (awaitNextStep === "passport") return "apply-passport-bg";
+  if (awaitNextStep === "theme") return "apply-theme";
+  return null;
+}
+
 export function updateAfterRemoveBg(userDir, imageId, awaitNextStep = null) {
   const existing = readMeta(userDir, imageId) || { imageId, variants: {} };
   const operations = Array.isArray(existing.operations) ? [...existing.operations] : [];
@@ -246,6 +257,9 @@ export function updateAfterRemoveBg(userDir, imageId, awaitNextStep = null) {
     status,
     operations,
     variants,
+    processingPhase: status === PROCESSING_STATUS.PROCESSING
+      ? resolveProcessingPhase(awaitNextStep)
+      : null,
     processedAt: awaitNextStep ? null : new Date().toISOString(),
     error: null,
   };
@@ -306,8 +320,9 @@ export function updateAfterPassportBg(
  * @param {string} userDir
  * @param {string} imageId
  * @param {string} themeId
+ * @param {{ themeBackgroundSource?: string }} [options]
  */
-export function updateAfterTheme(userDir, imageId, themeId) {
+export function updateAfterTheme(userDir, imageId, themeId, options = {}) {
   const existing = readMeta(userDir, imageId) || { imageId, variants: {} };
   const operations = Array.isArray(existing.operations) ? [...existing.operations] : [];
 
@@ -325,6 +340,10 @@ export function updateAfterTheme(userDir, imageId, themeId) {
     themeId,
   };
 
+  if (options.themeBackgroundSource) {
+    pipeline.themeBackgroundSource = options.themeBackgroundSource;
+  }
+
   const updated = {
     ...existing,
     imageId,
@@ -332,6 +351,7 @@ export function updateAfterTheme(userDir, imageId, themeId) {
     operations,
     variants,
     pipeline,
+    processingPhase: null,
     processedAt: new Date().toISOString(),
     error: null,
   };

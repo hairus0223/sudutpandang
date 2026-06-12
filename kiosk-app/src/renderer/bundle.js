@@ -1096,11 +1096,11 @@
             var dispatcher = resolveDispatcher();
             return dispatcher.useReducer(reducer, initialArg, init);
           }
-          function useRef4(initialValue) {
+          function useRef5(initialValue) {
             var dispatcher = resolveDispatcher();
             return dispatcher.useRef(initialValue);
           }
-          function useEffect3(create, deps) {
+          function useEffect4(create, deps) {
             var dispatcher = resolveDispatcher();
             return dispatcher.useEffect(create, deps);
           }
@@ -1112,7 +1112,7 @@
             var dispatcher = resolveDispatcher();
             return dispatcher.useLayoutEffect(create, deps);
           }
-          function useCallback3(callback, deps) {
+          function useCallback5(callback, deps) {
             var dispatcher = resolveDispatcher();
             return dispatcher.useCallback(callback, deps);
           }
@@ -1879,18 +1879,18 @@
           exports.memo = memo;
           exports.startTransition = startTransition;
           exports.unstable_act = act;
-          exports.useCallback = useCallback3;
+          exports.useCallback = useCallback5;
           exports.useContext = useContext;
           exports.useDebugValue = useDebugValue;
           exports.useDeferredValue = useDeferredValue;
-          exports.useEffect = useEffect3;
+          exports.useEffect = useEffect4;
           exports.useId = useId;
           exports.useImperativeHandle = useImperativeHandle;
           exports.useInsertionEffect = useInsertionEffect;
           exports.useLayoutEffect = useLayoutEffect;
           exports.useMemo = useMemo3;
           exports.useReducer = useReducer;
-          exports.useRef = useRef4;
+          exports.useRef = useRef5;
           exports.useState = useState4;
           exports.useSyncExternalStore = useSyncExternalStore;
           exports.useTransition = useTransition;
@@ -24491,11 +24491,11 @@
   });
 
   // src/renderer/main.jsx
-  var import_react5 = __toESM(require_react());
+  var import_react6 = __toESM(require_react());
   var import_client = __toESM(require_client());
 
   // src/renderer/App.jsx
-  var import_react4 = __toESM(require_react());
+  var import_react5 = __toESM(require_react());
 
   // src/renderer/config.js
   var DEFAULT_API_BASE = "http://localhost:4000";
@@ -24558,15 +24558,67 @@
     }
   }
 
+  // src/renderer/lib/processingLabels.js
+  function inferProcessingPhase(image, packageType) {
+    if (!image) return "remove-bg";
+    if (image.processingPhase) return image.processingPhase;
+    if (image.variants?.subject) {
+      if (packageType === "ai-photo" && !image.variants?.themed) {
+        return "apply-theme";
+      }
+      if (packageType === "pas-photo" && !image.variants?.passport) {
+        return "apply-passport-bg";
+      }
+    }
+    return "remove-bg";
+  }
+  function getKioskProcessingMessage(packageType, isProcessing, image, isReviewing = false) {
+    if (!isProcessing) {
+      if (packageType === "ai-photo" && isReviewing) {
+        return "Foto AI siap";
+      }
+      return null;
+    }
+    const phase = inferProcessingPhase(image, packageType);
+    if (phase === "apply-theme") {
+      return "Menerapkan tema AI\u2026 harap tunggu";
+    }
+    if (phase === "apply-passport-bg") {
+      return "Membuat pas foto\u2026 harap tunggu";
+    }
+    if (packageType === "ai-photo") {
+      return "Menghapus background\u2026 harap tunggu";
+    }
+    if (packageType === "pas-photo") {
+      return "Menghapus background\u2026 harap tunggu";
+    }
+    return "Memproses foto\u2026 harap tunggu";
+  }
+
   // src/renderer/services/api.js
   var API_BASE = getApiBase();
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
   function getPreviewUrl(image, packageType = "self-photo") {
     if (!image) return null;
-    const preferSubject = packageType === "ai-photo" || packageType === "pas-photo";
-    if (preferSubject && image.processingStatus === "ready" && image.variants?.subject) {
-      return image.variants.subject;
+    if (image.processingStatus === "ready") {
+      if (packageType === "pas-photo" && image.variants?.passport) {
+        return image.variants.passport;
+      }
+      if (packageType === "ai-photo" && image.variants?.themed) {
+        return image.variants.themed;
+      }
+      if ((packageType === "ai-photo" || packageType === "pas-photo") && image.variants?.subject) {
+        return image.variants.subject;
+      }
     }
     return image.url ?? null;
+  }
+  function isAwaitingProcessedPreview(image, packageType = "self-photo") {
+    if (!image) return false;
+    if (packageType !== "ai-photo" && packageType !== "pas-photo") return false;
+    return image.processingStatus === "pending" || image.processingStatus === "processing";
   }
   async function fetchLatestImage(userSlug) {
     const res = await fetch(`${API_BASE}/api/images/${encodeURIComponent(userSlug)}`);
@@ -24574,6 +24626,45 @@
     const data = await res.json();
     if (!Array.isArray(data.images) || data.images.length === 0) return null;
     return data.images[data.images.length - 1];
+  }
+  async function fetchImageStatus(userSlug, imageId) {
+    const res = await fetch(
+      `${API_BASE}/api/images/${encodeURIComponent(userSlug)}/${encodeURIComponent(imageId)}/status`
+    );
+    if (!res.ok) return null;
+    return res.json();
+  }
+  async function pollImageUntilSettled({
+    userSlug,
+    imageId,
+    intervalMs = 2e3,
+    maxMs = 12e4,
+    signal
+  }) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < maxMs) {
+      if (signal?.aborted) {
+        throw new Error("poll_aborted");
+      }
+      const status = await fetchImageStatus(userSlug, imageId);
+      if (!status) {
+        await sleep(intervalMs);
+        continue;
+      }
+      if (status.status === "ready" || status.status === "failed") {
+        return status;
+      }
+      await sleep(intervalMs);
+    }
+    throw new Error("poll_timeout");
+  }
+  async function refreshLatestPreview(userSlug, packageType) {
+    const latest = await fetchLatestImage(userSlug);
+    return {
+      image: latest,
+      previewUrl: getPreviewUrl(latest, packageType),
+      isProcessing: isAwaitingProcessedPreview(latest, packageType)
+    };
   }
   async function triggerBackendCapture(userSlug) {
     const res = await fetch(`${API_BASE}/api/capture`, {
@@ -24584,11 +24675,110 @@
     if (!res.ok) throw new Error("capture_failed");
     return res.json();
   }
+  function applyKioskSyncFields(setters, fields = {}) {
+    if (fields.packageType) setters.setPackageType(fields.packageType);
+    if (fields.passportSizeId) setters.setPassportSizeId(fields.passportSizeId);
+    if (fields.themeId) setters.setThemeId(fields.themeId);
+  }
+
+  // src/renderer/hooks/useKioskPreview.js
+  var import_react = __toESM(require_react());
+  function useKioskPreview({
+    userSlug,
+    packageType,
+    enabled,
+    onPreviewUpdate
+  }) {
+    const pollAbortRef = (0, import_react.useRef)(null);
+    const packageTypeRef = (0, import_react.useRef)(packageType);
+    packageTypeRef.current = packageType;
+    const cancelPoll = (0, import_react.useCallback)(() => {
+      pollAbortRef.current?.abort();
+      pollAbortRef.current = null;
+    }, []);
+    const refreshPreview = (0, import_react.useCallback)(async () => {
+      if (!userSlug || !enabled) return;
+      const result = await refreshLatestPreview(userSlug, packageTypeRef.current);
+      onPreviewUpdate({
+        previewUrl: result.previewUrl,
+        isProcessing: result.isProcessing,
+        image: result.image
+      });
+      return result;
+    }, [userSlug, enabled, onPreviewUpdate]);
+    const waitForImageProcessing = (0, import_react.useCallback)(
+      async (imageId) => {
+        if (!userSlug || !imageId) return;
+        cancelPoll();
+        const controller = new AbortController();
+        pollAbortRef.current = controller;
+        try {
+          const status = await pollImageUntilSettled({
+            userSlug,
+            imageId,
+            signal: controller.signal
+          });
+          const latest = await refreshLatestPreview(
+            userSlug,
+            packageTypeRef.current
+          );
+          onPreviewUpdate({
+            previewUrl: latest.previewUrl,
+            isProcessing: false,
+            image: latest.image,
+            failed: status.status === "failed",
+            error: status.error ?? null
+          });
+        } catch (err) {
+          if (err instanceof Error && err.message === "poll_aborted") {
+            return;
+          }
+          await refreshPreview();
+        } finally {
+          if (pollAbortRef.current === controller) {
+            pollAbortRef.current = null;
+          }
+        }
+      },
+      [userSlug, cancelPoll, onPreviewUpdate, refreshPreview]
+    );
+    const handlePhotoProcessed = (0, import_react.useCallback)(
+      (payload) => {
+        if (!userSlug || payload.user !== userSlug) return;
+        cancelPoll();
+        if (payload.status === "ready") {
+          const previewUrl = payload.themedUrl || payload.passportUrl || payload.subjectUrl;
+          onPreviewUpdate({
+            previewUrl: previewUrl ?? null,
+            isProcessing: false,
+            failed: false,
+            error: null
+          });
+          return;
+        }
+        if (payload.status === "failed") {
+          onPreviewUpdate({
+            isProcessing: false,
+            failed: true,
+            error: payload.error ?? "Proses foto gagal."
+          });
+        }
+      },
+      [userSlug, cancelPoll, onPreviewUpdate]
+    );
+    (0, import_react.useEffect)(() => cancelPoll, [cancelPoll]);
+    return {
+      refreshPreview,
+      waitForImageProcessing,
+      handlePhotoProcessed,
+      cancelPoll
+    };
+  }
 
   // src/renderer/services/audio.js
-  var import_react = __toESM(require_react());
+  var import_react2 = __toESM(require_react());
   function useKioskAudio() {
-    const sounds = (0, import_react.useMemo)(
+    const sounds = (0, import_react2.useMemo)(
       () => ({
         welcome: new Audio("/audio/welcome-id.mp3"),
         beep: new Audio("/audio/beep-id.mp3"),
@@ -24598,7 +24788,7 @@
       }),
       []
     );
-    const play = (0, import_react.useCallback)(
+    const play = (0, import_react2.useCallback)(
       (key) => {
         const audio = sounds[key];
         console.log("test audio", audio);
@@ -24616,14 +24806,14 @@
   }
 
   // src/renderer/hooks/useSessionTimer.js
-  var import_react2 = __toESM(require_react());
+  var import_react3 = __toESM(require_react());
   function useSessionTimer({ durationMs, onExpire, onWarn }) {
-    const [endsAt, setEndsAt] = (0, import_react2.useState)(null);
-    const [remainingMs, setRemainingMs] = (0, import_react2.useState)(durationMs);
-    const [isPaused, setIsPaused] = (0, import_react2.useState)(false);
-    const timerRef = (0, import_react2.useRef)(null);
-    const warnedRef = (0, import_react2.useRef)(false);
-    (0, import_react2.useEffect)(() => {
+    const [endsAt, setEndsAt] = (0, import_react3.useState)(null);
+    const [remainingMs, setRemainingMs] = (0, import_react3.useState)(durationMs);
+    const [isPaused, setIsPaused] = (0, import_react3.useState)(false);
+    const timerRef = (0, import_react3.useRef)(null);
+    const warnedRef = (0, import_react3.useRef)(false);
+    (0, import_react3.useEffect)(() => {
       if (!endsAt || isPaused) return;
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = setInterval(() => {
@@ -24702,12 +24892,12 @@
   }
 
   // src/renderer/hooks/useCameraPreview.js
-  var import_react3 = __toESM(require_react());
+  var import_react4 = __toESM(require_react());
   function useCameraPreview() {
-    const videoRef = (0, import_react3.useRef)(null);
-    const streamRef = (0, import_react3.useRef)(null);
-    const [ready, setReady] = (0, import_react3.useState)(false);
-    const start = (0, import_react3.useCallback)(async () => {
+    const videoRef = (0, import_react4.useRef)(null);
+    const streamRef = (0, import_react4.useRef)(null);
+    const [ready, setReady] = (0, import_react4.useState)(false);
+    const start = (0, import_react4.useCallback)(async () => {
       try {
         const baseConstraints = { width: { ideal: 1920 }, height: { ideal: 1080 } };
         let constraints = { video: baseConstraints };
@@ -24740,7 +24930,7 @@
         setReady(false);
       }
     }, []);
-    const stop = (0, import_react3.useCallback)(() => {
+    const stop = (0, import_react4.useCallback)(() => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
@@ -28152,81 +28342,140 @@
     MAIN: "main",
     END: "end"
   };
+  var PACKAGE_LABELS = {
+    "self-photo": "Self Photo",
+    "pas-photo": "Pas Photo",
+    "ai-photo": "AI Photo"
+  };
+  function syncKioskFields(fields, setters) {
+    applyKioskSyncFields(setters, fields);
+  }
   function App() {
     const { play } = useKioskAudio();
-    const [kioskConfig, setKioskConfig] = (0, import_react4.useState)({
+    const [kioskConfig, setKioskConfig] = (0, import_react5.useState)({
       sessionDurationMinutes: 10,
       captureCountdownSeconds: 3
     });
-    const [screen, setScreen] = (0, import_react4.useState)(Screen.IDLE);
-    const [sessionUser, setSessionUser] = (0, import_react4.useState)(null);
-    const [captureCountdown, setCaptureCountdown] = (0, import_react4.useState)(3);
-    const [isCapturing, setIsCapturing] = (0, import_react4.useState)(false);
-    const [isReviewing, setIsReviewing] = (0, import_react4.useState)(false);
-    const [captureCount, setCaptureCount] = (0, import_react4.useState)(0);
-    const [lastImageUrl, setLastImageUrl] = (0, import_react4.useState)(null);
-    const [lastImageProcessing, setLastImageProcessing] = (0, import_react4.useState)(false);
-    const [packageType, setPackageType] = (0, import_react4.useState)("self-photo");
-    const sessionUserRef = (0, import_react4.useRef)(sessionUser);
-    const packageTypeRef = (0, import_react4.useRef)(packageType);
+    const [screen, setScreen] = (0, import_react5.useState)(Screen.IDLE);
+    const [sessionUser, setSessionUser] = (0, import_react5.useState)(null);
+    const [captureCountdown, setCaptureCountdown] = (0, import_react5.useState)(3);
+    const [isCapturing, setIsCapturing] = (0, import_react5.useState)(false);
+    const [isReviewing, setIsReviewing] = (0, import_react5.useState)(false);
+    const [captureCount, setCaptureCount] = (0, import_react5.useState)(0);
+    const [lastImageUrl, setLastImageUrl] = (0, import_react5.useState)(null);
+    const [lastImageProcessing, setLastImageProcessing] = (0, import_react5.useState)(false);
+    const [processingError, setProcessingError] = (0, import_react5.useState)(null);
+    const [packageType, setPackageType] = (0, import_react5.useState)("self-photo");
+    const [passportSizeId, setPassportSizeId] = (0, import_react5.useState)("3x4");
+    const [themeId, setThemeId] = (0, import_react5.useState)(null);
+    const [themeLabels, setThemeLabels] = (0, import_react5.useState)({});
+    const [latestPreviewImage, setLatestPreviewImage] = (0, import_react5.useState)(null);
+    const sessionUserRef = (0, import_react5.useRef)(sessionUser);
+    const packageTypeRef = (0, import_react5.useRef)(packageType);
     sessionUserRef.current = sessionUser;
     packageTypeRef.current = packageType;
-    const { videoRef, start: startCameraPreview, stop: stopCameraPreview, ready: cameraReady } = useCameraPreview();
+    const kioskSetters = (0, import_react5.useMemo)(
+      () => ({ setPackageType, setPassportSizeId, setThemeId }),
+      []
+    );
+    const handlePreviewUpdate = (0, import_react5.useCallback)(({ previewUrl, isProcessing, failed, error, image }) => {
+      if (previewUrl) setLastImageUrl(previewUrl);
+      if (image) setLatestPreviewImage(image);
+      if (typeof isProcessing === "boolean") setLastImageProcessing(isProcessing);
+      if (failed) {
+        setProcessingError(error || "Proses foto gagal.");
+      } else if (!isProcessing) {
+        setProcessingError(null);
+      }
+    }, []);
+    const { refreshPreview, waitForImageProcessing, handlePhotoProcessed, cancelPoll } = useKioskPreview({
+      userSlug: sessionUser,
+      packageType,
+      enabled: screen === Screen.TRIAL || screen === Screen.MAIN,
+      onPreviewUpdate: handlePreviewUpdate
+    });
+    const { videoRef, start: startCameraPreview, stop: stopCameraPreview } = useCameraPreview();
     const sessionTimer = useSessionTimer({
       durationMs: kioskConfig.sessionDurationMinutes * 60 * 1e3,
       onExpire: () => {
         play("sessionEnd");
         stopCameraPreview();
+        cancelPoll();
         setScreen(Screen.END);
         setSessionUser(null);
       },
       onWarn: () => play("timeWarning")
     });
     const remainingMs = sessionTimer.remainingMs;
-    const remainingLabel = (0, import_react4.useMemo)(() => {
+    const remainingLabel = (0, import_react5.useMemo)(() => {
       if (!remainingMs) return "10:00";
       const totalSeconds = Math.max(0, Math.floor(remainingMs / 1e3));
       const m = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
       const s = String(totalSeconds % 60).padStart(2, "0");
       return `${m}:${s}`;
     }, [remainingMs]);
-    (0, import_react4.useEffect)(() => {
+    const processingMessage = (0, import_react5.useMemo)(
+      () => getKioskProcessingMessage(
+        packageType,
+        lastImageProcessing,
+        latestPreviewImage,
+        isReviewing
+      ),
+      [packageType, lastImageProcessing, latestPreviewImage, isReviewing]
+    );
+    const themeLabel = themeId ? themeLabels[themeId] ?? null : null;
+    (0, import_react5.useEffect)(() => {
       fetchKioskConfig().then(setKioskConfig).catch(() => {
       });
     }, []);
-    (0, import_react4.useEffect)(() => {
+    (0, import_react5.useEffect)(() => {
+      fetch(`${getApiBase()}/api/themes`).then((res) => res.ok ? res.json() : null).then((data) => {
+        if (!data?.themes) return;
+        const labels = {};
+        for (const theme of data.themes) {
+          labels[theme.id] = theme.label;
+        }
+        setThemeLabels(labels);
+      }).catch(() => {
+      });
+    }, []);
+    (0, import_react5.useEffect)(() => {
       const socket = lookup2(getApiBase(), {
         transports: ["websocket"]
       });
-      socket.on("kiosk-trial-start", ({ user, endsAt }) => {
+      socket.on("kiosk-trial-start", ({ user, endsAt, ...fields }) => {
         setSessionUser(user);
         setScreen(Screen.TRIAL);
         setCaptureCount(0);
         setLastImageUrl(null);
         setLastImageProcessing(false);
+        setProcessingError(null);
+        syncKioskFields(fields, kioskSetters);
         sessionTimer.startWithEndsAt(endsAt);
         startCameraPreview();
       });
       socket.on("kiosk-trial-skip", ({ user }) => {
         if (!sessionUser || sessionUser === user) {
           sessionTimer.clear();
+          cancelPoll();
           setScreen(Screen.IDLE);
         }
       });
-      socket.on("kiosk-main-start", ({ user, endsAt, packageType: pkg }) => {
+      socket.on("kiosk-main-start", ({ user, endsAt, ...fields }) => {
         setSessionUser(user);
         setScreen(Screen.MAIN);
         setCaptureCount(0);
         setLastImageUrl(null);
         setLastImageProcessing(false);
-        setPackageType(pkg || "self-photo");
+        setProcessingError(null);
+        syncKioskFields(fields, kioskSetters);
         sessionTimer.startWithEndsAt(endsAt);
         startCameraPreview();
       });
       socket.on("session-ended", () => {
-        console.log("session-ended");
         play("sessionEnd");
         stopCameraPreview();
+        cancelPoll();
         sessionTimer.clear();
         setScreen(Screen.END);
         setSessionUser(null);
@@ -28234,6 +28483,10 @@
       socket.on("session-state", ({ activeSession, sessionLocked, timer }) => {
         if (sessionLocked || !timer) return;
         setSessionUser(timer.user);
+        syncKioskFields(timer, kioskSetters);
+        if (activeSession?.packageType && !timer.packageType) {
+          setPackageType(activeSession.packageType);
+        }
         sessionTimer.syncFromServer({
           endsAt: timer.endsAt,
           pausedAt: timer.pausedAt,
@@ -28244,28 +28497,29 @@
           startCameraPreview();
         } else if (timer.phase === "main") {
           setScreen(Screen.MAIN);
-          if (activeSession?.packageType) {
-            setPackageType(activeSession.packageType);
+          startCameraPreview();
+        }
+      });
+      socket.on(
+        "session-timer-update",
+        ({ user, endsAt, pausedAt, remainingMs: remaining, phase, ...fields }) => {
+          setSessionUser(user);
+          syncKioskFields(fields, kioskSetters);
+          sessionTimer.syncFromServer({ endsAt, pausedAt, remainingMs: remaining });
+          if (pausedAt) return;
+          if (phase === "trial") {
+            setScreen(Screen.TRIAL);
+            startCameraPreview();
+          } else if (phase === "main") {
+            setScreen(Screen.MAIN);
+            startCameraPreview();
           }
-          startCameraPreview();
         }
-      });
-      socket.on("session-timer-update", ({ user, endsAt, pausedAt, remainingMs: remainingMs2, phase }) => {
-        setSessionUser(user);
-        sessionTimer.syncFromServer({ endsAt, pausedAt, remainingMs: remainingMs2 });
-        if (pausedAt) return;
-        if (phase === "trial") {
-          setScreen(Screen.TRIAL);
-          startCameraPreview();
-        } else if (phase === "main") {
-          setScreen(Screen.MAIN);
-          startCameraPreview();
-        }
-      });
-      socket.on("session-paused", ({ remainingMs: remainingMs2 }) => {
+      );
+      socket.on("session-paused", ({ remainingMs: remaining }) => {
         sessionTimer.syncFromServer({
           pausedAt: Date.now(),
-          remainingMs: remainingMs2
+          remainingMs: remaining
         });
       });
       socket.on("session-resumed", (session) => {
@@ -28275,18 +28529,7 @@
           remainingMs: Math.max(0, session.endsAt - Date.now())
         });
       });
-      socket.on("photo-processed", (payload) => {
-        const currentUser = sessionUserRef.current;
-        if (!currentUser || payload.user !== currentUser) return;
-        if (payload.status === "ready" && payload.subjectUrl) {
-          setLastImageUrl(payload.subjectUrl);
-          setLastImageProcessing(false);
-          return;
-        }
-        if (payload.status === "failed") {
-          setLastImageProcessing(false);
-        }
-      });
+      socket.on("photo-processed", handlePhotoProcessed);
       return () => {
         socket.disconnect();
       };
@@ -28294,6 +28537,7 @@
     async function handleCapture() {
       if (!sessionUser) return;
       const userSlug = sessionUser;
+      const pkg = packageTypeRef.current;
       try {
         await triggerBackendCapture(userSlug);
       } catch (e) {
@@ -28306,12 +28550,15 @@
         });
       }
       setCaptureCount((c) => c + 1);
-      setTimeout(async () => {
-        const latest = await fetchLatestImage(userSlug);
-        const previewUrl = getPreviewUrl(latest, packageType);
-        if (previewUrl) setLastImageUrl(previewUrl);
-        const waitingForSubject = (packageType === "ai-photo" || packageType === "pas-photo") && latest?.processingStatus !== "ready";
-        setLastImageProcessing(Boolean(waitingForSubject));
+      setProcessingError(null);
+      window.setTimeout(async () => {
+        const result = await refreshPreview();
+        const latest = result?.image;
+        const waitingForProcessed = pkg === "ai-photo" || pkg === "pas-photo" ? latest?.processingStatus !== "ready" : false;
+        setLastImageProcessing(Boolean(waitingForProcessed));
+        if (waitingForProcessed && latest?.imageId) {
+          void waitForImageProcessing(latest.imageId);
+        }
       }, 1500);
     }
     function startCaptureCountdown() {
@@ -28320,14 +28567,14 @@
       setIsCapturing(true);
       setCaptureCountdown(total);
       let localCount = total;
-      const timer = setInterval(async () => {
+      const timer = window.setInterval(async () => {
         if (localCount <= 1) {
-          clearInterval(timer);
+          window.clearInterval(timer);
           play("shutter");
           await handleCapture();
           setIsCapturing(false);
           setIsReviewing(true);
-          setTimeout(() => {
+          window.setTimeout(() => {
             setIsReviewing(false);
             startCameraPreview();
           }, 3e3);
@@ -28338,22 +28585,14 @@
         setCaptureCountdown(localCount);
       }, 1e3);
     }
-    function handleBackToIdle() {
-      stopCameraPreview();
-      sessionTimer.clear();
-      setLastImageUrl(null);
-      setLastImageProcessing(false);
-      setCaptureCount(0);
-      setScreen(Screen.IDLE);
-    }
     if (screen === Screen.IDLE) {
       return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "screen screen--idle", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: "/logo-light.png", height: 150 }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: "/logo-light.png", height: 150, alt: "Sudut Pandang" }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pill", children: "Self Photo Session" }),
         /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "subheadline text-center", children: [
           "Menunggu sesi dari operator.",
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("br", {}),
-          " Registrasi dan kontrol sesi dilakukan dari operator kiosk."
+          "Registrasi dan kontrol sesi dilakukan dari operator kiosk."
         ] })
       ] });
     }
@@ -28361,34 +28600,64 @@
       const phaseLabel = screen === Screen.TRIAL ? "Trial Session:" : "Halo,";
       const isPasPhoto = packageType === "pas-photo";
       const isAiPhoto = packageType === "ai-photo";
+      const passportAspect = passportSizeId === "2x3" ? "2 / 3" : passportSizeId === "4x6" ? "4 / 6" : "3 / 4";
       return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "screen screen--preview", children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "preview-wrapper", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "preview-header flex flex-row justify-between items-center gap-2", children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "pill", children: [
-          phaseLabel,
-          " ",
-          sessionUser ?? "-"
-        ] }) }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "preview-header flex flex-row justify-between items-center gap-2", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "pill", children: [
+            phaseLabel,
+            " ",
+            sessionUser ?? "-"
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "flex flex-wrap gap-2 justify-end", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pill pill--package", children: PACKAGE_LABELS[packageType] ?? packageType }),
+            isAiPhoto && themeId && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "pill pill--theme", children: [
+              "Tema: ",
+              themeLabel ?? "AI Photo"
+            ] })
+          ] })
+        ] }),
         isCapturing && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-overlay", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-overlay-number", children: captureCountdown }) }),
         !isReviewing && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "preview-video-wrapper", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "video",
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("video", { className: "preview-video", ref: videoRef, playsInline: true, muted: true }),
+          isPasPhoto && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pas-photo-frame", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+            "div",
             {
-              className: "preview-video",
-              ref: videoRef,
-              playsInline: true,
-              muted: true
+              className: "pas-photo-inner",
+              style: { aspectRatio: passportAspect }
             }
-          ),
-          isPasPhoto && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pas-photo-frame", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pas-photo-inner" }) })
+          ) }),
+          isAiPhoto && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "ai-photo-badge", children: "Mode AI Photo" })
         ] }),
         isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "capture-overlay", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: lastImageUrl, alt: "Foto terakhir", className: "preview-video" }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "last-shot-label", children: isAiPhoto && lastImageProcessing ? "Menghapus background... harap tunggu sebentar" : isAiPhoto ? "Foto AI siap... sesi lanjut sebentar lagi" : isPasPhoto && lastImageProcessing ? "Memproses pas foto... harap tunggu sebentar" : "Menampilkan hasil foto... sesi lanjut sebentar lagi" })
+          lastImageProcessing && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "processing-overlay", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "processing-spinner" }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "last-shot-label", children: processingMessage || (isAiPhoto ? "Foto AI siap" : "Menampilkan hasil foto\u2026 sesi lanjut sebentar lagi") })
         ] }),
-        !isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "last-shot-thumb", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: lastImageUrl, alt: "Foto terakhir" }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "last-shot-label", children: "Foto terakhir" })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "preview-toolbar", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pill-big", children: remainingLabel }) })
+        !isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+          "div",
+          {
+            className: `last-shot-thumb${lastImageProcessing ? " last-shot-thumb--processing" : ""}`,
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: lastImageUrl, alt: "Foto terakhir" }),
+              lastImageProcessing && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "last-shot-thumb-overlay", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "processing-spinner processing-spinner--sm" }) }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "last-shot-label", children: lastImageProcessing ? processingMessage || "Memproses\u2026" : "Foto terakhir" })
+            ]
+          }
+        ),
+        processingError && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "kiosk-processing-error", children: processingError }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "preview-toolbar", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pill-big", children: remainingLabel }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+            "button",
+            {
+              type: "button",
+              className: "primary-button preview-capture-button",
+              onClick: startCaptureCountdown,
+              disabled: isCapturing || isReviewing || !sessionUser,
+              children: "Ambil Foto"
+            }
+          )
+        ] })
       ] }) });
     }
     return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "screen screen--idle", children: [
@@ -28396,7 +28665,7 @@
       /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "subheadline", children: [
         "Foto Anda sedang diproses.",
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("br", {}),
-        " Silakan hubungi tim studio bila ingin melihat atau mencetak lebih banyak."
+        "Silakan hubungi tim studio bila ingin melihat atau mencetak lebih banyak."
       ] })
     ] });
   }
@@ -28406,7 +28675,7 @@
   var container = document.getElementById("app");
   var root = (0, import_client.createRoot)(container);
   root.render(
-    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react5.default.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(App, {}) })
+    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_react6.default.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(App, {}) })
   );
 })();
 /*! Bundled license information:

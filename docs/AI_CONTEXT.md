@@ -140,6 +140,8 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 | `stores/useGalleryStore.ts` | Images, print selection, transforms, filters, template |
 | `lib/env.ts` → `API_BASE_URL` | All Next.js API URLs |
 | `lib/printTemplates.ts` | `4R`, `4R_FULL` dimensions |
+| `lib/resolvePaper.ts` + `hooks/useResolvedSheetPaper.ts` | Sheet margin override → printable area |
+| `lib/sheetAdjustSelection.ts` + `lib/sheetAdjustMeta.ts` | Multi-slot selection + batch zoom/nudge |
 | `utils/exportCanvas.ts` → `exportCanvasPrint()` | PNG export before print |
 | `stores/useCanvasPanZoom.ts` → `useCanvasPanZoomPro()` | Canvas pan/zoom |
 
@@ -163,11 +165,13 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 | Socket emits | Same file |
 | Capture watcher | chokidar on `CAPTURE_DIR` → `captures/` + `processed/` |
 | Background removal | `api/services/backgroundRemoval.js` + `imageProcessingQueue.js` |
+| Theme generation | `api/services/themeGeneration.js`, `themePresets.js`, `themeBackgrounds.js` |
+| Studio config / health | `api/services/studioConfig.js` — `GET /api/health` |
 | Print pipeline | Sharp → PDFKit → SumatraPDF |
 
 ### Package types
 
-`self-photo` (10m) · `pas-photo` (5m + frame) · `ai-photo` (remove-bg + kiosk preview)
+`self-photo` (10m) · `pas-photo` (5m + frame) · `ai-photo` (remove-bg + theme + kiosk preview)
 
 ---
 
@@ -220,7 +224,11 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 | `CAMERA_CAPTURE_COMMAND` | api | Optional shell shutter trigger |
 | `SESSION_DURATION_MINUTES` | api | Default `10` |
 | `BG_REMOVAL_ENABLED` | api | Default `true`; set `false` to disable auto remove-bg |
-| `API_PUBLIC_HOST` | api | Host for `subjectUrl` in Socket payloads |
+| `THEME_GENERATION_ENABLED` | api | Default `true`; WC2026 + classic themes |
+| `DEFAULT_THEME_ID` | api | e.g. `wc2026-stadium-night` |
+| `IMAGE_PROCESS_MIN_INTERVAL_MS` | api | Manual process rate limit (default 2000) |
+| `IMAGE_PROCESS_MAX_JOBS_PER_USER` | api | Concurrent jobs per user (default 3) |
+| `API_PUBLIC_HOST` | api | Host for image URLs in Socket payloads — **set LAN IP in production** |
 | `UPLOAD_MAX_BYTES` | api | Upload limit (default 20MB) |
 
 ### Filesystem layout
@@ -240,7 +248,7 @@ BASE_DIR/
 
 ### API surface (key endpoints)
 
-`POST /api/register` · `GET /api/customer-by-name` · `POST /api/session/*` · `POST /api/kiosk/trial-start|trial-skip|main-start` · `GET /api/images/:user` · `GET /api/images/:user/:imageId/status` · `POST /api/images/:user/:imageId/process` · `POST /api/images/:user/upload` · `GET /api/print-config/:user` · `POST /api/print` · `POST /api/capture` · `GET /api/kiosk-config` · `GET /api/headline`
+`POST /api/register` · `GET /api/customer-by-name` · `POST /api/session/*` · `POST /api/kiosk/trial-start|trial-skip|main-start` · `GET /api/images/:user` · `GET /api/images/:user/:imageId/status` · `POST /api/images/:user/:imageId/process` · `POST /api/images/:user/upload` · `GET /api/themes` · `GET /api/print-config/:user` · `POST /api/print` · `POST /api/capture` · `GET /api/kiosk-config` · `GET /api/headline` · `GET /api/health` · `GET /api/health/image-processing`
 
 ### Socket events (kiosk listens)
 
@@ -258,7 +266,7 @@ Unused in UI today: `session-paused`, `session-resumed`
 - Electron **loads localhost:5180** in dev — production packaging incomplete
 - `CameraService` in `main.js` is a **stub**
 - Kiosk config key mismatch risk: `sessionDurationMinutes` (API) vs `sessionDurationSeconds` (config.js)
-- `ai-photo` has **remove-bg only** — no theme generation yet
+- `ai-photo` runs **remove-bg + theme** (WC2026 presets + classic); gallery sandbox can re-apply themes
 - Print copies forced to `1` in api (people-based logic commented out)
 
 ---
@@ -290,9 +298,12 @@ New print template?
 
 ```bash
 cd api && node server.js                    # :4000
+cd api && npm run smoke-test                # health + themes (API must be running)
 cd studio-kiosk && npm run dev              # :5173
 cd kiosk-app && npm run dev                 # :5180 + Electron
 ```
+
+**Production:** copy `api/.env.production.example` → `api/.env`, set `API_PUBLIC_HOST` to studio LAN IP, run `npm run generate:wc2026-assets` if WC PNGs missing, set `studio-kiosk/.env.local` `NEXT_PUBLIC_API_URL` to same IP.
 
 ---
 

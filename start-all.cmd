@@ -8,12 +8,14 @@ SET PATH=%PATH%;C:\Users\khairus\AppData\Local\nvm;C:\Users\khairus\AppData\Roam
 echo.
 echo === Starting API (pm2) ===
 cd /d D:\Dev\sudutPandangV1\api
-call pm2 start server.js --name sudutpandang-api
+call pm2 delete sudutpandang-api 2>nul
+call pm2 start server.js --name sudutpandang-api --cwd D:\Dev\sudutPandangV1\api --time
 
 echo.
 echo === Starting Next.js kiosk (pm2) ===
 cd /d D:\Dev\sudutPandangV1\studio-kiosk
-call pm2 start node_modules/next/dist/bin/next --name sudutpandang -- start -p 5173 -H 0.0.0.0
+call pm2 delete sudutpandang 2>nul
+call pm2 start node_modules/next/dist/bin/next --name sudutpandang --cwd D:\Dev\sudutPandangV1\studio-kiosk --time -- start -p 5173 -H 0.0.0.0
 
 echo.
 echo === Testing and starting nginx ===
