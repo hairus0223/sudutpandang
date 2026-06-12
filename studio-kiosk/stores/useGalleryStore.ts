@@ -12,7 +12,26 @@ import {
   loadSheetSlotTransforms,
   saveSheetSlotTransforms,
 } from "@/lib/transformPersistence";
+import { getPaperPreset, type PaperMarginsMm } from "@/lib/paperSizes";
+import {
+  loadStudioPaperMargins,
+  saveStudioPaperMargins,
+} from "@/lib/paperMarginStorage";
+import { clampMarginMm, clampMargins } from "@/lib/resolvePaper";
+import {
+  nextSlotSelection,
+  pruneSlotIndices,
+  type SlotSelectionModifiers,
+} from "@/lib/sheetAdjustSelection";
+import type { SheetAdjustMeta } from "@/lib/sheetAdjustMeta";
 import { create } from "zustand";
+
+function initialSheetPaperMargins(): PaperMarginsMm {
+  return (
+    loadStudioPaperMargins() ??
+    getPaperPreset("A4").marginMm
+  );
+}
 
 /* ================= TYPES ================= */
 
@@ -68,6 +87,16 @@ type GalleryStore = {
     setSheetCopies: (copies: number) => void;
     sheetAlign: SheetGridAlign;
     setSheetAlign: (align: SheetGridAlign) => void;
+    sheetPaperMargins: PaperMarginsMm;
+    sheetMarginUniform: boolean;
+    setSheetPaperMargins: (margins: PaperMarginsMm) => void;
+    setSheetPaperMarginSide: (
+        side: keyof PaperMarginsMm,
+        valueMm: number
+    ) => void;
+    setSheetPaperMarginsUniform: (valueMm: number) => void;
+    resetSheetPaperMargins: () => void;
+    setSheetMarginUniform: (uniform: boolean) => void;
     showCutLines: boolean;
     setShowCutLines: (show: boolean) => void;
     sheetBindingMode: SheetBindingMode;
@@ -80,21 +109,24 @@ type GalleryStore = {
     setSheetAssignImageFilename: (filename: string | null) => void;
     sheetSlotTransforms: Record<string, PhotoTransform>;
     activeAdjustSlotIndex: number | null;
-    activeAdjustMeta: {
-        slotIndex: number;
-        filename: string;
-        sizeKey: string;
-        label: string;
-    } | null;
+    activeAdjustMeta: SheetAdjustMeta | null;
+    selectedAdjustSlotIndices: number[];
     setActiveAdjustSlotIndex: (slotIndex: number | null) => void;
-    setActiveAdjustMeta: (
-        meta: {
-            slotIndex: number;
-            filename: string;
-            sizeKey: string;
-            label: string;
-        } | null
+    setActiveAdjustMeta: (meta: SheetAdjustMeta | null) => void;
+    setAdjustSlotSelection: (
+        indices: number[],
+        primaryIndex: number,
+        meta: SheetAdjustMeta | null
     ) => void;
+    adjustSlotSelection: (
+        clickedIndex: number,
+        slotCount: number,
+        meta: SheetAdjustMeta | null,
+        modifiers?: SlotSelectionModifiers
+    ) => void;
+    selectAllAdjustSlots: (slotCount: number) => void;
+    clearAdjustSlotSelection: () => void;
+    pruneAdjustSlotSelection: (slotCount: number) => void;
     getSheetSlotTransform: (
         filename: string,
         sizeKey: string,
@@ -156,7 +188,13 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
         set({ selectedForPrint: [...selectedForPrint, filename] });
     },
 
-    resetSelection: () => set({ selectedForPrint: [] }),
+    resetSelection: () =>
+        set({
+            selectedForPrint: [],
+            selectedAdjustSlotIndices: [],
+            activeAdjustSlotIndex: null,
+            activeAdjustMeta: null,
+        }),
     reset: () =>
         set({
             images: [],
@@ -167,6 +205,7 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
             sheetSlotTransforms: {},
             activeAdjustSlotIndex: null,
             activeAdjustMeta: null,
+            selectedAdjustSlotIndices: [],
         }),
 
     printTemplate:
@@ -187,6 +226,46 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
       set({ sheetCopies: Math.max(1, Math.min(10, sheetCopies)) }),
     sheetAlign: "top-left",
     setSheetAlign: (sheetAlign) => set({ sheetAlign }),
+    sheetPaperMargins: initialSheetPaperMargins(),
+    sheetMarginUniform: true,
+    setSheetPaperMargins: (margins) => {
+        const next = clampMargins(margins);
+        saveStudioPaperMargins(next);
+        set({ sheetPaperMargins: next });
+    },
+    setSheetPaperMarginSide: (side, valueMm) => {
+        const clamped = clampMarginMm(valueMm);
+        set((state) => {
+            const next = state.sheetMarginUniform
+                ? {
+                      top: clamped,
+                      right: clamped,
+                      bottom: clamped,
+                      left: clamped,
+                  }
+                : { ...state.sheetPaperMargins, [side]: clamped };
+            const resolved = clampMargins(next);
+            saveStudioPaperMargins(resolved);
+            return { sheetPaperMargins: resolved };
+        });
+    },
+    setSheetPaperMarginsUniform: (valueMm) => {
+        const clamped = clampMarginMm(valueMm);
+        const next = {
+            top: clamped,
+            right: clamped,
+            bottom: clamped,
+            left: clamped,
+        };
+        saveStudioPaperMargins(next);
+        set({ sheetPaperMargins: next, sheetMarginUniform: true });
+    },
+    resetSheetPaperMargins: () => {
+        const next = getPaperPreset(get().sheetRecipe.paperId).marginMm;
+        saveStudioPaperMargins(next);
+        set({ sheetPaperMargins: next, sheetMarginUniform: true });
+    },
+    setSheetMarginUniform: (sheetMarginUniform) => set({ sheetMarginUniform }),
     showCutLines: true,
     setShowCutLines: (showCutLines) => set({ showCutLines }),
     sheetBindingMode: "cycle",
@@ -213,9 +292,102 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
     sheetSlotTransforms: {},
     activeAdjustSlotIndex: null,
     activeAdjustMeta: null,
+    selectedAdjustSlotIndices: [],
     setActiveAdjustSlotIndex: (activeAdjustSlotIndex) =>
         set({ activeAdjustSlotIndex }),
     setActiveAdjustMeta: (activeAdjustMeta) => set({ activeAdjustMeta }),
+    setAdjustSlotSelection: (indices, primaryIndex, meta) => {
+        const sorted = [...new Set(indices.filter((i) => i >= 0))].sort(
+            (a, b) => a - b
+        );
+        set({
+            selectedAdjustSlotIndices: sorted,
+            activeAdjustSlotIndex: primaryIndex,
+            activeAdjustMeta: meta,
+        });
+    },
+    adjustSlotSelection: (clickedIndex, slotCount, meta, modifiers = {}) => {
+        const { selectedAdjustSlotIndices, activeAdjustSlotIndex } = get();
+        const current = selectedAdjustSlotIndices.length
+            ? selectedAdjustSlotIndices
+            : activeAdjustSlotIndex !== null
+              ? [activeAdjustSlotIndex]
+              : [];
+
+        const next = nextSlotSelection(
+            current,
+            clickedIndex,
+            activeAdjustSlotIndex,
+            slotCount,
+            modifiers
+        );
+
+        set({
+            selectedAdjustSlotIndices: next,
+            activeAdjustSlotIndex: clickedIndex,
+            activeAdjustMeta: meta,
+        });
+    },
+    selectAllAdjustSlots: (slotCount) => {
+        const indices = Array.from({ length: slotCount }, (_, i) => i);
+        const { activeAdjustMeta, activeAdjustSlotIndex } = get();
+        const primary =
+            activeAdjustSlotIndex !== null &&
+            activeAdjustSlotIndex < slotCount
+                ? activeAdjustSlotIndex
+                : 0;
+
+        set({
+            selectedAdjustSlotIndices: indices,
+            activeAdjustSlotIndex: primary,
+            activeAdjustMeta:
+                activeAdjustMeta?.slotIndex === primary
+                    ? activeAdjustMeta
+                    : activeAdjustMeta,
+        });
+    },
+    clearAdjustSlotSelection: () =>
+        set({
+            selectedAdjustSlotIndices: [],
+            activeAdjustSlotIndex: null,
+            activeAdjustMeta: null,
+        }),
+    pruneAdjustSlotSelection: (slotCount) => {
+        const { selectedAdjustSlotIndices, activeAdjustSlotIndex, activeAdjustMeta } =
+            get();
+        const pruned = pruneSlotIndices(selectedAdjustSlotIndices, slotCount);
+
+        if (slotCount === 0) {
+            set({
+                selectedAdjustSlotIndices: [],
+                activeAdjustSlotIndex: null,
+                activeAdjustMeta: null,
+            });
+            return;
+        }
+
+        const primary =
+            activeAdjustSlotIndex !== null &&
+            activeAdjustSlotIndex < slotCount
+                ? activeAdjustSlotIndex
+                : pruned[0] ?? 0;
+
+        const nextIndices =
+            pruned.length > 0
+                ? pruned.includes(primary)
+                    ? pruned
+                    : [...pruned, primary].sort((a, b) => a - b)
+                : [primary];
+
+        set({
+            selectedAdjustSlotIndices: nextIndices,
+            activeAdjustSlotIndex: primary,
+            activeAdjustMeta:
+                activeAdjustMeta?.slotIndex === primary
+                    ? activeAdjustMeta
+                    : null,
+        });
+    },
 
     getSheetSlotTransform: (filename, sizeKey, slotIndex) => {
         const key = buildSlotTransformKey(filename, sizeKey, slotIndex);

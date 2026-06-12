@@ -2,16 +2,22 @@
 
 import { CheckSquare, Square } from "lucide-react";
 import { useGalleryStore } from "@/stores/useGalleryStore";
-import type { ProcessingStatus } from "@/lib/imageTypes";
+import { getProcessingStatusLabel } from "@/lib/processingLabels";
+import type { PackageType, ProcessingPhase, ProcessingStatus } from "@/lib/imageTypes";
 
 type PhotoCardProps = {
   src: string;
   filename: string;
   onClick: () => void;
   processingStatus?: ProcessingStatus;
+  processingPhase?: ProcessingPhase | null;
+  packageType?: PackageType;
   processingError?: string | null;
   onRemoveBackground?: () => void;
   removeBackgroundLoading?: boolean;
+  onApplyTheme?: () => void;
+  applyThemeLoading?: boolean;
+  showApplyTheme?: boolean;
   hideFilename?: boolean;
   hidePrintToggle?: boolean;
   style?: React.CSSProperties;
@@ -19,20 +25,6 @@ type PhotoCardProps = {
 
 function canRemoveBackground(status?: ProcessingStatus) {
   return status === "none" || status === "failed" || status === undefined;
-}
-
-function getStatusLabel(status?: ProcessingStatus) {
-  switch (status) {
-    case "pending":
-    case "processing":
-      return "Memproses…";
-    case "ready":
-      return "Siap";
-    case "failed":
-      return "Gagal";
-    default:
-      return null;
-  }
 }
 
 function getStatusClass(status?: ProcessingStatus) {
@@ -54,25 +46,41 @@ export function PhotoCard({
   filename,
   onClick,
   processingStatus,
+  processingPhase,
+  packageType = "self-photo",
   processingError,
   onRemoveBackground,
   removeBackgroundLoading = false,
+  onApplyTheme,
+  applyThemeLoading = false,
+  showApplyTheme = false,
   hideFilename = false,
   hidePrintToggle = false,
   style,
 }: PhotoCardProps) {
   const { selectedForPrint, togglePrint } = useGalleryStore();
   const isSelected = selectedForPrint.includes(filename);
-  const statusLabel = getStatusLabel(processingStatus);
+  const statusLabel = getProcessingStatusLabel(processingStatus, {
+    packageType,
+    processingPhase,
+    short: true,
+  });
+  const isActionLoading = removeBackgroundLoading || applyThemeLoading;
   const showRetry =
     processingStatus === "failed" &&
     Boolean(onRemoveBackground) &&
-    !removeBackgroundLoading;
+    !isActionLoading;
   const showRemoveBg =
     Boolean(onRemoveBackground) &&
     canRemoveBackground(processingStatus) &&
     processingStatus !== "failed" &&
-    !removeBackgroundLoading;
+    !isActionLoading;
+  const showThemeButton =
+    showApplyTheme &&
+    Boolean(onApplyTheme) &&
+    processingStatus !== "pending" &&
+    processingStatus !== "processing" &&
+    !isActionLoading;
 
   return (
     <div
@@ -108,39 +116,56 @@ export function PhotoCard({
         </div>
       )}
 
-      {showRemoveBg && (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onRemoveBackground?.();
-          }}
-          className="absolute bottom-3 left-3 z-20 rounded-full bg-violet-600/90
-                     px-3 py-1 text-xs text-white backdrop-blur
-                     hover:bg-violet-500 transition"
-        >
-          Hapus BG
-        </button>
-      )}
+      {(showThemeButton || showRemoveBg || showRetry || isActionLoading) && (
+        <div className="absolute bottom-3 left-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-1">
+          {showThemeButton && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onApplyTheme?.();
+              }}
+              className="rounded-full bg-emerald-600/90 px-3 py-1 text-xs text-white backdrop-blur hover:bg-emerald-500 transition"
+            >
+              Terapkan Tema
+            </button>
+          )}
 
-      {showRetry && (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onRemoveBackground?.();
-          }}
-          className="absolute bottom-3 left-3 z-20 rounded-full bg-amber-600/90
-                     px-3 py-1 text-xs text-white backdrop-blur
-                     hover:bg-amber-500 transition"
-        >
-          Coba lagi
-        </button>
-      )}
+          {showRemoveBg && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemoveBackground?.();
+              }}
+              className="rounded-full bg-violet-600/90 px-3 py-1 text-xs text-white backdrop-blur hover:bg-violet-500 transition"
+            >
+              Hapus BG
+            </button>
+          )}
 
-      {removeBackgroundLoading && (
-        <div className="absolute bottom-3 left-3 z-20 rounded-full bg-amber-500/80 px-3 py-1 text-xs text-white backdrop-blur">
-          Memulai…
+          {showRetry && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemoveBackground?.();
+              }}
+              className="rounded-full bg-amber-600/90 px-3 py-1 text-xs text-white backdrop-blur hover:bg-amber-500 transition"
+            >
+              Coba lagi
+            </button>
+          )}
+
+          {isActionLoading && (
+            <div className="rounded-full bg-amber-500/80 px-3 py-1 text-xs text-white backdrop-blur">
+              {applyThemeLoading
+                ? "Menerapkan tema…"
+                : removeBackgroundLoading
+                  ? "Memproses…"
+                  : "Memproses…"}
+            </div>
+          )}
         </div>
       )}
 

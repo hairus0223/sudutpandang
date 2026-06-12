@@ -8,7 +8,7 @@ import { SheetAdjustToolbar } from "./SheetAdjustToolbar";
 import { SheetLayoutSelector } from "./SheetLayoutSelector";
 import { exportCanvasPrint, exportSheetPrint, ImageData } from "@/utils/exportCanvas";
 import { API_BASE_URL } from "@/lib/env";
-import { getPaperPreset } from "@/lib/paperSizes";
+import { useResolvedSheetPaper } from "@/hooks/useResolvedSheetPaper";
 import { packSheetRecipe, validateSheetRecipe } from "@/utils/sheetLayoutEngine";
 
 const FILTERS: { id: PhotoFilter; label: string }[] = [
@@ -39,11 +39,22 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
     sheetSizeAssignments,
     sheetSlotAssignments,
     sheetSlotTransforms,
+    sheetPaperMargins,
     photoTransforms,
     setPhotoTransform,
     faceBoxes,
     persistSheetTransforms,
   } = useGalleryStore();
+
+  const resolvedPaper = useResolvedSheetPaper();
+
+  const sheetCanPrint = useMemo(() => {
+    if (printMode !== "sheet") return true;
+    const validation = validateSheetRecipe(sheetRecipe, resolvedPaper);
+    return (
+      validation.rows.every((row) => row.fits) && validation.fitsVertically
+    );
+  }, [printMode, sheetRecipe, resolvedPaper]);
 
   /* =========================
    * ACTIVE STATE (UX)
@@ -83,18 +94,23 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
       setPrinting(true);
 
       if (printMode === "sheet") {
-        const paper = getPaperPreset(sheetRecipe.paperId);
-        const validation = validateSheetRecipe(sheetRecipe, paper);
+        const validation = validateSheetRecipe(sheetRecipe, resolvedPaper);
 
         if (
           !validation.rows.every((row) => row.fits) ||
           !validation.fitsVertically
         ) {
-          alert("Layout tidak muat di kertas. Perbaiki baris atau jumlah foto.");
+          alert(
+            "Layout tidak muat di kertas dengan margin ini. Perkecil margin, baris, atau jumlah foto."
+          );
           return;
         }
 
-        const geometry = packSheetRecipe(sheetRecipe, paper, sheetAlign);
+        const geometry = packSheetRecipe(
+          sheetRecipe,
+          resolvedPaper,
+          sheetAlign
+        );
 
         persistSheetTransforms();
 
@@ -110,6 +126,7 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
           includeCutLines: false,
           copies: sheetCopies,
           align: sheetAlign,
+          paperMargins: sheetPaperMargins,
         });
 
         await fetch(`${API_BASE_URL}/api/print`, {
@@ -174,7 +191,7 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
       {/* CENTER */}
       <div className="flex flex-col items-center gap-2 order-last w-full sm:order-none sm:w-auto">
         <SheetLayoutSelector images={images} />
-        <SheetAdjustToolbar />
+        <SheetAdjustToolbar images={images} />
 
         {/* FILTER BUTTONS */}
         <div className="flex flex-wrap gap-1 sm:gap-2 justify-center">
@@ -219,11 +236,16 @@ export function PrintToolbar({ images }: { images: ImageData[] }) {
       {/* RIGHT */}
       <button
         onClick={handlePrint}
-        disabled={printing}
+        disabled={printing || !sheetCanPrint}
+        title={
+          printMode === "sheet" && !sheetCanPrint
+            ? "Layout tidak muat — perbaiki margin atau jumlah foto"
+            : undefined
+        }
         className={`
           flex items-center gap-2 px-4 sm:px-6 py-2 rounded text-sm sm:text-base
           transition
-          ${printing
+          ${printing || !sheetCanPrint
             ? "bg-green-600/50 cursor-not-allowed"
             : "bg-green-600 hover:bg-green-500"}
         `}

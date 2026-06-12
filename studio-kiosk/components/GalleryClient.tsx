@@ -3,16 +3,24 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNewPhotoSocket } from "@/hooks/useNewPhotoSocket";
 import { usePhotoProcessedSocket } from "@/hooks/usePhotoProcessedSocket";
+import { useImageProcessing } from "@/hooks/useImageProcessing";
+import { countProcessingImages } from "@/lib/processingLabels";
+import { useThemes } from "@/hooks/useThemes";
 import { useRouter, useSearchParams } from "next/navigation";
-import { fetchImages, processImage } from "@/services/image.service";
+import { fetchImages, uploadImage } from "@/services/image.service";
 import { useGalleryStore } from "@/stores/useGalleryStore";
 import { PhotoCard } from "@/components/cards/PhotoCard";
 import { InfoCard } from "@/components/cards/InfoCard";
 import { PhotoModal } from "@/components/modals/PhotoModal";
+import { GalleryAiToolbar } from "@/components/gallery/GalleryAiToolbar";
 import { BottomPrintBar } from "@/components/bottom/BottomPrintBar";
 import { ScrollToTop } from "@/components/ui/ScrollToTop";
 import { API_BASE_URL } from "@/lib/env";
-import { resolveImageUrl } from "@/lib/resolveImageUrl";
+import {
+  hasSubjectVariant,
+  resolveGalleryPreviewUrl,
+  type GalleryPreviewVariant,
+} from "@/lib/resolveImageUrl";
 import { PRINT_TEMPLATES } from "@/lib/printTemplates";
 import { configurePasPhotoPrintDefaults } from "@/lib/passportPrint";
 import { ArrowLeft } from "lucide-react";
@@ -23,9 +31,10 @@ export default function GalleryClient() {
   const user = params.get("user") ?? "";
 
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const [processingImageId, setProcessingImageId] = useState<string | null>(
-    null
-  );
+  const [sessionThemeId, setSessionThemeId] = useState<string | undefined>();
+  const [previewVariant, setPreviewVariant] =
+    useState<GalleryPreviewVariant>("auto");
+  const [uploading, setUploading] = useState(false);
   const {
     images,
     setImages,
@@ -38,6 +47,8 @@ export default function GalleryClient() {
     packageType,
   } = useGalleryStore();
 
+  const { themeGroups, loading: themesLoading } = useThemes();
+
   const refreshGallery = useCallback(async () => {
     if (!user) return;
     try {
@@ -47,6 +58,46 @@ export default function GalleryClient() {
       console.error(err);
     }
   }, [user, setImages]);
+
+  const handleProcessingError = useCallback((message: string) => {
+    alert(message);
+  }, []);
+
+  const {
+    selectedThemeId,
+    setSelectedThemeId,
+    runRemoveBackground,
+    runApplyTheme,
+    isProcessing,
+    isBusy,
+  } = useImageProcessing({
+    user,
+    enabled: Boolean(user),
+    initialThemeId: sessionThemeId,
+    onRefresh: refreshGallery,
+    onError: handleProcessingError,
+  });
+
+  const handleUpload = useCallback(
+    async (file: File) => {
+      if (!user || uploading || isBusy) return;
+
+      setUploading(true);
+      try {
+        await uploadImage(user, file);
+        await refreshGallery();
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "Upload foto gagal. Silakan coba lagi.";
+        alert(message);
+      } finally {
+        setUploading(false);
+      }
+    },
+    [user, uploading, isBusy, refreshGallery]
+  );
 
   useEffect(() => {
     void refreshGallery();
@@ -73,6 +124,18 @@ export default function GalleryClient() {
     },
   });
 
+  const processingCount = countProcessingImages(images);
+
+  useEffect(() => {
+    if (!user || processingCount === 0) return;
+
+    const timer = window.setInterval(() => {
+      void refreshGallery();
+    }, 4000);
+
+    return () => window.clearInterval(timer);
+  }, [user, processingCount, refreshGallery]);
+
   useEffect(() => {
     if (!user) return;
 
@@ -82,6 +145,11 @@ export default function GalleryClient() {
         setAllowedPrint(d.allowedPrint);
         const resolvedPackageType = d.packageType || "self-photo";
         setPackageType(resolvedPackageType);
+
+        if (d.themeId) {
+          setSessionThemeId(d.themeId);
+          setSelectedThemeId(d.themeId);
+        }
 
         configurePasPhotoPrintDefaults({
           packageType: resolvedPackageType,
@@ -102,44 +170,17 @@ export default function GalleryClient() {
     setPrintTemplate,
     setPrintMode,
     setSheetRecipe,
+    setSelectedThemeId,
   ]);
-
-  const handleRemoveBackground = useCallback(
-    async (imageId: string) => {
-      if (!user || processingImageId) return;
-
-      setProcessingImageId(imageId);
-      setImages(
-        images.map((img) =>
-          img.imageId === imageId
-            ? { ...img, processingStatus: "pending" as const }
-            : img
-        )
-      );
-
-      try {
-        await processImage(user, imageId);
-        await refreshGallery();
-      } catch (err) {
-        console.error(err);
-        alert("Gagal memproses hapus background. Silakan coba lagi.");
-        await refreshGallery();
-      } finally {
-        setProcessingImageId(null);
-      }
-    },
-    [user, processingImageId, images, setImages, refreshGallery]
-  );
 
   return (
     <main className="p-3 sm:p-4 pb-28 sm:pb-32 max-w-[1960px] mx-auto min-h-screen">
-      {/* HEADER */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <button
           onClick={() => router.push("/")}
           className="flex items-center gap-2 text-sm sm:text-base text-white/90 hover:text-white"
         >
-          <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" /> Back
+          <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" /> Kembali
         </button>
 
         <span className="text-white/50 text-sm sm:text-base">
@@ -147,37 +188,70 @@ export default function GalleryClient() {
         </span>
       </div>
 
-      {/* GRID — responsive columns */}
+      {user && (
+        <GalleryAiToolbar
+          packageType={packageType}
+          sessionThemeId={sessionThemeId}
+          selectedThemeId={selectedThemeId}
+          onThemeChange={setSelectedThemeId}
+          onUpload={handleUpload}
+          uploading={uploading}
+          previewVariant={previewVariant}
+          onPreviewVariantChange={setPreviewVariant}
+          themeGroups={themeGroups}
+          themesLoading={themesLoading}
+          isBusy={isBusy || uploading}
+          processingCount={processingCount}
+        />
+      )}
+
       <div className="columns-1 sm:columns-2 xl:columns-3 2xl:columns-4 gap-3 sm:gap-4">
         <InfoCard userName={user} />
 
-        {images.map((img, index) => (
-          <PhotoCard
-            key={img.filename}
-            src={resolveImageUrl(img, packageType, "gallery")}
-            filename={img.filename}
-            processingStatus={img.processingStatus}
-            processingError={img.processingError}
-            onRemoveBackground={
-              img.imageId
-                ? () => void handleRemoveBackground(img.imageId!)
-                : undefined
-            }
-            removeBackgroundLoading={processingImageId === img.imageId}
-            onClick={() => setActiveIndex(index)}
-          />
-        ))}
+        {images.map((img, index) => {
+          const imageId = img.imageId ?? "";
+          const processing = isProcessing(imageId);
+
+          return (
+            <PhotoCard
+              key={img.filename}
+              src={resolveGalleryPreviewUrl(img, packageType, previewVariant)}
+              filename={img.filename}
+              processingStatus={img.processingStatus}
+              processingPhase={img.processingPhase}
+              packageType={packageType}
+              processingError={img.processingError}
+              onRemoveBackground={
+                img.imageId
+                  ? () => void runRemoveBackground(img.imageId!)
+                  : undefined
+              }
+              removeBackgroundLoading={processing}
+              showApplyTheme={hasSubjectVariant(img)}
+              onApplyTheme={
+                img.imageId
+                  ? () => void runApplyTheme(img.imageId!)
+                  : undefined
+              }
+              applyThemeLoading={processing}
+              onClick={() => setActiveIndex(index)}
+            />
+          );
+        })}
       </div>
 
       <PhotoModal
         open={activeIndex !== null}
         index={activeIndex}
-        images={images.map((img) => ({
-          ...img,
-          url: resolveImageUrl(img, packageType, "gallery"),
-        }))}
+        images={images}
+        packageType={packageType}
+        previewVariant={previewVariant}
+        onPreviewVariantChange={setPreviewVariant}
         onClose={() => setActiveIndex(null)}
         onChange={setActiveIndex}
+        onRemoveBackground={(imageId) => void runRemoveBackground(imageId)}
+        onApplyTheme={(imageId) => void runApplyTheme(imageId)}
+        isProcessing={isProcessing}
       />
 
       <BottomPrintBar

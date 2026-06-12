@@ -4,7 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useGalleryStore, type ImageData } from "@/stores/useGalleryStore";
 import type { SheetBindingMode } from "@/lib/sheetSlotBinding";
 import { PHOTO_SIZE_PRESETS } from "@/lib/photoSizes";
-import { getPaperPreset, PAPER_PRESETS } from "@/lib/paperSizes";
+import {
+  getPaperPreset,
+  PAPER_PRESETS,
+  type PaperMarginsMm,
+} from "@/lib/paperSizes";
+import { useResolvedSheetPaper } from "@/hooks/useResolvedSheetPaper";
+import { MARGIN_MAX_MM, MARGIN_MIN_MM } from "@/lib/resolvePaper";
 import {
   cloneRecipe,
   countRecipeSlots,
@@ -60,6 +66,12 @@ export function SheetRecipeComposer({ images }: { images: ImageData[] }) {
     setSheetSizeAssignment,
     sheetAssignImageFilename,
     setSheetAssignImageFilename,
+    sheetPaperMargins,
+    sheetMarginUniform,
+    setSheetPaperMarginSide,
+    setSheetPaperMarginsUniform,
+    resetSheetPaperMargins,
+    setSheetMarginUniform,
   } = useGalleryStore();
 
   const [savedTemplates, setSavedTemplates] = useState<SavedSheetRecipe[]>([]);
@@ -68,11 +80,19 @@ export function SheetRecipeComposer({ images }: { images: ImageData[] }) {
     setSavedTemplates(loadSavedSheetRecipes());
   }, []);
 
-  const paper = getPaperPreset(sheetRecipe.paperId);
+  const paper = useResolvedSheetPaper();
   const validation = useMemo(
     () => validateSheetRecipe(sheetRecipe, paper),
     [sheetRecipe, paper]
   );
+
+  const marginPresets = [0, 5, 10, 15] as const;
+  const marginSides: { key: keyof PaperMarginsMm; label: string }[] = [
+    { key: "top", label: "Atas" },
+    { key: "right", label: "Kanan" },
+    { key: "bottom", label: "Bawah" },
+    { key: "left", label: "Kiri" },
+  ];
   const slotCount = countRecipeSlots(sheetRecipe);
   const canPrint = validation.rows.every((r) => r.fits) && validation.fitsVertically;
   const uniqueSizes = useMemo(
@@ -214,6 +234,91 @@ export function SheetRecipeComposer({ images }: { images: ImageData[] }) {
             {p.label}
           </button>
         ))}
+      </div>
+
+      <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/5 p-3">
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <span className="text-xs text-white/70">Margin kertas (mm):</span>
+          {marginPresets.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => setSheetPaperMarginsUniform(preset)}
+              className={cn(
+                "rounded px-2 py-1 text-[11px] transition",
+                sheetMarginUniform &&
+                  sheetPaperMargins.top === preset &&
+                  sheetPaperMargins.right === preset &&
+                  sheetPaperMargins.bottom === preset &&
+                  sheetPaperMargins.left === preset
+                  ? "bg-violet-600 text-white"
+                  : "bg-white/10 text-white hover:bg-white/20"
+              )}
+            >
+              {preset === 0 ? "0 (full)" : preset}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={resetSheetPaperMargins}
+            className="rounded bg-white/10 px-2 py-1 text-[11px] text-white/80 hover:bg-white/20"
+          >
+            Reset default
+          </button>
+        </div>
+
+        <label className="flex cursor-pointer items-center justify-center gap-2 text-[11px] text-white/70">
+          <input
+            type="checkbox"
+            checked={sheetMarginUniform}
+            onChange={(e) => setSheetMarginUniform(e.target.checked)}
+            className="accent-violet-500"
+          />
+          Margin seragam (semua sisi sama)
+        </label>
+
+        {sheetMarginUniform ? (
+          <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-white/80">
+            <span>Semua sisi</span>
+            <input
+              type="number"
+              min={MARGIN_MIN_MM}
+              max={MARGIN_MAX_MM}
+              value={sheetPaperMargins.top}
+              onChange={(e) =>
+                setSheetPaperMarginsUniform(Number(e.target.value))
+              }
+              className="w-14 rounded bg-white/10 px-1 py-0.5 text-center text-white"
+            />
+            <span className="text-white/50">mm</span>
+          </div>
+        ) : (
+          <div className="flex flex-wrap justify-center gap-3">
+            {marginSides.map(({ key, label }) => (
+              <label
+                key={key}
+                className="flex items-center gap-1.5 text-[11px] text-white/80"
+              >
+                {label}
+                <input
+                  type="number"
+                  min={MARGIN_MIN_MM}
+                  max={MARGIN_MAX_MM}
+                  value={sheetPaperMargins[key]}
+                  onChange={(e) =>
+                    setSheetPaperMarginSide(key, Number(e.target.value))
+                  }
+                  className="w-12 rounded bg-white/10 px-1 py-0.5 text-center text-white"
+                />
+              </label>
+            ))}
+          </div>
+        )}
+
+        <p className="text-center text-[10px] text-white/45">
+          Area abu-abu di preview = margin non-cetak · validasi layout mengikuti
+          margin ini
+        </p>
       </div>
 
       <div className="flex flex-wrap items-center justify-center gap-2">

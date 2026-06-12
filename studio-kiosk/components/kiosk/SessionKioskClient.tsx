@@ -7,6 +7,8 @@ import { API_BASE_URL } from "@/lib/env";
 import { cn } from "@/lib/utils";
 import { msToMMSS } from "@/utils/time";
 import { useNewPhotoSocket } from "@/hooks/useNewPhotoSocket";
+import { usePhotoProcessedSocket } from "@/hooks/usePhotoProcessedSocket";
+import { useThemes } from "@/hooks/useThemes";
 import { useSessionTimer } from "@/hooks/useSessionTimer";
 import {
   type PackageType,
@@ -23,12 +25,13 @@ import {
   trialSkip,
   trialStart,
 } from "@/services/session.service";
+import { fetchImages } from "@/services/image.service";
+import { resolveImageUrl } from "@/lib/resolveImageUrl";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import {
-  AI_THEME_OPTIONS,
-  DEFAULT_THEME_ID,
-} from "@/lib/aiThemes";
+import { toUiThemeOptions } from "@/lib/aiThemes";
+import { getProcessingStatusLabel } from "@/lib/processingLabels";
+import type { ProcessingPhase } from "@/lib/imageTypes";
 import {
   DEFAULT_PASSPORT_COLOR,
   PASSPORT_COLOR_OPTIONS,
@@ -50,6 +53,12 @@ type Customer = {
 };
 
 const TRIAL_PRESETS = [30, 60, 90] as const;
+
+const PACKAGE_LABELS: Record<PackageType, string> = {
+  "self-photo": "Self Photo",
+  "pas-photo": "Pas Photo",
+  "ai-photo": "AI Photo",
+};
 
 const DEFAULT_KIOSK_CONFIG = {
   sessionDurationMinutes: 10,
@@ -80,14 +89,6 @@ async function apiRegister(payload: {
   if (!res.ok) throw new Error("register_failed");
   const data = (await res.json()) as { customer: Customer };
   return data.customer;
-}
-
-async function apiLatestImageUrl(userSlug: string): Promise<string | null> {
-  const res = await fetch(`${API_BASE_URL}/api/images/${encodeURIComponent(userSlug)}`);
-  if (!res.ok) return null;
-  const data = (await res.json()) as { images: Array<{ url: string }> };
-  if (!Array.isArray(data.images) || data.images.length === 0) return null;
-  return data.images[data.images.length - 1]?.url ?? null;
 }
 
 async function apiCustomerByName(name: string): Promise<Customer | null> {
@@ -121,8 +122,25 @@ export function SessionKioskClient() {
   const [captureCount, setCaptureCount] = React.useState(0);
   const [session, setSession] = React.useState<Session | null>(null);
   const [lastImageUrl, setLastImageUrl] = React.useState<string | null>(null);
+  const [lastImageProcessing, setLastImageProcessing] = React.useState(false);
+  const [lastProcessingPhase, setLastProcessingPhase] =
+    React.useState<ProcessingPhase | null>(null);
+  const [sessionMeta, setSessionMeta] = React.useState<{
+    packageType: PackageType;
+    themeId?: string;
+    themeLabel?: string;
+  }>({ packageType: "self-photo" });
   const [kioskConfig, setKioskConfig] = React.useState(DEFAULT_KIOSK_CONFIG);
   const [trialSeconds, setTrialSeconds] = React.useState(60);
+
+  const { themes } = useThemes();
+  const themeLabelById = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const theme of toUiThemeOptions(themes)) {
+      map.set(theme.id, theme.label);
+    }
+    return map;
+  }, [themes]);
 
   const captureTimerRef = React.useRef<number | null>(null);
   const syncFromServerRef = React.useRef<
@@ -178,9 +196,47 @@ export function SessionKioskClient() {
 
   const refreshLastImage = React.useCallback(async () => {
     if (!session?.user) return;
-    const url = await apiLatestImageUrl(session.user);
-    if (url) setLastImageUrl(url);
-  }, [session?.user]);
+
+    const pkg =
+      sessionMeta.packageType || session.packageType || ("self-photo" as PackageType);
+
+    try {
+      const res = await fetchImages(session.user);
+      const latest = res.images[res.images.length - 1];
+      if (!latest) return;
+
+      const url = resolveImageUrl(latest, pkg, "kiosk");
+      if (url) setLastImageUrl(url);
+
+      const isProcessing =
+        latest.processingStatus === "pending" ||
+        latest.processingStatus === "processing";
+
+      setLastImageProcessing(isProcessing);
+      setLastProcessingPhase(
+        isProcessing ? (latest.processingPhase ?? null) : null
+      );
+    } catch {
+      // ignore transient fetch errors
+    }
+  }, [session?.user, session?.packageType, sessionMeta.packageType]);
+
+  React.useEffect(() => {
+    if (!session?.user) return;
+
+    fetch(`${API_BASE_URL}/api/print-config/${encodeURIComponent(session.user)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const pkg: PackageType = d.packageType || session.packageType || "self-photo";
+        const themeId = d.themeId as string | undefined;
+        setSessionMeta({
+          packageType: pkg,
+          themeId,
+          themeLabel: themeId ? themeLabelById.get(themeId) ?? themeId : undefined,
+        });
+      })
+      .catch(() => {});
+  }, [session?.user, session?.packageType, themeLabelById]);
 
   React.useEffect(() => {
     if (screen !== "preview" || !session?.user) return;
@@ -192,6 +248,26 @@ export function SessionKioskClient() {
     enabled: screen === "preview" && Boolean(session?.user),
     onNewPhoto: () => {
       void refreshLastImage();
+    },
+  });
+
+  usePhotoProcessedSocket({
+    user: session?.user ?? "",
+    enabled: screen === "preview" && Boolean(session?.user),
+    onPhotoProcessed: (payload) => {
+      if (payload.status === "ready") {
+        const url =
+          payload.themedUrl || payload.passportUrl || payload.subjectUrl;
+        if (url) setLastImageUrl(url);
+        setLastImageProcessing(false);
+        setLastProcessingPhase(null);
+        return;
+      }
+
+      if (payload.status === "failed") {
+        setLastImageProcessing(false);
+        setLastProcessingPhase(null);
+      }
     },
   });
 
@@ -345,6 +421,27 @@ export function SessionKioskClient() {
           </button>
           <div className="flex flex-wrap gap-2">
             <Pill label={`Sesi: ${session?.user ?? "-"}`} />
+            <Pill
+              label={
+                PACKAGE_LABELS[
+                  sessionMeta.packageType || session?.packageType || "self-photo"
+                ]
+              }
+            />
+            {sessionMeta.themeLabel && (
+              <Pill label={`Tema: ${sessionMeta.themeLabel}`} />
+            )}
+            {lastImageProcessing && (
+              <Pill
+                label={
+                  getProcessingStatusLabel("processing", {
+                    packageType: sessionMeta.packageType,
+                    processingPhase: lastProcessingPhase,
+                  }) ?? "Memproses foto…"
+                }
+                intent="warn"
+              />
+            )}
             <Pill label={`Shot: ${captureCount}`} />
             <Pill
               label={
@@ -360,13 +457,23 @@ export function SessionKioskClient() {
         <section className="mx-auto flex w-full flex-1 flex-col gap-4">
           <div className="flex flex-1 items-center justify-center overflow-hidden">
             {lastImageUrl ? (
-              <>
+              <div className="relative h-full w-full">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={lastImageUrl}
                   alt="Preview foto terakhir"
                   className="h-full w-full object-contain"
                 />
+                {lastImageProcessing && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/45">
+                    <span className="rounded-full bg-amber-500/90 px-4 py-2 text-sm text-white">
+                      {getProcessingStatusLabel("processing", {
+                        packageType: sessionMeta.packageType,
+                        processingPhase: lastProcessingPhase,
+                      }) ?? "Memproses foto…"}
+                    </span>
+                  </div>
+                )}
                 {isCapturing && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/60">
                     <div className="text-6xl font-extrabold tracking-[0.18em] text-white sm:text-8xl">
@@ -374,7 +481,7 @@ export function SessionKioskClient() {
                     </div>
                   </div>
                 )}
-              </>
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center gap-4 text-white/50">
                 <p className="text-center text-sm sm:text-base">
@@ -600,7 +707,21 @@ function RegisterOrCheckScreen({
     React.useState<string>(DEFAULT_PASSPORT_COLOR);
   const [passportSizeId, setPassportSizeId] =
     React.useState<string>(DEFAULT_PASSPORT_SIZE_ID);
-  const [themeId, setThemeId] = React.useState<string>(DEFAULT_THEME_ID);
+  const { defaultThemeId, themeGroups } = useThemes();
+  const [themeId, setThemeId] = React.useState<string>(defaultThemeId);
+
+  React.useEffect(() => {
+    setThemeId(defaultThemeId);
+  }, [defaultThemeId]);
+
+  const themePickerGroups = React.useMemo(
+    () =>
+      themeGroups.map((group) => ({
+        ...group,
+        uiThemes: toUiThemeOptions(group.themes),
+      })),
+    [themeGroups]
+  );
 
   const passportSizeOptions = PHOTO_SIZE_PRESETS.filter((preset) =>
     ["2x3", "3x4", "4x6"].includes(preset.id)
@@ -796,31 +917,52 @@ function RegisterOrCheckScreen({
                 </>
               )}
               {packageType === "ai-photo" && (
-                <div className="space-y-2">
-                  <label className="text-xs tracking-[0.22em] text-white/60">
-                    TEMA AI
-                  </label>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {AI_THEME_OPTIONS.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => setThemeId(option.id)}
+                <div className="space-y-4">
+                  {themePickerGroups.map((group) => (
+                    <div key={group.id} className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="text-xs tracking-[0.22em] text-white/60 uppercase">
+                          {group.label}
+                        </label>
+                        {!group.assetsReady && (
+                          <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-200">
+                            Asset belum lengkap
+                          </span>
+                        )}
+                      </div>
+                      <div
                         className={cn(
-                          "flex flex-col items-center gap-2 rounded-lg border px-2 py-3 text-xs transition",
-                          themeId === option.id
-                            ? "border-white bg-white/10 text-white"
-                            : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
+                          "grid gap-2",
+                          group.pickerCompact
+                            ? "grid-cols-2 sm:grid-cols-3"
+                            : "grid-cols-2 sm:grid-cols-2"
                         )}
                       >
-                        <span
-                          className="h-8 w-full rounded-md border border-white/30"
-                          style={{ background: option.preview }}
-                        />
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
+                        {group.uiThemes.map((option) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => setThemeId(option.id)}
+                            className={cn(
+                              "relative flex flex-col items-center gap-2 rounded-lg border px-2 py-3 text-xs transition",
+                              themeId === option.id
+                                ? "border-white bg-white/10 text-white"
+                                : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
+                            )}
+                          >
+                            <span
+                              className="h-8 w-full rounded-md border border-white/30"
+                              style={{ background: option.preview }}
+                            />
+                            {option.label}
+                            {option.assetAvailable ? (
+                              <span className="absolute right-2 top-2 size-1.5 rounded-full bg-emerald-400" />
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
               <div className="flex gap-3 pt-2">

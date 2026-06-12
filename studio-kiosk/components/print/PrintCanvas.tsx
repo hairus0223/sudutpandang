@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useGalleryStore, PhotoTransform } from "@/stores/useGalleryStore";
 import { chunkPhotos } from "@/utils/printChunk";
 import { draw4RLayout } from "./canvas/draw4Rlayout";
@@ -15,7 +15,8 @@ import { drawFull4RLayout } from "./canvas/drawFull4RLayout";
 import { drawSheetLayout } from "./canvas/drawSheetLayout";
 import type { SheetRecipe } from "@/lib/sheetRecipe";
 import { countRecipeSlots } from "@/lib/sheetRecipe";
-import { getPaperPreset } from "@/lib/paperSizes";
+import { useResolvedSheetPaper } from "@/hooks/useResolvedSheetPaper";
+import { buildAdjustMetaForSlot } from "@/lib/sheetAdjustMeta";
 import { getSlotSizeKey, resolveSlotImage } from "@/lib/sheetSlotBinding";
 import { buildSlotTransformKey } from "@/lib/slotTransformKey";
 import { buildSheetSlotDraws } from "@/utils/sheetRender";
@@ -399,27 +400,30 @@ function SheetCanvasPage({
         sheetSlotTransforms,
         getSheetSlotTransform,
         setSheetSlotTransform,
-        setActiveAdjustSlotIndex,
-        setActiveAdjustMeta,
+        adjustSlotSelection,
+        setAdjustSlotSelection,
+        pruneAdjustSlotSelection,
+        activeAdjustSlotIndex,
+        selectedAdjustSlotIndices,
         packageType,
     } = useGalleryStore();
 
     const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(0);
+    const resolvedPaper = useResolvedSheetPaper();
 
-    const updateActiveSlot = (
-        slotIndex: number,
-        slotImage: ImageData,
-        sizeKey: string
-    ) => {
-        setActiveSlotIndex(slotIndex);
-        setActiveAdjustSlotIndex(slotIndex);
-        setActiveAdjustMeta({
-            slotIndex,
-            filename: slotImage.filename,
-            sizeKey,
-            label: getPhotoSizePreset(sizeKey).label,
-        });
-    };
+    const bindingOptions = useMemo(
+        () => ({
+            bindingMode: sheetBindingMode,
+            sizeAssignments: sheetSizeAssignments,
+            slotAssignments: sheetSlotAssignments,
+        }),
+        [sheetBindingMode, sheetSizeAssignments, sheetSlotAssignments]
+    );
+
+    const geometry = useMemo(
+        () => packSheetRecipe(recipe, resolvedPaper, sheetAlign),
+        [recipe, resolvedPaper, sheetAlign]
+    );
 
     const readSlotTransform = (
         filename: string,
@@ -433,9 +437,44 @@ function SheetCanvasPage({
         );
     };
 
-    const paper = getPaperPreset(recipe.paperId);
-    const geometry = packSheetRecipe(recipe, paper, sheetAlign);
+    const selectSlotAt = (slotIndex: number, e?: MouseEvent) => {
+        const meta = buildAdjustMetaForSlot(
+            slotIndex,
+            geometry.slots,
+            images,
+            bindingOptions
+        );
+        if (!meta) return;
+
+        adjustSlotSelection(slotIndex, geometry.slots.length, meta, {
+            shiftKey: e?.shiftKey,
+            additive: e?.ctrlKey || e?.metaKey,
+        });
+
+        const slot = geometry.slots[slotIndex];
+        if (!slot) return;
+
+        setActiveSlotIndex(slotIndex);
+        activeSlotRef.current = {
+            x: slot.x,
+            y: slot.y,
+            w: slot.w,
+            h: slot.h,
+        };
+
+        transformRef.current = readSlotTransform(
+            meta.filename,
+            meta.sizeKey,
+            slotIndex
+        );
+
+        const cached = imageCacheRef.current.find(
+            (entry) => entry.filename === meta.filename
+        );
+        if (cached) activeImageRef.current = cached.img;
+    };
     const displayScale = SHEET_DISPLAY_MAX_WIDTH / geometry.paperWidthPx;
+    const autoCenteredRef = useRef(new Set<string>());
 
     const resolveImageForSlot = (slotIndex: number) => {
         const slot = geometry.slots[slotIndex];
@@ -459,36 +498,64 @@ function SheetCanvasPage({
     }, [geometry.paperWidthPx, geometry.paperHeightPx]);
 
     useEffect(() => {
+        autoCenteredRef.current.clear();
+    }, [recipe.id, recipe.paperId, sheetAlign]);
+
+    useEffect(() => {
+        pruneAdjustSlotSelection(geometry.slots.length);
+    }, [geometry.slots.length, recipe.id, pruneAdjustSlotSelection]);
+
+    useEffect(() => {
         const firstSlot = geometry.slots[0];
         if (!firstSlot) return;
 
-        const firstImage = resolveImageForSlot(firstSlot.index);
-        const firstSizeKey = getSlotSizeKey(firstSlot);
+        const nextMeta = buildAdjustMetaForSlot(
+            firstSlot.index,
+            geometry.slots,
+            images,
+            bindingOptions
+        );
+        if (!nextMeta) return;
+
         activeSlotRef.current = {
             x: firstSlot.x,
             y: firstSlot.y,
             w: firstSlot.w,
             h: firstSlot.h,
         };
-        updateActiveSlot(firstSlot.index, firstImage, firstSizeKey);
+
+        setActiveSlotIndex((prev) =>
+            prev === firstSlot.index ? prev : firstSlot.index
+        );
+
+        const { selectedAdjustSlotIndices: currentSelection } =
+            useGalleryStore.getState();
+        if (!currentSelection.length) {
+            setAdjustSlotSelection(
+                [firstSlot.index],
+                firstSlot.index,
+                nextMeta
+            );
+        }
 
         const cached = imageCacheRef.current.find(
-            (entry) => entry.filename === firstImage.filename
+            (entry) => entry.filename === nextMeta.filename
         );
         if (cached) activeImageRef.current = cached.img;
 
         transformRef.current = readSlotTransform(
-            firstImage.filename,
-            firstSizeKey,
+            nextMeta.filename,
+            nextMeta.sizeKey,
             firstSlot.index
         );
     }, [
         recipe.id,
-        geometry.slots,
+        recipe.paperId,
+        sheetAlign,
+        geometry.slots.length,
         images,
-        sheetBindingMode,
-        sheetSizeAssignments,
-        sheetSlotAssignments,
+        bindingOptions,
+        setAdjustSlotSelection,
     ]);
 
     const getClampRect = () => {
@@ -531,7 +598,7 @@ function SheetCanvasPage({
             },
             getClampRect
         );
-    }, [activeSlotIndex, recipe.id, geometry.slots, images]);
+    }, [activeSlotIndex, recipe.id, geometry.slots.length, images.length]);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -561,26 +628,7 @@ function SheetCanvasPage({
                 setSheetSlotAssignment(slot.index, sheetAssignImageFilename);
             }
 
-            const slotImage = resolveImageForSlot(slot.index);
-            const sizeKey = getSlotSizeKey(slot);
-            updateActiveSlot(slot.index, slotImage, sizeKey);
-            activeSlotRef.current = {
-                x: slot.x,
-                y: slot.y,
-                w: slot.w,
-                h: slot.h,
-            };
-
-            transformRef.current = readSlotTransform(
-                slotImage.filename,
-                sizeKey,
-                slot.index
-            );
-
-            const cached = imageCacheRef.current.find(
-                (entry) => entry.filename === slotImage.filename
-            );
-            if (cached) activeImageRef.current = cached.img;
+            selectSlotAt(slot.index, e);
         };
 
         canvas.addEventListener("mousedown", onMouseDown, true);
@@ -593,6 +641,46 @@ function SheetCanvasPage({
         sheetAssignImageFilename,
         sheetSizeAssignments,
         sheetSlotAssignments,
+        bindingOptions,
+        adjustSlotSelection,
+    ]);
+
+    useEffect(() => {
+        if (activeAdjustSlotIndex === null) return;
+
+        const slot = geometry.slots[activeAdjustSlotIndex];
+        if (!slot) return;
+
+        const slotImage = resolveImageForSlot(activeAdjustSlotIndex);
+        const sizeKey = getSlotSizeKey(slot);
+
+        setActiveSlotIndex((prev) =>
+            prev === activeAdjustSlotIndex ? prev : activeAdjustSlotIndex
+        );
+        activeSlotRef.current = {
+            x: slot.x,
+            y: slot.y,
+            w: slot.w,
+            h: slot.h,
+        };
+        transformRef.current = readSlotTransform(
+            slotImage.filename,
+            sizeKey,
+            activeAdjustSlotIndex
+        );
+
+        const cached = imageCacheRef.current.find(
+            (entry) => entry.filename === slotImage.filename
+        );
+        if (cached) activeImageRef.current = cached.img;
+    }, [
+        activeAdjustSlotIndex,
+        geometry.slots,
+        images,
+        sheetBindingMode,
+        sheetSizeAssignments,
+        sheetSlotAssignments,
+        sheetSlotTransforms,
     ]);
 
     useEffect(() => {
@@ -605,7 +693,13 @@ function SheetCanvasPage({
                 slot.index
             );
 
-            if (sheetSlotTransforms[transformKey]) return;
+            if (
+                autoCenteredRef.current.has(transformKey) ||
+                sheetSlotTransforms[transformKey]
+            ) {
+                autoCenteredRef.current.add(transformKey);
+                return;
+            }
 
             const cached = imageCacheRef.current.find(
                 (entry) => entry.filename === imgData.filename
@@ -630,17 +724,19 @@ function SheetCanvasPage({
                 slot.index,
                 auto
             );
+            autoCenteredRef.current.add(transformKey);
         });
     }, [
         images,
         recipe.id,
-        geometry.slots,
-        imageCacheRef.current.length,
+        geometry.slots.length,
         sheetBindingMode,
         sheetSizeAssignments,
         sheetSlotAssignments,
         faceBoxes,
         packageType,
+        activeSlotIndex,
+        sheetSlotTransforms,
     ]);
 
     useEffect(() => {
@@ -679,9 +775,18 @@ function SheetCanvasPage({
                 slots: geometry.slots,
                 slotDraws,
                 showCutLines: showCutLines && !isPrintMode,
-                activeSlotIndex: isPrintMode ? null : activeSlotIndex,
+                primarySlotIndex: isPrintMode ? null : activeSlotIndex,
+                selectedSlotIndices: isPrintMode
+                    ? []
+                    : selectedAdjustSlotIndices.length
+                      ? selectedAdjustSlotIndices
+                      : activeSlotIndex !== null
+                        ? [activeSlotIndex]
+                        : [],
                 showPassportGuide:
                     packageType === "pas-photo" && !isPrintMode,
+                printableArea: geometry.printableArea,
+                showPrintableGuide: !isPrintMode,
             });
         });
     }, [
@@ -692,6 +797,7 @@ function SheetCanvasPage({
         faceBoxes,
         showCutLines,
         activeSlotIndex,
+        selectedAdjustSlotIndices,
         isPrintMode,
         recipe.id,
         sheetAlign,
@@ -729,9 +835,8 @@ function SheetCanvasPage({
         <div className="flex flex-col items-center gap-3">
             <p className="text-xs text-white/60 text-center max-w-xl">
                 {recipe.label} · {countRecipeSlots(recipe)} slot · {bindingHint}
-                {packageType === "pas-photo" && (
-                    <> · klik slot, lalu geser atau pinch untuk menyesuaikan</>
-                )}
+                {" "}
+                · geser/pinch slot utama · Ctrl+klik multi-pilih
             </p>
             <canvas
                 ref={canvasRef}

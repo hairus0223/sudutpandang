@@ -6,7 +6,8 @@ import { FaceBox } from "./faceDetect";
 import { drawFull4RLayout } from "@/components/print/canvas/drawFull4RLayout";
 import { PrintTemplate } from "@/lib/printTemplates";
 import type { SheetRecipe } from "@/lib/sheetRecipe";
-import { getPaperPreset } from "@/lib/paperSizes";
+import type { PaperMarginsMm } from "@/lib/paperSizes";
+import { resolvePaperForLayout } from "@/lib/resolvePaper";
 import { drawSheetLayout } from "@/components/print/canvas/drawSheetLayout";
 import type { SheetBindingMode } from "@/lib/sheetSlotBinding";
 import { buildSheetSlotDraws } from "@/utils/sheetRender";
@@ -115,6 +116,7 @@ export async function exportSheetPrint({
   includeCutLines = false,
   copies = 1,
   align = "top-left",
+  paperMargins,
 }: {
   images: ImageData[];
   recipe: SheetRecipe;
@@ -127,10 +129,11 @@ export async function exportSheetPrint({
   includeCutLines?: boolean;
   copies?: number;
   align?: SheetGridAlign;
+  paperMargins?: PaperMarginsMm | null;
 }): Promise<string[]> {
   if (!images.length) return [];
 
-  const paper = getPaperPreset(recipe.paperId);
+  const paper = resolvePaperForLayout(recipe.paperId, paperMargins);
   const geometry = packSheetRecipe(recipe, paper, align);
 
   const loaded = await Promise.all(
