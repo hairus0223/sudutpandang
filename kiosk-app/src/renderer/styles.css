@@ -10,6 +10,8 @@ body {
   padding: 0;
   width: 100%;
   height: 100%;
+  /* 32" portrait TV: larger root type so rem/clamp scale up */
+  font-size: clamp(20px, 2.6vmin, 34px);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background-color: #000;
   color: #f9fafb;
@@ -240,21 +242,21 @@ body {
 }
 
 .pill {
-  padding: 0.8rem 2rem 1rem 2rem;
+  padding: 0.75rem 1.6rem;
   border-radius: 9999px;
   border: 1px solid #FFFFFF;
-  font-size: 1.5rem;
-  letter-spacing: 0.12em;
+  font-size: clamp(1.15rem, 3.2vmin, 2rem);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #FFFFFF;
 }
 
 .pill-big {
-  padding: 0.4rem 3rem 1rem 3rem;
+  padding: 0.35rem 1.75rem 0.55rem;
   border-radius: 9999px;
   border: 1px solid #FFFFFF;
-  font-size: 7rem;
-  letter-spacing: 0.12em;
+  font-size: clamp(2.75rem, 9vmin, 5.5rem);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #FFFFFF;
 }
@@ -304,9 +306,9 @@ body {
 }
 
 .last-shot-label {
-  padding: 0.25rem 0.6rem 0.45rem;
-  font-size: 0.7rem;
-  letter-spacing: 0.14em;
+  padding: 0.4rem 0.75rem 0.55rem;
+  font-size: clamp(0.85rem, 2.4vmin, 1.25rem);
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #e5e7eb;
   background: linear-gradient(to right, rgba(15, 23, 42, 0.95), rgba(31, 41, 55, 0.95));
@@ -318,17 +320,258 @@ body {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 1rem;
   background: radial-gradient(circle at center, rgba(17, 24, 39, 0.3), rgba(15, 23, 42, 0.85));
   backdrop-filter: blur(2px);
+  z-index: 4;
+}
+
+.capture-overlay--countdown {
+  background:
+    radial-gradient(circle at center, transparent 0%, rgba(2, 6, 23, 0.5) 75%),
+    rgba(2, 6, 23, 0.28);
+}
+
+.capture-overlay--urgent {
+  background:
+    radial-gradient(circle at center, rgba(250, 204, 21, 0.1) 0%, rgba(2, 6, 23, 0.55) 72%),
+    rgba(2, 6, 23, 0.32);
+}
+
+/* Bright full-bleed review — hero moment, longer than countdown/wait */
+.capture-overlay--review {
+  gap: 0;
+  padding: 0;
+  background: #f1f5f9;
+  animation: capture-review-in 0.35s ease-out both;
+}
+
+.capture-countdown-ring {
+  display: grid;
+  place-items: center;
+  width: clamp(11rem, 36vmin, 18rem);
+  height: clamp(11rem, 36vmin, 18rem);
+  border-radius: 9999px;
+  border: 5px solid rgba(255, 255, 255, 0.35);
+  box-shadow:
+    0 0 0 12px rgba(255, 255, 255, 0.05),
+    inset 0 0 48px rgba(255, 255, 255, 0.08);
+  animation: capture-ring-pulse 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .capture-overlay-number {
-  font-size: clamp(4rem, 9vw, 6rem);
+  font-size: clamp(6.5rem, 28vmin, 14rem);
   font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  color: #fff;
+  text-shadow:
+    0 0 36px rgba(255, 255, 255, 0.35),
+    0 12px 40px rgba(0, 0, 0, 0.65);
+  animation: capture-count-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.capture-overlay-number--final {
+  color: #fde68a;
+  text-shadow:
+    0 0 48px rgba(250, 204, 21, 0.55),
+    0 12px 40px rgba(0, 0, 0, 0.65);
+  animation: capture-count-final 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.capture-overlay-hint {
+  font-size: clamp(1.35rem, 4.2vmin, 2.4rem);
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(248, 250, 252, 0.95);
+}
+
+/* Brief white flash only — not a long interactive beat */
+.capture-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  background: #fff;
+  animation: capture-flash-burst 0.28s ease-out both;
+}
+
+/* Calm non-interactive wait while file/preview settles */
+.capture-wait {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  background: rgba(2, 6, 23, 0.72);
+  pointer-events: none;
+}
+
+.capture-wait-text {
+  font-size: clamp(2rem, 6.5vmin, 3.75rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #f8fafc;
+}
+
+.capture-wait-sub {
+  font-size: clamp(1.15rem, 3.4vmin, 1.85rem);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.capture-review-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #f1f5f9;
+  filter: brightness(1.08) contrast(1.06) saturate(1.05);
+  animation: capture-review-image-in 0.4s ease-out both;
+}
+
+.capture-review-badge {
+  position: absolute;
+  top: 4%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: 0.55rem 1.4rem;
+  border-radius: 9999px;
+  font-size: clamp(1.15rem, 3.4vmin, 1.85rem);
+  font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.2);
+}
+
+.capture-review-caption {
+  position: absolute;
+  left: 50%;
+  bottom: 4%;
+  transform: translateX(-50%);
+  z-index: 3;
+  max-width: 90%;
+  padding: 0.7rem 1.5rem;
+  border-radius: 9999px;
+  text-align: center;
+  font-size: clamp(1.15rem, 3.4vmin, 1.85rem);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
+}
+
+.preview-video-wrapper--countdown {
+  filter: brightness(0.92);
+}
+
+.preview-capture-button {
+  margin-top: 0.75rem;
+  font-size: clamp(1.25rem, 3.8vmin, 2rem);
+  padding: 1rem 2.6rem;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  box-shadow: 0 0 0 0 rgba(248, 250, 252, 0.35);
+  animation: capture-button-idle 2.2s ease-in-out infinite;
+}
+
+.preview-capture-button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.preview-capture-button--armed {
+  animation: none;
+  opacity: 0.75;
+}
+
+@keyframes capture-count-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.45);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes capture-count-final {
+  0% {
+    opacity: 0;
+    transform: scale(0.35);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes capture-ring-pulse {
+  0% {
+    transform: scale(0.86);
+    border-color: rgba(255, 255, 255, 0.18);
+  }
+  100% {
+    transform: scale(1);
+    border-color: rgba(255, 255, 255, 0.42);
+  }
+}
+
+@keyframes capture-flash-burst {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes capture-review-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes capture-review-image-in {
+  from {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes capture-button-idle {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(248, 250, 252, 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 14px rgba(248, 250, 252, 0);
+  }
 }
 
 .pill--package {
@@ -346,9 +589,9 @@ body {
   top: 1rem;
   left: 50%;
   transform: translateX(-50%);
-  padding: 0.45rem 1rem;
+  padding: 0.55rem 1.25rem;
   border-radius: 9999px;
-  font-size: 0.75rem;
+  font-size: clamp(1rem, 3vmin, 1.6rem);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: #ede9fe;
@@ -402,12 +645,6 @@ body {
   border: 1px solid rgba(248, 113, 113, 0.35);
 }
 
-.preview-capture-button {
-  margin-top: 0.75rem;
-  font-size: clamp(1rem, 1.2vw, 1.1rem);
-  padding: 0.85rem 2rem;
-}
-
 .preview-toolbar {
   display: flex;
   flex-direction: column;
@@ -458,5 +695,12 @@ body {
 
     transform: translate(-50%, -50%) rotate(90deg);
     object-fit: cover;
+  }
+
+  .capture-review-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    filter: brightness(1.1) contrast(1.08) saturate(1.06);
   }
 }

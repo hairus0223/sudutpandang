@@ -18,6 +18,10 @@ const Screen = {
   END: "end",
 };
 
+/** Photo review stays up longer than countdown / wait (32" TV). */
+const REVIEW_DISPLAY_MS = 7000;
+const FLASH_HOLD_MS = 280;
+
 const PACKAGE_LABELS = {
   "self-photo": "Self Photo",
   "pas-photo": "Pas Photo",
@@ -29,7 +33,7 @@ function syncKioskFields(fields, setters) {
 }
 
 export function App() {
-  const { play } = useKioskAudio();
+  const { play, unlockAudio } = useKioskAudio();
   const [kioskConfig, setKioskConfig] = useState({
     sessionDurationMinutes: 10,
     captureCountdownSeconds: 3,
@@ -39,7 +43,10 @@ export function App() {
   const [sessionUser, setSessionUser] = useState(null);
   const [captureCountdown, setCaptureCountdown] = useState(3);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isFlashing, setIsFlashing] = useState(false);
+  const [isWaitingCapture, setIsWaitingCapture] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
+  const [shotStamp, setShotStamp] = useState(0);
   const [captureCount, setCaptureCount] = useState(0);
   const [lastImageUrl, setLastImageUrl] = useState(null);
   const [lastImageProcessing, setLastImageProcessing] = useState(false);
@@ -52,8 +59,12 @@ export function App() {
 
   const sessionUserRef = useRef(sessionUser);
   const packageTypeRef = useRef(packageType);
+  const screenRef = useRef(screen);
+  const countdownTimerRef = useRef(null);
+  const reviewTimerRef = useRef(null);
   sessionUserRef.current = sessionUser;
   packageTypeRef.current = packageType;
+  screenRef.current = screen;
 
   const kioskSetters = useMemo(
     () => ({ setPackageType, setPassportSizeId, setThemeId }),
@@ -80,6 +91,95 @@ export function App() {
     });
 
   const { videoRef, start: startCameraPreview, stop: stopCameraPreview } = useCameraPreview();
+
+  const clearCaptureTimers = useCallback(() => {
+    if (countdownTimerRef.current) {
+      window.clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    if (reviewTimerRef.current) {
+      window.clearTimeout(reviewTimerRef.current);
+      reviewTimerRef.current = null;
+    }
+  }, []);
+
+  /** Celebrate real camera capture — driven by Imaging Edge file → api `new-photo`. */
+  const celebrateNewCapture = useCallback(
+    async (payload) => {
+      const user = sessionUserRef.current;
+      const scr = screenRef.current;
+      if (!user || payload?.user !== user) return;
+      if (scr !== Screen.TRIAL && scr !== Screen.MAIN) return;
+
+      unlockAudio();
+      clearCaptureTimers();
+      setIsCapturing(false);
+      setIsReviewing(false);
+      setIsFlashing(true);
+      setIsWaitingCapture(false);
+      setShotStamp((n) => n + 1);
+      play("shutter");
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate([40, 30, 60]);
+      }
+
+      setCaptureCount((c) => c + 1);
+      setProcessingError(null);
+
+      const flashHold = new Promise((resolve) => {
+        window.setTimeout(resolve, FLASH_HOLD_MS);
+      });
+
+      const pkg = packageTypeRef.current;
+      const previewPromise = (async () => {
+        try {
+          const result = await refreshPreview();
+          const latest = result?.image;
+          const waitingForProcessed =
+            pkg === "ai-photo" || pkg === "pas-photo"
+              ? latest?.processingStatus !== "ready"
+              : false;
+
+          setLastImageProcessing(Boolean(waitingForProcessed));
+
+          if (waitingForProcessed && (payload.imageId || latest?.imageId)) {
+            void waitForImageProcessing(payload.imageId || latest.imageId);
+          }
+          return result;
+        } catch (err) {
+          console.warn("Preview refresh after new-photo failed", err);
+          return null;
+        }
+      })();
+
+      await flashHold;
+      setIsFlashing(false);
+      setIsWaitingCapture(true);
+
+      await previewPromise;
+
+      setIsWaitingCapture(false);
+      setIsReviewing(true);
+      play("captureSuccess");
+
+      reviewTimerRef.current = window.setTimeout(() => {
+        setIsReviewing(false);
+        startCameraPreview();
+        reviewTimerRef.current = null;
+      }, REVIEW_DISPLAY_MS);
+    },
+    [
+      clearCaptureTimers,
+      play,
+      refreshPreview,
+      startCameraPreview,
+      unlockAudio,
+      waitForImageProcessing,
+    ]
+  );
+
+  const celebrateNewCaptureRef = useRef(celebrateNewCapture);
+  celebrateNewCaptureRef.current = celebrateNewCapture;
 
   const sessionTimer = useSessionTimer({
     durationMs: kioskConfig.sessionDurationMinutes * 60 * 1000,
@@ -140,12 +240,18 @@ export function App() {
     });
 
     socket.on("kiosk-trial-start", ({ user, endsAt, ...fields }) => {
+      clearCaptureTimers();
+      unlockAudio();
       setSessionUser(user);
       setScreen(Screen.TRIAL);
       setCaptureCount(0);
       setLastImageUrl(null);
       setLastImageProcessing(false);
       setProcessingError(null);
+      setIsCapturing(false);
+      setIsFlashing(false);
+      setIsWaitingCapture(false);
+      setIsReviewing(false);
       syncKioskFields(fields, kioskSetters);
       sessionTimer.startWithEndsAt(endsAt);
       startCameraPreview();
@@ -160,12 +266,18 @@ export function App() {
     });
 
     socket.on("kiosk-main-start", ({ user, endsAt, ...fields }) => {
+      clearCaptureTimers();
+      unlockAudio();
       setSessionUser(user);
       setScreen(Screen.MAIN);
       setCaptureCount(0);
       setLastImageUrl(null);
       setLastImageProcessing(false);
       setProcessingError(null);
+      setIsCapturing(false);
+      setIsFlashing(false);
+      setIsWaitingCapture(false);
+      setIsReviewing(false);
       syncKioskFields(fields, kioskSetters);
       sessionTimer.startWithEndsAt(endsAt);
       startCameraPreview();
@@ -176,6 +288,11 @@ export function App() {
       stopCameraPreview();
       cancelPoll();
       sessionTimer.clear();
+      clearCaptureTimers();
+      setIsCapturing(false);
+      setIsFlashing(false);
+      setIsWaitingCapture(false);
+      setIsReviewing(false);
       setScreen(Screen.END);
       setSessionUser(null);
     });
@@ -240,16 +357,27 @@ export function App() {
 
     socket.on("photo-processed", handlePhotoProcessed);
 
+    // Real shutter moment: file landed from camera (Imaging Edge → capture/)
+    socket.on("new-photo", (payload) => {
+      void celebrateNewCaptureRef.current(payload);
+    });
+
     return () => {
       socket.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (screen !== Screen.TRIAL && screen !== Screen.MAIN) return;
+    const unlock = () => unlockAudio();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    return () => window.removeEventListener("pointerdown", unlock);
+  }, [screen, unlockAudio]);
+
   async function handleCapture() {
     if (!sessionUser) return;
     const userSlug = sessionUser;
-    const pkg = packageTypeRef.current;
 
     try {
       await triggerBackendCapture(userSlug);
@@ -263,49 +391,40 @@ export function App() {
         targetFolderHint: `/SudutPandangStudio/<today>/${userSlug}`,
       });
     }
-
-    setCaptureCount((c) => c + 1);
-    setProcessingError(null);
-
-    window.setTimeout(async () => {
-      const result = await refreshPreview();
-      const latest = result?.image;
-      const waitingForProcessed =
-        pkg === "ai-photo" || pkg === "pas-photo"
-          ? latest?.processingStatus !== "ready"
-          : false;
-
-      setLastImageProcessing(Boolean(waitingForProcessed));
-
-      if (waitingForProcessed && latest?.imageId) {
-        void waitForImageProcessing(latest.imageId);
-      }
-    }, 1500);
   }
 
+  /** Optional pose countdown + software trigger. Shutter SFX waits for `new-photo`. */
   function startCaptureCountdown() {
     if (isCapturing || isReviewing || !sessionUser) return;
+    unlockAudio();
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      navigator.vibrate(18);
+    }
+
     const total = kioskConfig.captureCountdownSeconds || 3;
+    clearCaptureTimers();
+    setIsFlashing(false);
     setIsCapturing(true);
     setCaptureCountdown(total);
+    play("beep", { remaining: total });
 
     let localCount = total;
-    const timer = window.setInterval(async () => {
+    countdownTimerRef.current = window.setInterval(async () => {
       if (localCount <= 1) {
-        window.clearInterval(timer);
-        play("shutter");
-        await handleCapture();
+        if (countdownTimerRef.current) {
+          window.clearInterval(countdownTimerRef.current);
+          countdownTimerRef.current = null;
+        }
         setIsCapturing(false);
-        setIsReviewing(true);
-        window.setTimeout(() => {
-          setIsReviewing(false);
-          startCameraPreview();
-        }, 3000);
+        await handleCapture();
         return;
       }
       localCount -= 1;
-      play("beep");
+      play("beep", { remaining: localCount });
       setCaptureCountdown(localCount);
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate(localCount === 1 ? 28 : 12);
+      }
     }, 1000);
   }
 
@@ -337,28 +456,62 @@ export function App() {
     return (
       <div className="screen screen--preview">
         <div className="preview-wrapper">
-          <div className="preview-header flex flex-row justify-between items-center gap-2">
-            <div className="pill">
-              {phaseLabel} {sessionUser ?? "-"}
-            </div>
-            <div className="flex flex-wrap gap-2 justify-end">
-              <div className="pill pill--package">{PACKAGE_LABELS[packageType] ?? packageType}</div>
-              {isAiPhoto && themeId && (
-                <div className="pill pill--theme">
-                  Tema: {themeLabel ?? "AI Photo"}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {isCapturing && (
-            <div className="capture-overlay">
-              <div className="capture-overlay-number">{captureCountdown}</div>
+          {!isReviewing && !isWaitingCapture && !isFlashing && (
+            <div className="preview-header flex flex-row justify-between items-center gap-2">
+              <div className="pill">
+                {phaseLabel} {sessionUser ?? "-"}
+              </div>
+              <div className="flex flex-wrap gap-2 justify-end">
+                <div className="pill pill--package">{PACKAGE_LABELS[packageType] ?? packageType}</div>
+                {isAiPhoto && themeId && (
+                  <div className="pill pill--theme">
+                    Tema: {themeLabel ?? "AI Photo"}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
-          {!isReviewing && (
-            <div className="preview-video-wrapper">
+          {isCapturing && (
+            <div
+              className={`capture-overlay capture-overlay--countdown${
+                captureCountdown <= 1 ? " capture-overlay--urgent" : ""
+              }`}
+              aria-live="polite"
+            >
+              <div className="capture-countdown-ring" key={`ring-${captureCountdown}`}>
+                <div
+                  key={captureCountdown}
+                  className={`capture-overlay-number${
+                    captureCountdown <= 1 ? " capture-overlay-number--final" : ""
+                  }`}
+                >
+                  {captureCountdown}
+                </div>
+              </div>
+              <div className="capture-overlay-hint">
+                {captureCountdown <= 1 ? "Pose!" : "Siap…"}
+              </div>
+            </div>
+          )}
+
+          {isFlashing && (
+            <div className="capture-flash" aria-hidden="true" />
+          )}
+
+          {isWaitingCapture && (
+            <div className="capture-wait" aria-live="polite">
+              <div className="capture-wait-text">Mengambil foto…</div>
+              <div className="capture-wait-sub">Mohon tunggu sebentar</div>
+            </div>
+          )}
+
+          {!isReviewing && !isWaitingCapture && (
+            <div
+              className={`preview-video-wrapper${
+                isCapturing ? " preview-video-wrapper--countdown" : ""
+              }`}
+            >
               <video className="preview-video" ref={videoRef} playsInline muted />
               {isPasPhoto && (
                 <div className="pas-photo-frame">
@@ -375,23 +528,28 @@ export function App() {
           )}
 
           {isReviewing && lastImageUrl && (
-            <div className="capture-overlay">
-              <img src={lastImageUrl} alt="Foto terakhir" className="preview-video" />
+            <div className="capture-overlay capture-overlay--review" key={`review-${shotStamp}`}>
+              <img
+                src={lastImageUrl}
+                alt="Foto terakhir"
+                className="capture-review-image"
+              />
+              <div className="capture-review-badge">Hasil foto</div>
               {lastImageProcessing && (
                 <div className="processing-overlay">
                   <div className="processing-spinner" />
                 </div>
               )}
-              <div className="last-shot-label">
+              <div className="capture-review-caption">
                 {processingMessage ||
                   (isAiPhoto
                     ? "Foto AI siap"
-                    : "Menampilkan hasil foto… sesi lanjut sebentar lagi")}
+                    : "Lihat hasilnya — sesi lanjut sebentar lagi")}
               </div>
             </div>
           )}
 
-          {!isReviewing && lastImageUrl && (
+          {!isReviewing && !isWaitingCapture && lastImageUrl && (
             <div
               className={`last-shot-thumb${lastImageProcessing ? " last-shot-thumb--processing" : ""}`}
             >
@@ -413,17 +571,21 @@ export function App() {
             <div className="kiosk-processing-error">{processingError}</div>
           )}
 
-          <div className="preview-toolbar">
-            <div className="pill-big">{remainingLabel}</div>
-            <button
-              type="button"
-              className="primary-button preview-capture-button"
-              onClick={startCaptureCountdown}
-              disabled={isCapturing || isReviewing || !sessionUser}
-            >
-              Ambil Foto
-            </button>
-          </div>
+          {!isReviewing && !isWaitingCapture && !isFlashing && (
+            <div className="preview-toolbar">
+              <div className="pill-big">{remainingLabel}</div>
+              <button
+                type="button"
+                className={`primary-button preview-capture-button${
+                  isCapturing ? " preview-capture-button--armed" : ""
+                }`}
+                onClick={startCaptureCountdown}
+                disabled={isCapturing || isReviewing || !sessionUser}
+              >
+                {isCapturing ? "Mengambil…" : "Ambil Foto"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );

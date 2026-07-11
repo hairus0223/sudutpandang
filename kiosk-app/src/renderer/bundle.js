@@ -1096,7 +1096,7 @@
             var dispatcher = resolveDispatcher();
             return dispatcher.useReducer(reducer, initialArg, init);
           }
-          function useRef5(initialValue) {
+          function useRef6(initialValue) {
             var dispatcher = resolveDispatcher();
             return dispatcher.useRef(initialValue);
           }
@@ -1890,7 +1890,7 @@
           exports.useLayoutEffect = useLayoutEffect;
           exports.useMemo = useMemo3;
           exports.useReducer = useReducer;
-          exports.useRef = useRef5;
+          exports.useRef = useRef6;
           exports.useState = useState4;
           exports.useSyncExternalStore = useSyncExternalStore;
           exports.useTransition = useTransition;
@@ -24777,21 +24777,135 @@
 
   // src/renderer/services/audio.js
   var import_react2 = __toESM(require_react());
+  function createCaptureSynth() {
+    let ctx = null;
+    function getCtx() {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      if (!ctx) ctx = new AC();
+      if (ctx.state === "suspended") {
+        void ctx.resume();
+      }
+      return ctx;
+    }
+    function playTone({
+      frequency,
+      duration = 0.16,
+      type = "sine",
+      peak = 0.28,
+      startAt = 0
+    }) {
+      const c = getCtx();
+      if (!c) return;
+      const now = c.currentTime + startAt;
+      const osc = c.createOscillator();
+      const gain = c.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(frequency, now);
+      gain.gain.setValueAtTime(1e-4, now);
+      gain.gain.exponentialRampToValueAtTime(peak, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(1e-4, now + duration);
+      osc.connect(gain);
+      gain.connect(c.destination);
+      osc.start(now);
+      osc.stop(now + duration + 0.02);
+    }
+    function playNoiseBurst({ duration = 0.05, peak = 0.45, startAt = 0, filterFreq = 2200 }) {
+      const c = getCtx();
+      if (!c) return;
+      const now = c.currentTime + startAt;
+      const length = Math.max(1, Math.floor(c.sampleRate * duration));
+      const buffer = c.createBuffer(1, length, c.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < length; i += 1) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+      }
+      const src = c.createBufferSource();
+      src.buffer = buffer;
+      const filter = c.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(filterFreq, now);
+      filter.Q.setValueAtTime(0.9, now);
+      const gain = c.createGain();
+      gain.gain.setValueAtTime(1e-4, now);
+      gain.gain.exponentialRampToValueAtTime(peak, now + 4e-3);
+      gain.gain.exponentialRampToValueAtTime(1e-4, now + duration);
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(c.destination);
+      src.start(now);
+      src.stop(now + duration + 0.02);
+    }
+    function beep(remainingSeconds = 3) {
+      const urgency = Math.max(0, 4 - Number(remainingSeconds || 0));
+      const freq = 760 + urgency * 180;
+      playTone({ frequency: freq, duration: 0.14, type: "sine", peak: 0.32 });
+      if (remainingSeconds <= 1) {
+        playTone({
+          frequency: freq * 1.5,
+          duration: 0.1,
+          type: "triangle",
+          peak: 0.18,
+          startAt: 0.04
+        });
+      }
+    }
+    function shutter() {
+      playTone({ frequency: 190, duration: 0.04, type: "square", peak: 0.22 });
+      playNoiseBurst({ duration: 0.055, peak: 0.55, startAt: 0.018, filterFreq: 2800 });
+      playTone({
+        frequency: 920,
+        duration: 0.07,
+        type: "triangle",
+        peak: 0.2,
+        startAt: 0.03
+      });
+      playNoiseBurst({ duration: 0.09, peak: 0.22, startAt: 0.06, filterFreq: 900 });
+    }
+    function captureSuccess() {
+      playTone({ frequency: 523.25, duration: 0.12, type: "sine", peak: 0.18 });
+      playTone({
+        frequency: 659.25,
+        duration: 0.16,
+        type: "sine",
+        peak: 0.16,
+        startAt: 0.08
+      });
+    }
+    function unlock() {
+      getCtx();
+    }
+    return { beep, shutter, captureSuccess, unlock };
+  }
   function useKioskAudio() {
+    const synthRef = (0, import_react2.useRef)(null);
+    if (!synthRef.current) {
+      synthRef.current = createCaptureSynth();
+    }
     const sounds = (0, import_react2.useMemo)(
       () => ({
         welcome: new Audio("/audio/welcome-id.mp3"),
-        beep: new Audio("/audio/beep-id.mp3"),
-        shutter: new Audio("/audio/shutter-id.mp3"),
         timeWarning: new Audio("/audio/time-warning-id.mp3"),
         sessionEnd: new Audio("/audio/session-end-id.mp3")
       }),
       []
     );
     const play = (0, import_react2.useCallback)(
-      (key) => {
+      (key, options = {}) => {
+        const synth = synthRef.current;
+        if (key === "beep") {
+          synth?.beep(options.remaining ?? options.step ?? 3);
+          return;
+        }
+        if (key === "shutter") {
+          synth?.shutter();
+          return;
+        }
+        if (key === "captureSuccess") {
+          synth?.captureSuccess();
+          return;
+        }
         const audio = sounds[key];
-        console.log("test audio", audio);
         if (!audio) return;
         try {
           audio.currentTime = 0;
@@ -24802,7 +24916,10 @@
       },
       [sounds]
     );
-    return { play };
+    const unlockAudio = (0, import_react2.useCallback)(() => {
+      synthRef.current?.unlock();
+    }, []);
+    return { play, unlockAudio };
   }
 
   // src/renderer/hooks/useSessionTimer.js
@@ -28351,7 +28468,7 @@
     applyKioskSyncFields(setters, fields);
   }
   function App() {
-    const { play } = useKioskAudio();
+    const { play, unlockAudio } = useKioskAudio();
     const [kioskConfig, setKioskConfig] = (0, import_react5.useState)({
       sessionDurationMinutes: 10,
       captureCountdownSeconds: 3
@@ -28360,6 +28477,7 @@
     const [sessionUser, setSessionUser] = (0, import_react5.useState)(null);
     const [captureCountdown, setCaptureCountdown] = (0, import_react5.useState)(3);
     const [isCapturing, setIsCapturing] = (0, import_react5.useState)(false);
+    const [isFlashing, setIsFlashing] = (0, import_react5.useState)(false);
     const [isReviewing, setIsReviewing] = (0, import_react5.useState)(false);
     const [captureCount, setCaptureCount] = (0, import_react5.useState)(0);
     const [lastImageUrl, setLastImageUrl] = (0, import_react5.useState)(null);
@@ -28372,8 +28490,12 @@
     const [latestPreviewImage, setLatestPreviewImage] = (0, import_react5.useState)(null);
     const sessionUserRef = (0, import_react5.useRef)(sessionUser);
     const packageTypeRef = (0, import_react5.useRef)(packageType);
+    const screenRef = (0, import_react5.useRef)(screen);
+    const countdownTimerRef = (0, import_react5.useRef)(null);
+    const reviewTimerRef = (0, import_react5.useRef)(null);
     sessionUserRef.current = sessionUser;
     packageTypeRef.current = packageType;
+    screenRef.current = screen;
     const kioskSetters = (0, import_react5.useMemo)(
       () => ({ setPackageType, setPassportSizeId, setThemeId }),
       []
@@ -28395,6 +28517,64 @@
       onPreviewUpdate: handlePreviewUpdate
     });
     const { videoRef, start: startCameraPreview, stop: stopCameraPreview } = useCameraPreview();
+    const clearCaptureTimers = (0, import_react5.useCallback)(() => {
+      if (countdownTimerRef.current) {
+        window.clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+      if (reviewTimerRef.current) {
+        window.clearTimeout(reviewTimerRef.current);
+        reviewTimerRef.current = null;
+      }
+    }, []);
+    const celebrateNewCapture = (0, import_react5.useCallback)(
+      async (payload) => {
+        const user = sessionUserRef.current;
+        const scr = screenRef.current;
+        if (!user || payload?.user !== user) return;
+        if (scr !== Screen.TRIAL && scr !== Screen.MAIN) return;
+        unlockAudio();
+        clearCaptureTimers();
+        setIsCapturing(false);
+        setIsFlashing(true);
+        play("shutter");
+        if (typeof navigator !== "undefined" && navigator.vibrate) {
+          navigator.vibrate([30, 40, 50]);
+        }
+        setCaptureCount((c) => c + 1);
+        setProcessingError(null);
+        const pkg = packageTypeRef.current;
+        try {
+          const result = await refreshPreview();
+          const latest = result?.image;
+          const waitingForProcessed = pkg === "ai-photo" || pkg === "pas-photo" ? latest?.processingStatus !== "ready" : false;
+          setLastImageProcessing(Boolean(waitingForProcessed));
+          if (waitingForProcessed && (payload.imageId || latest?.imageId)) {
+            void waitForImageProcessing(payload.imageId || latest.imageId);
+          }
+        } catch (err) {
+          console.warn("Preview refresh after new-photo failed", err);
+        }
+        setIsFlashing(false);
+        setIsReviewing(true);
+        play("captureSuccess");
+        reviewTimerRef.current = window.setTimeout(() => {
+          setIsReviewing(false);
+          startCameraPreview();
+          reviewTimerRef.current = null;
+        }, 3e3);
+      },
+      [
+        clearCaptureTimers,
+        play,
+        refreshPreview,
+        startCameraPreview,
+        unlockAudio,
+        waitForImageProcessing
+      ]
+    );
+    const celebrateNewCaptureRef = (0, import_react5.useRef)(celebrateNewCapture);
+    celebrateNewCaptureRef.current = celebrateNewCapture;
     const sessionTimer = useSessionTimer({
       durationMs: kioskConfig.sessionDurationMinutes * 60 * 1e3,
       onExpire: () => {
@@ -28444,12 +28624,17 @@
         transports: ["websocket"]
       });
       socket.on("kiosk-trial-start", ({ user, endsAt, ...fields }) => {
+        clearCaptureTimers();
+        unlockAudio();
         setSessionUser(user);
         setScreen(Screen.TRIAL);
         setCaptureCount(0);
         setLastImageUrl(null);
         setLastImageProcessing(false);
         setProcessingError(null);
+        setIsCapturing(false);
+        setIsFlashing(false);
+        setIsReviewing(false);
         syncKioskFields(fields, kioskSetters);
         sessionTimer.startWithEndsAt(endsAt);
         startCameraPreview();
@@ -28462,12 +28647,17 @@
         }
       });
       socket.on("kiosk-main-start", ({ user, endsAt, ...fields }) => {
+        clearCaptureTimers();
+        unlockAudio();
         setSessionUser(user);
         setScreen(Screen.MAIN);
         setCaptureCount(0);
         setLastImageUrl(null);
         setLastImageProcessing(false);
         setProcessingError(null);
+        setIsCapturing(false);
+        setIsFlashing(false);
+        setIsReviewing(false);
         syncKioskFields(fields, kioskSetters);
         sessionTimer.startWithEndsAt(endsAt);
         startCameraPreview();
@@ -28477,6 +28667,10 @@
         stopCameraPreview();
         cancelPoll();
         sessionTimer.clear();
+        clearCaptureTimers();
+        setIsCapturing(false);
+        setIsFlashing(false);
+        setIsReviewing(false);
         setScreen(Screen.END);
         setSessionUser(null);
       });
@@ -28530,14 +28724,22 @@
         });
       });
       socket.on("photo-processed", handlePhotoProcessed);
+      socket.on("new-photo", (payload) => {
+        void celebrateNewCaptureRef.current(payload);
+      });
       return () => {
         socket.disconnect();
       };
     }, []);
+    (0, import_react5.useEffect)(() => {
+      if (screen !== Screen.TRIAL && screen !== Screen.MAIN) return;
+      const unlock = () => unlockAudio();
+      window.addEventListener("pointerdown", unlock, { once: true });
+      return () => window.removeEventListener("pointerdown", unlock);
+    }, [screen, unlockAudio]);
     async function handleCapture() {
       if (!sessionUser) return;
       const userSlug = sessionUser;
-      const pkg = packageTypeRef.current;
       try {
         await triggerBackendCapture(userSlug);
       } catch (e) {
@@ -28549,40 +28751,36 @@
           targetFolderHint: `/SudutPandangStudio/<today>/${userSlug}`
         });
       }
-      setCaptureCount((c) => c + 1);
-      setProcessingError(null);
-      window.setTimeout(async () => {
-        const result = await refreshPreview();
-        const latest = result?.image;
-        const waitingForProcessed = pkg === "ai-photo" || pkg === "pas-photo" ? latest?.processingStatus !== "ready" : false;
-        setLastImageProcessing(Boolean(waitingForProcessed));
-        if (waitingForProcessed && latest?.imageId) {
-          void waitForImageProcessing(latest.imageId);
-        }
-      }, 1500);
     }
     function startCaptureCountdown() {
       if (isCapturing || isReviewing || !sessionUser) return;
+      unlockAudio();
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate(18);
+      }
       const total = kioskConfig.captureCountdownSeconds || 3;
+      clearCaptureTimers();
+      setIsFlashing(false);
       setIsCapturing(true);
       setCaptureCountdown(total);
+      play("beep", { remaining: total });
       let localCount = total;
-      const timer = window.setInterval(async () => {
+      countdownTimerRef.current = window.setInterval(async () => {
         if (localCount <= 1) {
-          window.clearInterval(timer);
-          play("shutter");
-          await handleCapture();
+          if (countdownTimerRef.current) {
+            window.clearInterval(countdownTimerRef.current);
+            countdownTimerRef.current = null;
+          }
           setIsCapturing(false);
-          setIsReviewing(true);
-          window.setTimeout(() => {
-            setIsReviewing(false);
-            startCameraPreview();
-          }, 3e3);
+          await handleCapture();
           return;
         }
         localCount -= 1;
-        play("beep");
+        play("beep", { remaining: localCount });
         setCaptureCountdown(localCount);
+        if (typeof navigator !== "undefined" && navigator.vibrate) {
+          navigator.vibrate(localCount === 1 ? 28 : 12);
+        }
       }, 1e3);
     }
     if (screen === Screen.IDLE) {
@@ -28616,7 +28814,18 @@
             ] })
           ] })
         ] }),
-        isCapturing && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-overlay", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-overlay-number", children: captureCountdown }) }),
+        isCapturing && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "capture-overlay capture-overlay--countdown", "aria-live": "polite", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+            "div",
+            {
+              className: `capture-overlay-number${captureCountdown <= 1 ? " capture-overlay-number--final" : ""}`,
+              children: captureCountdown
+            },
+            captureCountdown
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-overlay-hint", children: "Siap\u2026" })
+        ] }),
+        isFlashing && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-flash", "aria-hidden": "true" }),
         !isReviewing && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "preview-video-wrapper", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("video", { className: "preview-video", ref: videoRef, playsInline: true, muted: true }),
           isPasPhoto && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pas-photo-frame", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
@@ -28628,8 +28837,8 @@
           ) }),
           isAiPhoto && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "ai-photo-badge", children: "Mode AI Photo" })
         ] }),
-        isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "capture-overlay", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: lastImageUrl, alt: "Foto terakhir", className: "preview-video" }),
+        isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "capture-overlay capture-overlay--review", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: lastImageUrl, alt: "Foto terakhir", className: "preview-video capture-review-image" }),
           lastImageProcessing && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "processing-overlay", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "processing-spinner" }) }),
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "last-shot-label", children: processingMessage || (isAiPhoto ? "Foto AI siap" : "Menampilkan hasil foto\u2026 sesi lanjut sebentar lagi") })
         ] }),
@@ -28651,10 +28860,10 @@
             "button",
             {
               type: "button",
-              className: "primary-button preview-capture-button",
+              className: `primary-button preview-capture-button${isCapturing ? " preview-capture-button--armed" : ""}`,
               onClick: startCaptureCountdown,
               disabled: isCapturing || isReviewing || !sessionUser,
-              children: "Ambil Foto"
+              children: isCapturing ? "Mengambil\u2026" : "Ambil Foto"
             }
           )
         ] })
