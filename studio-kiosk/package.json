@@ -6,7 +6,8 @@
     "dev": "next dev -p 5173",
     "build": "next build",
     "start": "next start -p 5173",
-    "lint": "eslint"
+    "lint": "eslint",
+    "smoke-test:print": "npx tsx scripts/print-editor-smoke.ts"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.3",

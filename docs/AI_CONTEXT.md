@@ -153,7 +153,7 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 |--------|---------|
 | `services/api.js` | `fetchLatestImage`, `triggerBackendCapture`, session/register |
 | `config.js` | `getApiBase()`, `fetchKioskConfig()` |
-| `services/audio.js` → `useKioskAudio()` | Countdown/shutter/session sounds |
+| `services/audio.js` → `useKioskAudio()` | Capture SFX on `new-photo` (shutter/success) + countdown beeps + MP3 session prompts |
 | `hooks/useSessionTimer.js` | Countdown from `endsAt` |
 | `hooks/useCameraPreview.js` | HDMI capture card live view |
 
@@ -189,7 +189,9 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 | `AccessForm` | `components/kiosk/AccessForm.tsx` | Navigate to gallery |
 | `RegisterForm` | `components/kiosk/RegisterForm.tsx` | Home registration only |
 | `PrintCanvas` | `components/print/PrintCanvas.tsx` | Print preview/editor |
-| `PrintToolbar` | `components/print/PrintToolbar.tsx` | Filters + print submit |
+| `PrintEditorLayout` | `components/print/editor/PrintEditorLayout.tsx` | 3-column print editor shell |
+| `PrintLayoutPanel` | `components/print/editor/PrintLayoutPanel.tsx` | Sheet layout sidebar |
+| `PrintInspectorPanel` | `components/print/editor/PrintInspectorPanel.tsx` | Adjust + filter sidebar |
 | `TemplateSelector` | `components/print/TemplateSelector.tsx` | Template picker |
 | `HeadlineGallery` | `components/kiosk/HeadlineGallery.tsx` | Home page only |
 | `SessionKioskClient` | `components/kiosk/SessionKioskClient.tsx` | `/session` only — extend, don't duplicate |
@@ -300,6 +302,7 @@ New print template?
 cd api && node server.js                    # :4000
 cd api && npm run smoke-test                # health + themes (API must be running)
 cd studio-kiosk && npm run dev              # :5173
+cd studio-kiosk && npm run smoke-test:print # layout/margin/selection smoke
 cd kiosk-app && npm run dev                 # :5180 + Electron
 ```
 

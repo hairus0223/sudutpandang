@@ -6,7 +6,7 @@ export default function PrintPage() {
     <Suspense
       fallback={
         <div className="min-h-screen w-full bg-neutral-900 flex items-center justify-center text-white">
-          Loading print...
+          Memuat editor cetak...
         </div>
       }
     >

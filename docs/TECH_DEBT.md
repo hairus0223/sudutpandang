@@ -68,7 +68,7 @@ Inventory of known technical debt, prioritized for a single-studio LAN deploymen
 | # | Technical debt | Severity | Recommended fix | Effort | Business impact |
 |---|----------------|----------|-----------------|--------|-----------------|
 | 18 | **Dual session UIs** — `SessionKioskClient` (browser) vs `kiosk-app` (Electron) with different capture behavior | High | Single source of truth: operator controls only; kiosk passive; remove duplicate capture from `/session` or document as dev-only | M | Operator may think browser preview equals customer experience — support confusion |
-| 19 | **`new-photo` Socket event unused** — gallery/session poll images instead | Medium | Subscribe in `GalleryClient` and/or `SessionKioskClient`; fallback poll | S | Delayed gallery refresh; extra API load from polling |
+| 19 | **`new-photo` unused in gallery/session operator UI** — kiosk-app now celebrates on `new-photo` | Medium | Subscribe in `GalleryClient` and/or `SessionKioskClient`; fallback poll | S | Delayed gallery refresh; extra API load from polling |
 | 20 | ~~**Pause/resume/add-time APIs without UI**~~ — **Resolved** — Pause, Resume, +1 min, +5 min in `SessionKioskClient` via `session.service.ts` | — | — | — | — |
 | 21 | **`ai-photo` package is UI-only** — no AI pipeline | Medium | Remove package or implement real processing + honest copy | L | Customer expectation mismatch if marketed as AI |
 | 22 | **Print limit inconsistency** — register sets `printLimit: peopleCount`; `/api/print-limit` uses 2/3/5; print copies forced to `1` | Medium | Single rule in `customer.json` + api; restore people-based copies if intended | S | Customers may get wrong number of prints vs package promise |
@@ -96,7 +96,7 @@ Inventory of known technical debt, prioritized for a single-studio LAN deploymen
 | 30 | **Legacy `renderer.js`** + committed **`bundle.js`** | Medium | Delete after confirming `App.jsx` + Vite build; remove from repo | S | Contributors edit wrong file; merge conflicts on bundle |
 | 31 | **`.gitignore` minimal** — only `node_modules` | Medium | Add `.next/`, `dist/`, `bundle.js`, `.env` | S | Bloated repo; risk of committing build artifacts |
 | 32 | **`SessionKioskClient.tsx` ~750 lines** | Medium | **Partially done** — API in `session.service.ts`, timer in `useSessionTimer`; still large due to `RegisterOrCheckScreen` inline | M | Hard to review session changes safely |
-| 33 | **Debug logging in production paths** — e.g. config fetch, audio service | Low | Remove or gate behind `DEBUG` env | S | Noise in kiosk logs during sessions |
+| 33 | **Debug logging in production paths** — e.g. config fetch | Low | Remove or gate behind `DEBUG` env | S | Noise in kiosk logs during sessions |
 | 34 | **Spurious api dependencies** — `lucide-react`, `child_process` npm package | Low | Remove unused deps from `api/package.json` | S | Confusion, slightly slower installs |
 | 35 | **`ImageData` type duplicated** in store, modal, export | Low | `types/photo.ts` shared import | S | Schema drift between gallery and print |
 | 36 | **Silent error handling** — many `.catch(() => {})` | Medium | User-visible toast or operator alert for session/print failures | S | Failures invisible until customer complains |
