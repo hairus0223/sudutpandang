@@ -24779,6 +24779,7 @@
   var import_react2 = __toESM(require_react());
   function createCaptureSynth() {
     let ctx = null;
+    let master = null;
     function getCtx() {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return null;
@@ -24788,31 +24789,50 @@
       }
       return ctx;
     }
+    function getMaster() {
+      const c = getCtx();
+      if (!c) return null;
+      if (!master) {
+        master = c.createGain();
+        master.gain.value = 1;
+        master.connect(c.destination);
+      }
+      return master;
+    }
     function playTone({
       frequency,
       duration = 0.16,
       type = "sine",
-      peak = 0.28,
-      startAt = 0
+      peak = 0.55,
+      startAt = 0,
+      attack = 0.01
     }) {
       const c = getCtx();
-      if (!c) return;
+      const dest = getMaster();
+      if (!c || !dest) return;
       const now = c.currentTime + startAt;
       const osc = c.createOscillator();
       const gain = c.createGain();
       osc.type = type;
       osc.frequency.setValueAtTime(frequency, now);
       gain.gain.setValueAtTime(1e-4, now);
-      gain.gain.exponentialRampToValueAtTime(peak, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(Math.max(1e-3, peak), now + attack);
       gain.gain.exponentialRampToValueAtTime(1e-4, now + duration);
       osc.connect(gain);
-      gain.connect(c.destination);
+      gain.connect(dest);
       osc.start(now);
-      osc.stop(now + duration + 0.02);
+      osc.stop(now + duration + 0.03);
     }
-    function playNoiseBurst({ duration = 0.05, peak = 0.45, startAt = 0, filterFreq = 2200 }) {
+    function playNoiseBurst({
+      duration = 0.05,
+      peak = 0.7,
+      startAt = 0,
+      filterFreq = 2200,
+      filterType = "bandpass"
+    }) {
       const c = getCtx();
-      if (!c) return;
+      const dest = getMaster();
+      if (!c || !dest) return;
       const now = c.currentTime + startAt;
       const length = Math.max(1, Math.floor(c.sampleRate * duration));
       const buffer = c.createBuffer(1, length, c.sampleRate);
@@ -24823,57 +24843,98 @@
       const src = c.createBufferSource();
       src.buffer = buffer;
       const filter = c.createBiquadFilter();
-      filter.type = "bandpass";
+      filter.type = filterType;
       filter.frequency.setValueAtTime(filterFreq, now);
-      filter.Q.setValueAtTime(0.9, now);
+      filter.Q.setValueAtTime(0.75, now);
       const gain = c.createGain();
       gain.gain.setValueAtTime(1e-4, now);
-      gain.gain.exponentialRampToValueAtTime(peak, now + 4e-3);
+      gain.gain.exponentialRampToValueAtTime(Math.max(1e-3, peak), now + 3e-3);
       gain.gain.exponentialRampToValueAtTime(1e-4, now + duration);
       src.connect(filter);
       filter.connect(gain);
-      gain.connect(c.destination);
+      gain.connect(dest);
       src.start(now);
-      src.stop(now + duration + 0.02);
+      src.stop(now + duration + 0.03);
     }
     function beep(remainingSeconds = 3) {
-      const urgency = Math.max(0, 4 - Number(remainingSeconds || 0));
-      const freq = 760 + urgency * 180;
-      playTone({ frequency: freq, duration: 0.14, type: "sine", peak: 0.32 });
-      if (remainingSeconds <= 1) {
+      const remaining = Number(remainingSeconds || 0);
+      const freq = remaining <= 1 ? 1318 : remaining <= 2 ? 1046 : 880;
+      playTone({
+        frequency: freq,
+        duration: 0.22,
+        type: "sine",
+        peak: 0.9,
+        attack: 3e-3
+      });
+      playTone({
+        frequency: freq * 2,
+        duration: 0.14,
+        type: "sine",
+        peak: 0.28,
+        startAt: 0.012,
+        attack: 4e-3
+      });
+      if (remaining <= 1) {
         playTone({
-          frequency: freq * 1.5,
-          duration: 0.1,
-          type: "triangle",
-          peak: 0.18,
-          startAt: 0.04
+          frequency: 1568,
+          duration: 0.26,
+          type: "sine",
+          peak: 0.95,
+          startAt: 0.14,
+          attack: 3e-3
         });
       }
     }
     function shutter() {
-      playTone({ frequency: 190, duration: 0.04, type: "square", peak: 0.22 });
-      playNoiseBurst({ duration: 0.055, peak: 0.55, startAt: 0.018, filterFreq: 2800 });
-      playTone({
-        frequency: 920,
+      playTone({ frequency: 140, duration: 0.05, type: "square", peak: 0.7 });
+      playNoiseBurst({
         duration: 0.07,
-        type: "triangle",
-        peak: 0.2,
-        startAt: 0.03
+        peak: 0.95,
+        startAt: 0.012,
+        filterFreq: 3200
       });
-      playNoiseBurst({ duration: 0.09, peak: 0.22, startAt: 0.06, filterFreq: 900 });
+      playTone({
+        frequency: 880,
+        duration: 0.09,
+        type: "triangle",
+        peak: 0.55,
+        startAt: 0.025
+      });
+      playNoiseBurst({
+        duration: 0.12,
+        peak: 0.45,
+        startAt: 0.05,
+        filterFreq: 700,
+        filterType: "lowpass"
+      });
+      playTone({
+        frequency: 220,
+        duration: 0.08,
+        type: "sine",
+        peak: 0.4,
+        startAt: 0.06
+      });
     }
     function captureSuccess() {
-      playTone({ frequency: 523.25, duration: 0.12, type: "sine", peak: 0.18 });
+      playTone({ frequency: 523.25, duration: 0.14, type: "sine", peak: 0.55 });
       playTone({
         frequency: 659.25,
-        duration: 0.16,
+        duration: 0.2,
         type: "sine",
-        peak: 0.16,
+        peak: 0.6,
         startAt: 0.08
+      });
+      playTone({
+        frequency: 783.99,
+        duration: 0.28,
+        type: "sine",
+        peak: 0.5,
+        startAt: 0.16
       });
     }
     function unlock() {
       getCtx();
+      getMaster();
     }
     return { beep, shutter, captureSuccess, unlock };
   }
@@ -24882,14 +24943,19 @@
     if (!synthRef.current) {
       synthRef.current = createCaptureSynth();
     }
-    const sounds = (0, import_react2.useMemo)(
-      () => ({
+    const sounds = (0, import_react2.useMemo)(() => {
+      const map = {
         welcome: new Audio("/audio/welcome-id.mp3"),
         timeWarning: new Audio("/audio/time-warning-id.mp3"),
+        // Original Indonesian voice — correct session-end UX
         sessionEnd: new Audio("/audio/session-end-id.mp3")
-      }),
-      []
-    );
+      };
+      Object.values(map).forEach((audio) => {
+        audio.volume = 1;
+      });
+      map.sessionEnd.volume = 0.85;
+      return map;
+    }, []);
     const play = (0, import_react2.useCallback)(
       (key, options = {}) => {
         const synth = synthRef.current;
@@ -24908,6 +24974,7 @@
         const audio = sounds[key];
         if (!audio) return;
         try {
+          if (key !== "sessionEnd") audio.volume = 1;
           audio.currentTime = 0;
           audio.play().catch(() => {
           });
@@ -24930,6 +24997,11 @@
     const [isPaused, setIsPaused] = (0, import_react3.useState)(false);
     const timerRef = (0, import_react3.useRef)(null);
     const warnedRef = (0, import_react3.useRef)(false);
+    const expiredRef = (0, import_react3.useRef)(false);
+    const onExpireRef = (0, import_react3.useRef)(onExpire);
+    const onWarnRef = (0, import_react3.useRef)(onWarn);
+    onExpireRef.current = onExpire;
+    onWarnRef.current = onWarn;
     (0, import_react3.useEffect)(() => {
       if (!endsAt || isPaused) return;
       if (timerRef.current) clearInterval(timerRef.current);
@@ -24939,13 +25011,17 @@
           clearInterval(timerRef.current);
           timerRef.current = null;
           setRemainingMs(0);
+          setEndsAt(null);
           warnedRef.current = false;
-          onExpire?.();
+          if (!expiredRef.current) {
+            expiredRef.current = true;
+            onExpireRef.current?.();
+          }
           return;
         }
         if (!warnedRef.current && remaining <= 6e4) {
           warnedRef.current = true;
-          onWarn?.();
+          onWarnRef.current?.();
         }
         setRemainingMs(remaining);
       }, 500);
@@ -24953,7 +25029,7 @@
         if (timerRef.current) clearInterval(timerRef.current);
         timerRef.current = null;
       };
-    }, [endsAt, isPaused, onExpire, onWarn]);
+    }, [endsAt, isPaused]);
     function stopInterval() {
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = null;
@@ -24975,6 +25051,9 @@
       }
       if (serverEndsAt != null) {
         setRemainingMs(Math.max(0, serverEndsAt - Date.now()));
+        if (serverEndsAt > Date.now()) {
+          expiredRef.current = false;
+        }
         warnedRef.current = false;
       } else if (serverRemainingMs != null) {
         setRemainingMs(serverRemainingMs);
@@ -24982,6 +25061,7 @@
     }
     function startWithEndsAt(serverEndsAt) {
       setIsPaused(false);
+      expiredRef.current = false;
       setEndsAt(serverEndsAt);
       setRemainingMs(Math.max(0, serverEndsAt - Date.now()));
       warnedRef.current = false;
@@ -24997,6 +25077,7 @@
       setIsPaused(false);
       setRemainingMs(durationMs);
       warnedRef.current = false;
+      expiredRef.current = false;
     }
     return {
       remainingMs,
@@ -28459,6 +28540,8 @@
     MAIN: "main",
     END: "end"
   };
+  var REVIEW_DISPLAY_MS = 3e3;
+  var FLASH_HOLD_MS = 280;
   var PACKAGE_LABELS = {
     "self-photo": "Self Photo",
     "pas-photo": "Pas Photo",
@@ -28478,7 +28561,9 @@
     const [captureCountdown, setCaptureCountdown] = (0, import_react5.useState)(3);
     const [isCapturing, setIsCapturing] = (0, import_react5.useState)(false);
     const [isFlashing, setIsFlashing] = (0, import_react5.useState)(false);
+    const [isWaitingCapture, setIsWaitingCapture] = (0, import_react5.useState)(false);
     const [isReviewing, setIsReviewing] = (0, import_react5.useState)(false);
+    const [shotStamp, setShotStamp] = (0, import_react5.useState)(0);
     const [captureCount, setCaptureCount] = (0, import_react5.useState)(0);
     const [lastImageUrl, setLastImageUrl] = (0, import_react5.useState)(null);
     const [lastImageProcessing, setLastImageProcessing] = (0, import_react5.useState)(false);
@@ -28493,6 +28578,8 @@
     const screenRef = (0, import_react5.useRef)(screen);
     const countdownTimerRef = (0, import_react5.useRef)(null);
     const reviewTimerRef = (0, import_react5.useRef)(null);
+    const sessionEndingRef = (0, import_react5.useRef)(false);
+    const sessionEndAudioPlayedRef = (0, import_react5.useRef)(false);
     sessionUserRef.current = sessionUser;
     packageTypeRef.current = packageType;
     screenRef.current = screen;
@@ -28536,33 +28623,47 @@
         unlockAudio();
         clearCaptureTimers();
         setIsCapturing(false);
+        setIsReviewing(false);
         setIsFlashing(true);
+        setIsWaitingCapture(false);
+        setShotStamp((n) => n + 1);
         play("shutter");
         if (typeof navigator !== "undefined" && navigator.vibrate) {
-          navigator.vibrate([30, 40, 50]);
+          navigator.vibrate([40, 30, 60]);
         }
         setCaptureCount((c) => c + 1);
         setProcessingError(null);
+        const flashHold = new Promise((resolve) => {
+          window.setTimeout(resolve, FLASH_HOLD_MS);
+        });
         const pkg = packageTypeRef.current;
-        try {
-          const result = await refreshPreview();
-          const latest = result?.image;
-          const waitingForProcessed = pkg === "ai-photo" || pkg === "pas-photo" ? latest?.processingStatus !== "ready" : false;
-          setLastImageProcessing(Boolean(waitingForProcessed));
-          if (waitingForProcessed && (payload.imageId || latest?.imageId)) {
-            void waitForImageProcessing(payload.imageId || latest.imageId);
+        const previewPromise = (async () => {
+          try {
+            const result = await refreshPreview();
+            const latest = result?.image;
+            const waitingForProcessed = pkg === "ai-photo" || pkg === "pas-photo" ? latest?.processingStatus !== "ready" : false;
+            setLastImageProcessing(Boolean(waitingForProcessed));
+            if (waitingForProcessed && (payload.imageId || latest?.imageId)) {
+              void waitForImageProcessing(payload.imageId || latest.imageId);
+            }
+            return result;
+          } catch (err) {
+            console.warn("Preview refresh after new-photo failed", err);
+            return null;
           }
-        } catch (err) {
-          console.warn("Preview refresh after new-photo failed", err);
-        }
+        })();
+        await flashHold;
         setIsFlashing(false);
+        setIsWaitingCapture(true);
+        await previewPromise;
+        setIsWaitingCapture(false);
         setIsReviewing(true);
         play("captureSuccess");
         reviewTimerRef.current = window.setTimeout(() => {
           setIsReviewing(false);
           startCameraPreview();
           reviewTimerRef.current = null;
-        }, 3e3);
+        }, REVIEW_DISPLAY_MS);
       },
       [
         clearCaptureTimers,
@@ -28575,17 +28676,38 @@
     );
     const celebrateNewCaptureRef = (0, import_react5.useRef)(celebrateNewCapture);
     celebrateNewCaptureRef.current = celebrateNewCapture;
+    const clearSessionTimerRef = (0, import_react5.useRef)(() => {
+    });
+    const endSession = (0, import_react5.useCallback)(() => {
+      if (sessionEndingRef.current && screenRef.current === Screen.END) {
+        return;
+      }
+      sessionEndingRef.current = true;
+      clearSessionTimerRef.current();
+      clearCaptureTimers();
+      stopCameraPreview();
+      cancelPoll();
+      if (!sessionEndAudioPlayedRef.current) {
+        sessionEndAudioPlayedRef.current = true;
+        play("sessionEnd");
+      }
+      setIsCapturing(false);
+      setIsFlashing(false);
+      setIsWaitingCapture(false);
+      setIsReviewing(false);
+      setScreen(Screen.END);
+      setSessionUser(null);
+    }, [cancelPoll, clearCaptureTimers, play, stopCameraPreview]);
+    const endSessionRef = (0, import_react5.useRef)(endSession);
+    endSessionRef.current = endSession;
     const sessionTimer = useSessionTimer({
       durationMs: kioskConfig.sessionDurationMinutes * 60 * 1e3,
       onExpire: () => {
-        play("sessionEnd");
-        stopCameraPreview();
-        cancelPoll();
-        setScreen(Screen.END);
-        setSessionUser(null);
+        endSessionRef.current();
       },
       onWarn: () => play("timeWarning")
     });
+    clearSessionTimerRef.current = sessionTimer.clear;
     const remainingMs = sessionTimer.remainingMs;
     const remainingLabel = (0, import_react5.useMemo)(() => {
       if (!remainingMs) return "10:00";
@@ -28624,6 +28746,8 @@
         transports: ["websocket"]
       });
       socket.on("kiosk-trial-start", ({ user, endsAt, ...fields }) => {
+        sessionEndingRef.current = false;
+        sessionEndAudioPlayedRef.current = false;
         clearCaptureTimers();
         unlockAudio();
         setSessionUser(user);
@@ -28634,6 +28758,7 @@
         setProcessingError(null);
         setIsCapturing(false);
         setIsFlashing(false);
+        setIsWaitingCapture(false);
         setIsReviewing(false);
         syncKioskFields(fields, kioskSetters);
         sessionTimer.startWithEndsAt(endsAt);
@@ -28647,6 +28772,8 @@
         }
       });
       socket.on("kiosk-main-start", ({ user, endsAt, ...fields }) => {
+        sessionEndingRef.current = false;
+        sessionEndAudioPlayedRef.current = false;
         clearCaptureTimers();
         unlockAudio();
         setSessionUser(user);
@@ -28657,25 +28784,17 @@
         setProcessingError(null);
         setIsCapturing(false);
         setIsFlashing(false);
+        setIsWaitingCapture(false);
         setIsReviewing(false);
         syncKioskFields(fields, kioskSetters);
         sessionTimer.startWithEndsAt(endsAt);
         startCameraPreview();
       });
       socket.on("session-ended", () => {
-        play("sessionEnd");
-        stopCameraPreview();
-        cancelPoll();
-        sessionTimer.clear();
-        clearCaptureTimers();
-        setIsCapturing(false);
-        setIsFlashing(false);
-        setIsReviewing(false);
-        setScreen(Screen.END);
-        setSessionUser(null);
+        endSessionRef.current();
       });
       socket.on("session-state", ({ activeSession, sessionLocked, timer }) => {
-        if (sessionLocked || !timer) return;
+        if (sessionLocked || !timer || sessionEndingRef.current) return;
         setSessionUser(timer.user);
         syncKioskFields(timer, kioskSetters);
         if (activeSession?.packageType && !timer.packageType) {
@@ -28697,6 +28816,11 @@
       socket.on(
         "session-timer-update",
         ({ user, endsAt, pausedAt, remainingMs: remaining, phase, ...fields }) => {
+          if (sessionEndingRef.current) return;
+          if (typeof remaining === "number" && remaining <= 0 && !pausedAt) {
+            endSessionRef.current();
+            return;
+          }
           setSessionUser(user);
           syncKioskFields(fields, kioskSetters);
           sessionTimer.syncFromServer({ endsAt, pausedAt, remainingMs: remaining });
@@ -28800,7 +28924,7 @@
       const isAiPhoto = packageType === "ai-photo";
       const passportAspect = passportSizeId === "2x3" ? "2 / 3" : passportSizeId === "4x6" ? "4 / 6" : "3 / 4";
       return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "screen screen--preview", children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "preview-wrapper", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "preview-header flex flex-row justify-between items-center gap-2", children: [
+        !isReviewing && !isWaitingCapture && !isFlashing && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "preview-header flex flex-row justify-between items-center gap-2", children: [
           /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "pill", children: [
             phaseLabel,
             " ",
@@ -28814,35 +28938,60 @@
             ] })
           ] })
         ] }),
-        isCapturing && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "capture-overlay capture-overlay--countdown", "aria-live": "polite", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "div",
-            {
-              className: `capture-overlay-number${captureCountdown <= 1 ? " capture-overlay-number--final" : ""}`,
-              children: captureCountdown
-            },
-            captureCountdown
-          ),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-overlay-hint", children: "Siap\u2026" })
-        ] }),
+        isCapturing && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+          "div",
+          {
+            className: `capture-overlay capture-overlay--countdown${captureCountdown <= 1 ? " capture-overlay--urgent" : ""}`,
+            "aria-live": "polite",
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-countdown-ring", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                "div",
+                {
+                  className: `capture-overlay-number${captureCountdown <= 1 ? " capture-overlay-number--final" : ""}`,
+                  children: captureCountdown
+                },
+                captureCountdown
+              ) }, `ring-${captureCountdown}`),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-overlay-hint", children: captureCountdown <= 1 ? "Pose!" : "Siap\u2026" })
+            ]
+          }
+        ),
         isFlashing && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-flash", "aria-hidden": "true" }),
-        !isReviewing && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "preview-video-wrapper", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("video", { className: "preview-video", ref: videoRef, playsInline: true, muted: true }),
-          isPasPhoto && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pas-photo-frame", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "div",
-            {
-              className: "pas-photo-inner",
-              style: { aspectRatio: passportAspect }
-            }
-          ) }),
-          isAiPhoto && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "ai-photo-badge", children: "Mode AI Photo" })
+        isWaitingCapture && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "capture-wait", "aria-live": "polite", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-wait-text", children: "Mengambil foto\u2026" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-wait-sub", children: "Mohon tunggu sebentar" })
         ] }),
+        !isReviewing && !isWaitingCapture && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+          "div",
+          {
+            className: `preview-video-wrapper${isCapturing ? " preview-video-wrapper--countdown" : ""}`,
+            children: [
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("video", { className: "preview-video", ref: videoRef, playsInline: true, muted: true }),
+              isPasPhoto && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pas-photo-frame", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                "div",
+                {
+                  className: "pas-photo-inner",
+                  style: { aspectRatio: passportAspect }
+                }
+              ) }),
+              isAiPhoto && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "ai-photo-badge", children: "Mode AI Photo" })
+            ]
+          }
+        ),
         isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "capture-overlay capture-overlay--review", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: lastImageUrl, alt: "Foto terakhir", className: "preview-video capture-review-image" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+            "img",
+            {
+              src: lastImageUrl,
+              alt: "Foto terakhir",
+              className: "capture-review-image"
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-review-badge", children: "Hasil foto" }),
           lastImageProcessing && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "processing-overlay", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "processing-spinner" }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "last-shot-label", children: processingMessage || (isAiPhoto ? "Foto AI siap" : "Menampilkan hasil foto\u2026 sesi lanjut sebentar lagi") })
-        ] }),
-        !isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-review-caption", children: processingMessage || (isAiPhoto ? "Foto AI siap" : "Lihat hasilnya \u2014 sesi lanjut sebentar lagi") })
+        ] }, `review-${shotStamp}`),
+        !isReviewing && !isWaitingCapture && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
           "div",
           {
             className: `last-shot-thumb${lastImageProcessing ? " last-shot-thumb--processing" : ""}`,
@@ -28854,27 +29003,26 @@
           }
         ),
         processingError && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "kiosk-processing-error", children: processingError }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "preview-toolbar", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pill-big", children: remainingLabel }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "button",
-            {
-              type: "button",
-              className: `primary-button preview-capture-button${isCapturing ? " preview-capture-button--armed" : ""}`,
-              onClick: startCaptureCountdown,
-              disabled: isCapturing || isReviewing || !sessionUser,
-              children: isCapturing ? "Mengambil\u2026" : "Ambil Foto"
-            }
-          )
-        ] })
+        !isReviewing && !isWaitingCapture && !isFlashing && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "preview-toolbar", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pill-big", children: remainingLabel }) })
       ] }) });
     }
+    if (screen === Screen.END) {
+      return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "screen screen--idle screen--end", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "headline", children: "Terima kasih" }),
+        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "subheadline", children: [
+          "Foto Anda sedang diproses.",
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("br", {}),
+          "Silakan hubungi tim studio bila ingin melihat atau mencetak lebih banyak."
+        ] })
+      ] });
+    }
     return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "screen screen--idle", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "headline", children: "Terima kasih" }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "subheadline", children: [
-        "Foto Anda sedang diproses.",
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: "/logo-light.png", height: 150, alt: "Sudut Pandang" }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pill", children: "Self Photo Session" }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "subheadline text-center", children: [
+        "Menunggu sesi dari operator.",
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("br", {}),
-        "Silakan hubungi tim studio bila ingin melihat atau mencetak lebih banyak."
+        "Registrasi dan kontrol sesi dilakukan dari operator kiosk."
       ] })
     ] });
   }

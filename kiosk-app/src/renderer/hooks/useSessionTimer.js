@@ -7,6 +7,11 @@ export function useSessionTimer({ durationMs, onExpire, onWarn }) {
 
   const timerRef = useRef(null);
   const warnedRef = useRef(false);
+  const expiredRef = useRef(false);
+  const onExpireRef = useRef(onExpire);
+  const onWarnRef = useRef(onWarn);
+  onExpireRef.current = onExpire;
+  onWarnRef.current = onWarn;
 
   useEffect(() => {
     if (!endsAt || isPaused) return;
@@ -19,16 +24,19 @@ export function useSessionTimer({ durationMs, onExpire, onWarn }) {
       if (remaining <= 0) {
         clearInterval(timerRef.current);
         timerRef.current = null;
-
         setRemainingMs(0);
+        setEndsAt(null);
         warnedRef.current = false;
-        onExpire?.();
+        if (!expiredRef.current) {
+          expiredRef.current = true;
+          onExpireRef.current?.();
+        }
         return;
       }
 
       if (!warnedRef.current && remaining <= 60000) {
         warnedRef.current = true;
-        onWarn?.();
+        onWarnRef.current?.();
       }
 
       setRemainingMs(remaining);
@@ -38,7 +46,7 @@ export function useSessionTimer({ durationMs, onExpire, onWarn }) {
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = null;
     };
-  }, [endsAt, isPaused, onExpire, onWarn]);
+  }, [endsAt, isPaused]);
 
   function stopInterval() {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -65,6 +73,9 @@ export function useSessionTimer({ durationMs, onExpire, onWarn }) {
 
     if (serverEndsAt != null) {
       setRemainingMs(Math.max(0, serverEndsAt - Date.now()));
+      if (serverEndsAt > Date.now()) {
+        expiredRef.current = false;
+      }
       warnedRef.current = false;
     } else if (serverRemainingMs != null) {
       setRemainingMs(serverRemainingMs);
@@ -73,6 +84,7 @@ export function useSessionTimer({ durationMs, onExpire, onWarn }) {
 
   function startWithEndsAt(serverEndsAt) {
     setIsPaused(false);
+    expiredRef.current = false;
     setEndsAt(serverEndsAt);
     setRemainingMs(Math.max(0, serverEndsAt - Date.now()));
     warnedRef.current = false;
@@ -94,6 +106,7 @@ export function useSessionTimer({ durationMs, onExpire, onWarn }) {
     setIsPaused(false);
     setRemainingMs(durationMs);
     warnedRef.current = false;
+    expiredRef.current = false;
   }
 
   return {

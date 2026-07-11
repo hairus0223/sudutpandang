@@ -18,8 +18,8 @@ const Screen = {
   END: "end",
 };
 
-/** Photo review stays up longer than countdown / wait (32" TV). */
-const REVIEW_DISPLAY_MS = 7000;
+/** Photo review — long enough to enjoy, shorter than lingering. */
+const REVIEW_DISPLAY_MS = 3000;
 const FLASH_HOLD_MS = 280;
 
 const PACKAGE_LABELS = {
@@ -62,6 +62,8 @@ export function App() {
   const screenRef = useRef(screen);
   const countdownTimerRef = useRef(null);
   const reviewTimerRef = useRef(null);
+  const sessionEndingRef = useRef(false);
+  const sessionEndAudioPlayedRef = useRef(false);
   sessionUserRef.current = sessionUser;
   packageTypeRef.current = packageType;
   screenRef.current = screen;
@@ -181,17 +183,42 @@ export function App() {
   const celebrateNewCaptureRef = useRef(celebrateNewCapture);
   celebrateNewCaptureRef.current = celebrateNewCapture;
 
+  const clearSessionTimerRef = useRef(() => {});
+
+  const endSession = useCallback(() => {
+    if (sessionEndingRef.current && screenRef.current === Screen.END) {
+      return;
+    }
+    sessionEndingRef.current = true;
+    clearSessionTimerRef.current();
+    clearCaptureTimers();
+    stopCameraPreview();
+    cancelPoll();
+
+    if (!sessionEndAudioPlayedRef.current) {
+      sessionEndAudioPlayedRef.current = true;
+      play("sessionEnd");
+    }
+
+    setIsCapturing(false);
+    setIsFlashing(false);
+    setIsWaitingCapture(false);
+    setIsReviewing(false);
+    setScreen(Screen.END);
+    setSessionUser(null);
+  }, [cancelPoll, clearCaptureTimers, play, stopCameraPreview]);
+
+  const endSessionRef = useRef(endSession);
+  endSessionRef.current = endSession;
+
   const sessionTimer = useSessionTimer({
     durationMs: kioskConfig.sessionDurationMinutes * 60 * 1000,
     onExpire: () => {
-      play("sessionEnd");
-      stopCameraPreview();
-      cancelPoll();
-      setScreen(Screen.END);
-      setSessionUser(null);
+      endSessionRef.current();
     },
     onWarn: () => play("timeWarning"),
   });
+  clearSessionTimerRef.current = sessionTimer.clear;
 
   const remainingMs = sessionTimer.remainingMs;
 
@@ -240,6 +267,8 @@ export function App() {
     });
 
     socket.on("kiosk-trial-start", ({ user, endsAt, ...fields }) => {
+      sessionEndingRef.current = false;
+      sessionEndAudioPlayedRef.current = false;
       clearCaptureTimers();
       unlockAudio();
       setSessionUser(user);
@@ -266,6 +295,8 @@ export function App() {
     });
 
     socket.on("kiosk-main-start", ({ user, endsAt, ...fields }) => {
+      sessionEndingRef.current = false;
+      sessionEndAudioPlayedRef.current = false;
       clearCaptureTimers();
       unlockAudio();
       setSessionUser(user);
@@ -284,21 +315,11 @@ export function App() {
     });
 
     socket.on("session-ended", () => {
-      play("sessionEnd");
-      stopCameraPreview();
-      cancelPoll();
-      sessionTimer.clear();
-      clearCaptureTimers();
-      setIsCapturing(false);
-      setIsFlashing(false);
-      setIsWaitingCapture(false);
-      setIsReviewing(false);
-      setScreen(Screen.END);
-      setSessionUser(null);
+      endSessionRef.current();
     });
 
     socket.on("session-state", ({ activeSession, sessionLocked, timer }) => {
-      if (sessionLocked || !timer) return;
+      if (sessionLocked || !timer || sessionEndingRef.current) return;
 
       setSessionUser(timer.user);
       syncKioskFields(timer, kioskSetters);
@@ -324,6 +345,13 @@ export function App() {
     socket.on(
       "session-timer-update",
       ({ user, endsAt, pausedAt, remainingMs: remaining, phase, ...fields }) => {
+        // Avoid reviving preview after local/server session end
+        if (sessionEndingRef.current) return;
+        if (typeof remaining === "number" && remaining <= 0 && !pausedAt) {
+          endSessionRef.current();
+          return;
+        }
+
         setSessionUser(user);
         syncKioskFields(fields, kioskSetters);
         sessionTimer.syncFromServer({ endsAt, pausedAt, remainingMs: remaining });
@@ -574,7 +602,7 @@ export function App() {
           {!isReviewing && !isWaitingCapture && !isFlashing && (
             <div className="preview-toolbar">
               <div className="pill-big">{remainingLabel}</div>
-              <button
+              {/* <button
                 type="button"
                 className={`primary-button preview-capture-button${
                   isCapturing ? " preview-capture-button--armed" : ""
@@ -583,7 +611,7 @@ export function App() {
                 disabled={isCapturing || isReviewing || !sessionUser}
               >
                 {isCapturing ? "Mengambil…" : "Ambil Foto"}
-              </button>
+              </button> */}
             </div>
           )}
         </div>
@@ -591,13 +619,27 @@ export function App() {
     );
   }
 
+  if (screen === Screen.END) {
+    return (
+      <div className="screen screen--idle screen--end">
+        <div className="headline">Terima kasih</div>
+        <p className="subheadline">
+          Foto Anda sedang diproses.
+          <br />
+          Silakan hubungi tim studio bila ingin melihat atau mencetak lebih banyak.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="screen screen--idle">
-      <div className="headline">Terima kasih</div>
-      <p className="subheadline">
-        Foto Anda sedang diproses.
+      <img src="/logo-light.png" height={150} alt="Sudut Pandang" />
+      <div className="pill">Self Photo Session</div>
+      <p className="subheadline text-center">
+        Menunggu sesi dari operator.
         <br />
-        Silakan hubungi tim studio bila ingin melihat atau mencetak lebih banyak.
+        Registrasi dan kontrol sesi dilakukan dari operator kiosk.
       </p>
     </div>
   );

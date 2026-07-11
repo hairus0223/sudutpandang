@@ -193,11 +193,14 @@ export function useKioskAudio() {
     const map = {
       welcome: new Audio("/audio/welcome-id.mp3"),
       timeWarning: new Audio("/audio/time-warning-id.mp3"),
+      // Original Indonesian voice — correct session-end UX
       sessionEnd: new Audio("/audio/session-end-id.mp3"),
     };
     Object.values(map).forEach((audio) => {
       audio.volume = 1;
     });
+    // Slightly softer so the voice reads warmer on TV speakers
+    map.sessionEnd.volume = 0.85;
     return map;
   }, []);
 
@@ -220,7 +223,7 @@ export function useKioskAudio() {
       const audio = sounds[key];
       if (!audio) return;
       try {
-        audio.volume = 1;
+        if (key !== "sessionEnd") audio.volume = 1;
         audio.currentTime = 0;
         audio.play().catch(() => {});
       } catch {

@@ -813,7 +813,6 @@ app.post("/api/session/add-time", (req, res) => {
 });
 
 app.post("/api/session/stop", (req, res) => {
-  emitSessionTimerUpdate();
   activeSession = null;
   sessionLocked = true;
   io.emit("session-ended");
@@ -823,7 +822,6 @@ app.post("/api/session/stop", (req, res) => {
 // Auto-end session
 setInterval(() => {
   if (activeSession && !activeSession.pausedAt && Date.now() > activeSession.endsAt) {
-    emitSessionTimerUpdate();
     activeSession = null;
     sessionLocked = true;
     io.emit("session-ended");
