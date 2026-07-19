@@ -4,11 +4,13 @@ import {
   removeImageBackground,
 } from "./backgroundRemoval.js";
 import {
+  readCustomerLookId,
   readCustomerPackageType,
   readCustomerThemeId,
   readPassportBackgroundColor,
   readPassportSizeId,
 } from "./customerConfig.js";
+import { LOOK_DEFAULT_INTENSITY } from "./lookPresets.js";
 import { compositePassportPhoto } from "./passportComposite.js";
 import {
   applyThemeToSubject,
@@ -34,7 +36,7 @@ import {
 const IMAGE_COMPOSITE_TIMEOUT_MS =
   Number(process.env.IMAGE_COMPOSITE_TIMEOUT_MS) || 60_000;
 
-/** @typedef {{ operation: string, userDir: string, imageId: string, user?: string, packageType?: string, passportColor?: string, themeId?: string, onComplete?: (result: unknown) => void, onError?: (error: Error) => void }} QueueJob */
+/** @typedef {{ operation: string, userDir: string, imageId: string, user?: string, packageType?: string, passportColor?: string, themeId?: string, lookId?: string, onComplete?: (result: unknown) => void, onError?: (error: Error) => void }} QueueJob */
 
 /**
  * @param {string} operation
@@ -55,6 +57,14 @@ function mapJobErrorToUserMessage(operation, error) {
   }
 
   if (operation === "remove-bg") {
+    // Theme composite runs inside remove-bg for ai-photo; surface that clearly.
+    if (
+      message.toLowerCase().includes("hue") ||
+      message.toLowerCase().includes("theme") ||
+      message.includes("COMPOSITE_TIMEOUT:remove-bg-theme")
+    ) {
+      return "Gagal menerapkan tema AI. Silakan coba lagi atau hubungi staf.";
+    }
     return mapRemovalErrorToUserMessage(error);
   }
 
@@ -236,14 +246,23 @@ async function runPassportComposite(userDir, imageId, passportColor, passportSiz
  * @param {string} userDir
  * @param {string} imageId
  * @param {string} themeId
+ * @param {string} [lookId]
  */
-async function runThemeComposite(userDir, imageId, themeId) {
+async function runThemeComposite(userDir, imageId, themeId, lookId) {
   const subjectPath = getSubjectPath(userDir, imageId);
   const outputPath = getThemedPath(userDir, imageId);
+  const resolvedLookId = lookId ?? readCustomerLookId(userDir);
 
-  const result = await applyThemeToSubject({ subjectPath, outputPath, themeId });
+  const result = await applyThemeToSubject({
+    subjectPath,
+    outputPath,
+    themeId,
+    lookId: resolvedLookId,
+    lookIntensity: LOOK_DEFAULT_INTENSITY,
+  });
   return updateAfterTheme(userDir, imageId, themeId, {
     themeBackgroundSource: result.themeBackgroundSource,
+    bakedLookId: result.bakedLookId,
   });
 }
 
@@ -291,8 +310,9 @@ export function registerImageProcessingHandlers() {
     if (packageType === "ai-photo" && THEME_GENERATION_ENABLED) {
       updateAfterRemoveBg(userDir, imageId, "theme");
       const themeId = job.themeId ?? readCustomerThemeId(userDir);
+      const lookId = job.lookId ?? readCustomerLookId(userDir);
       const meta = await withCompositeTimeout(
-        runThemeComposite(userDir, imageId, themeId),
+        runThemeComposite(userDir, imageId, themeId, lookId),
         IMAGE_COMPOSITE_TIMEOUT_MS,
         "remove-bg-theme"
       );
@@ -342,8 +362,9 @@ export function registerImageProcessingHandlers() {
     });
 
     const themeId = job.themeId ?? readCustomerThemeId(userDir);
+    const lookId = job.lookId ?? readCustomerLookId(userDir);
     const meta = await withCompositeTimeout(
-      runThemeComposite(userDir, imageId, themeId),
+      runThemeComposite(userDir, imageId, themeId, lookId),
       IMAGE_COMPOSITE_TIMEOUT_MS,
       "apply-theme"
     );
@@ -361,6 +382,7 @@ registerImageProcessingHandlers();
  * @param {string} [params.packageType]
  * @param {string} [params.passportColor]
  * @param {string} [params.themeId]
+ * @param {string} [params.lookId]
  * @param {(result: unknown) => void} [params.onComplete]
  * @param {(error: Error) => void} [params.onError]
  */
@@ -371,6 +393,7 @@ export function enqueueRemoveBackground({
   packageType,
   passportColor,
   themeId,
+  lookId,
   onComplete,
   onError,
 }) {
@@ -382,6 +405,7 @@ export function enqueueRemoveBackground({
     packageType,
     passportColor,
     themeId,
+    lookId,
     onComplete,
     onError,
   });
@@ -421,6 +445,7 @@ export function enqueueApplyPassportBg({
  * @param {string} params.imageId
  * @param {string} [params.user]
  * @param {string} [params.themeId]
+ * @param {string} [params.lookId]
  * @param {(result: unknown) => void} [params.onComplete]
  * @param {(error: Error) => void} [params.onError]
  */
@@ -429,6 +454,7 @@ export function enqueueApplyTheme({
   imageId,
   user,
   themeId,
+  lookId,
   onComplete,
   onError,
 }) {
@@ -438,6 +464,7 @@ export function enqueueApplyTheme({
     imageId,
     user,
     themeId,
+    lookId,
     onComplete,
     onError,
   });

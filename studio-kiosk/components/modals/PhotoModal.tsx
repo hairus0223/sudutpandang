@@ -55,12 +55,20 @@ export function PhotoModal({
   const { selectedForPrint, togglePrint } = useGalleryStore();
   const [bottomOffset, setBottomOffset] = useState(32);
   const [showUI, setShowUI] = useState(true);
+  const [comparePos, setComparePos] = useState(55);
+  const [compareMode, setCompareMode] = useState(false);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const hideUITimer = useRef<NodeJS.Timeout | null>(null);
   const touchStartX = useRef<number | null>(null);
   const scale = useRef(1);
   const lastScale = useRef(1);
   const startDistance = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setComparePos(55);
+    setCompareMode(false);
+  }, [open, index]);
 
   useEffect(() => {
     if (!open) return;
@@ -141,6 +149,13 @@ export function PhotoModal({
     packageType,
     previewVariant
   );
+  const originalUrl = image.variants?.original ?? image.url;
+  const themedUrl = image.variants?.themed;
+  const canCompare =
+    packageType === "ai-photo" &&
+    Boolean(themedUrl) &&
+    Boolean(originalUrl) &&
+    themedUrl !== originalUrl;
   const isSelected = selectedForPrint.includes(image.filename);
   const busy = image.imageId ? isProcessing?.(image.imageId) : false;
   const canRemoveBg =
@@ -263,22 +278,41 @@ export function PhotoModal({
             <button
               key={option.id}
               type="button"
-              disabled={isVariantDisabled(option.id)}
+              disabled={isVariantDisabled(option.id) || compareMode}
               onClick={(e) => {
                 e.stopPropagation();
+                setCompareMode(false);
                 onPreviewVariantChange(option.id);
               }}
               className={cn(
                 "rounded-full px-3 py-1 text-xs backdrop-blur transition",
-                previewVariant === option.id
+                !compareMode && previewVariant === option.id
                   ? "bg-violet-600 text-white"
                   : "bg-black/60 text-white/80 hover:bg-black/80",
-                isVariantDisabled(option.id) && "opacity-40 cursor-not-allowed"
+                (isVariantDisabled(option.id) || compareMode) &&
+                  "opacity-40 cursor-not-allowed"
               )}
             >
               {option.label}
             </button>
           ))}
+          {canCompare && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setCompareMode((v) => !v);
+              }}
+              className={cn(
+                "rounded-full px-3 py-1 text-xs backdrop-blur transition",
+                compareMode
+                  ? "bg-emerald-600 text-white"
+                  : "bg-black/60 text-white/80 hover:bg-black/80"
+              )}
+            >
+              Before / After
+            </button>
+          )}
         </div>
 
         {(canRemoveBg || canApplyTheme || busy) && (
@@ -333,29 +367,72 @@ export function PhotoModal({
           {isSelected ? (
             <>
               <CheckSquare className="text-green-400" />
-              Dipilih untuk cetak
+              {packageType === "ai-photo"
+                ? "Dipilih — siap cetak AI"
+                : "Dipilih untuk cetak"}
             </>
           ) : (
             <>
               <Square />
-              Pilih untuk cetak
+              {packageType === "ai-photo" ? "Pilih untuk cetak AI" : "Pilih untuk cetak"}
             </>
           )}
         </button>
       </div>
 
-      <div className="relative z-10">
-        <img
-          ref={imageRef}
-          src={displayUrl}
-          alt={image.filename}
-          draggable={false}
-          onClick={(e) => {
-            e.stopPropagation();
-            resetZoom();
-          }}
-          className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl transition-all duration-300 ease-out will-change-transform"
-        />
+      <div className="relative z-10" onClick={(e) => e.stopPropagation()}>
+        {compareMode && canCompare && themedUrl ? (
+          <div className="relative inline-block max-h-[90vh] max-w-[90vw] overflow-hidden rounded-lg shadow-2xl select-none">
+            <img
+              src={originalUrl}
+              alt="Sebelum AI"
+              draggable={false}
+              className="block max-h-[90vh] max-w-[90vw] object-contain"
+            />
+            <div
+              className="absolute inset-0"
+              style={{ clipPath: `inset(0 ${100 - comparePos}% 0 0)` }}
+            >
+              <img
+                src={themedUrl}
+                alt="Sesudah AI"
+                draggable={false}
+                className="h-full w-full object-contain"
+              />
+            </div>
+            <div
+              className="pointer-events-none absolute inset-y-0 w-0.5 bg-white/90 shadow-[0_0_12px_rgba(0,0,0,0.55)]"
+              style={{ left: `${comparePos}%` }}
+            />
+            <div className="absolute left-3 top-3 rounded-full bg-black/70 px-2.5 py-1 text-[11px] tracking-wide text-white/90">
+              Original
+            </div>
+            <div className="absolute right-3 top-3 rounded-full bg-violet-700/90 px-2.5 py-1 text-[11px] tracking-wide text-white">
+              AI
+            </div>
+            <input
+              type="range"
+              min={2}
+              max={98}
+              value={comparePos}
+              onChange={(e) => setComparePos(Number(e.target.value))}
+              className="absolute bottom-4 left-1/2 z-10 w-[min(70vw,420px)] -translate-x-1/2 accent-violet-400"
+              aria-label="Geser bandingkan sebelum dan sesudah AI"
+            />
+          </div>
+        ) : (
+          <img
+            ref={imageRef}
+            src={displayUrl}
+            alt={image.filename}
+            draggable={false}
+            onClick={(e) => {
+              e.stopPropagation();
+              resetZoom();
+            }}
+            className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl transition-all duration-300 ease-out will-change-transform"
+          />
+        )}
       </div>
     </div>
   );

@@ -23,10 +23,17 @@ import {
 import {
   normalizePassportColor,
   readCustomerJson,
+  readCustomerLookId,
   readCustomerPackageType,
   readCustomerThemeId,
   readPassportBackgroundColor,
+  writeCustomerLookId,
 } from "./services/customerConfig.js";
+import {
+  LOOK_PRESETS,
+  defaultLookForPackage,
+  normalizeLookId,
+} from "./services/lookPresets.js";
 import {
   enqueueApplyPassportBg,
   enqueueApplyTheme,
@@ -191,28 +198,33 @@ function readCustomerSessionMeta(userSlug) {
   const data = readCustomerJson(userFolder);
   if (!data) return null;
 
+  const packageType = data.packageType || "self-photo";
   return {
-    packageType: data.packageType || "self-photo",
+    packageType,
     passportBackgroundColor: normalizePassportColor(data.passportBackgroundColor),
     passportSizeId: normalizePassportSizeId(data.passportSizeId),
     themeId: normalizeThemeId(data.themeId),
+    lookId: normalizeLookId(data.lookId, packageType),
   };
 }
 
 /**
- * Package/theme fields for kiosk socket sync (customer.json is source of truth).
+ * Package/theme/look fields for kiosk socket sync (customer.json is source of truth).
  * @param {string} userSlug
  * @param {{ packageType?: string }} [fallback]
  */
 function buildKioskSyncFields(userSlug, fallback = {}) {
   const customerMeta = readCustomerSessionMeta(userSlug);
+  const packageType =
+    customerMeta?.packageType ?? fallback.packageType ?? "self-photo";
 
   return {
-    packageType:
-      customerMeta?.packageType ?? fallback.packageType ?? "self-photo",
+    packageType,
     passportSizeId:
       customerMeta?.passportSizeId ?? DEFAULT_PASSPORT_SIZE_ID,
     themeId: customerMeta?.themeId ?? null,
+    lookId:
+      customerMeta?.lookId ?? defaultLookForPackage(packageType),
   };
 }
 
@@ -230,6 +242,7 @@ function scheduleBackgroundRemoval({
   packageType,
   passportColor,
   themeId,
+  lookId,
   force = false,
 }) {
   if (!BG_REMOVAL_ENABLED) return;
@@ -241,6 +254,7 @@ function scheduleBackgroundRemoval({
   const resolvedPassportColor =
     passportColor ?? readPassportBackgroundColor(userFolder);
   const resolvedThemeId = themeId ?? readCustomerThemeId(userFolder);
+  const resolvedLookId = lookId ?? readCustomerLookId(userFolder);
 
   enqueueRemoveBackground({
     userDir: userFolder,
@@ -249,6 +263,7 @@ function scheduleBackgroundRemoval({
     packageType: resolvedPackageType,
     passportColor: resolvedPassportColor,
     themeId: resolvedThemeId,
+    lookId: resolvedLookId,
     onComplete: (result) => {
       emitPhotoProcessed({
         user: userSlug,
@@ -276,14 +291,17 @@ function scheduleThemeGeneration({
   imageId,
   todayFolder,
   themeId,
+  lookId,
 }) {
   const resolvedThemeId = themeId ?? readCustomerThemeId(userFolder);
+  const resolvedLookId = lookId ?? readCustomerLookId(userFolder);
 
   enqueueApplyTheme({
     userDir: userFolder,
     imageId,
     user: userSlug,
     themeId: resolvedThemeId,
+    lookId: resolvedLookId,
     onComplete: (result) => {
       emitPhotoProcessed({
         user: userSlug,
@@ -378,6 +396,7 @@ function listUserImages(userPath, host, todayFolder, userSlug) {
         processingPhase: meta?.processingPhase ?? null,
         processingError: meta?.error ?? null,
         themeBackgroundSource: meta?.pipeline?.themeBackgroundSource ?? null,
+        bakedLookId: meta?.pipeline?.bakedLookId ?? null,
         variants,
       });
     }
@@ -408,6 +427,9 @@ function emitPhotoProcessed({ user, imageId, status, todayFolder, meta, error })
       user,
       String(meta.variants.subject)
     );
+  }
+  if (status === "ready" && meta?.pipeline?.bakedLookId) {
+    payload.bakedLookId = meta.pipeline.bakedLookId;
   }
   if (status === "failed" && error) {
     payload.error = error;
@@ -492,6 +514,7 @@ function buildSessionTimerUpdate(session) {
     packageType: kioskFields.packageType,
     passportSizeId: kioskFields.passportSizeId,
     themeId: kioskFields.themeId,
+    lookId: kioskFields.lookId,
   };
 }
 
@@ -513,6 +536,7 @@ app.post("/api/register", (req, res) => {
     passportBackgroundColor,
     passportSizeId,
     themeId,
+    lookId,
   } = req.body;
 
   if (!name || typeof name !== "string" || name.trim() === "")
@@ -540,6 +564,10 @@ app.post("/api/register", (req, res) => {
         : null,
     themeId:
       packageType === "ai-photo" ? normalizeThemeId(themeId) : null,
+    lookId:
+      packageType === "pas-photo"
+        ? "natural"
+        : normalizeLookId(lookId, packageType),
     printLimit: people,
     folderPath: `/images/${todayFolder}/${slugName}`,
     registeredAt: new Date().toISOString(),
@@ -577,14 +605,23 @@ app.get("/api/print-config/:user", (req, res) => {
   if (!fs.existsSync(file)) return res.status(404).json({ error: "not found" });
 
   const data = JSON.parse(fs.readFileSync(file, "utf-8"));
+  const packageType = data.packageType || "self-photo";
   res.json({
     allowedPrint: data.printLimit,
     templateId: data.templateId,
     name: data.name,
-    packageType: data.packageType || "self-photo",
+    packageType,
     passportBackgroundColor: normalizePassportColor(data.passportBackgroundColor),
     passportSizeId: normalizePassportSizeId(data.passportSizeId),
     themeId: normalizeThemeId(data.themeId),
+    lookId: normalizeLookId(data.lookId, packageType),
+  });
+});
+
+app.get("/api/looks", (_req, res) => {
+  res.json({
+    looks: LOOK_PRESETS,
+    defaultIntensity: 0.6,
   });
 });
 
@@ -717,6 +754,7 @@ app.post("/api/kiosk/trial-start", (req, res) => {
     packageType: kioskFields.packageType,
     passportSizeId: kioskFields.passportSizeId,
     themeId: kioskFields.themeId,
+    lookId: kioskFields.lookId,
   });
   emitSessionTimerUpdate();
 
@@ -754,10 +792,35 @@ app.post("/api/kiosk/main-start", (req, res) => {
     packageType: kioskFields.packageType,
     passportSizeId: kioskFields.passportSizeId,
     themeId: kioskFields.themeId,
+    lookId: kioskFields.lookId,
   });
   emitSessionTimerUpdate();
 
   res.json({ success: true, endsAt });
+});
+
+/** Soft look preset — customer or operator; persists to customer.json + socket sync. */
+app.post("/api/kiosk/look", (req, res) => {
+  const { user, lookId } = req.body || {};
+  if (!user) return res.status(400).json({ error: "user required" });
+
+  const userFolder = getUserPathForToday(user);
+  if (!fs.existsSync(userFolder)) {
+    return res.status(404).json({ error: "customer not found" });
+  }
+
+  const packageType = readCustomerPackageType(userFolder);
+  const resolved = writeCustomerLookId(userFolder, lookId, packageType);
+
+  const payload = {
+    user,
+    lookId: resolved,
+    packageType,
+  };
+  io.emit("kiosk-look-update", payload);
+  emitSessionTimerUpdate();
+
+  res.json({ success: true, ...payload });
 });
 
 // Kiosk configuration for frontend (session duration, countdown, etc)
@@ -907,6 +970,7 @@ app.get("/api/images/:user/:imageId/status", (req, res) => {
     variants: buildVariantUrls(host, todayFolder, user, meta),
     error: meta.error ?? null,
     themeBackgroundSource: meta.pipeline?.themeBackgroundSource ?? null,
+    bakedLookId: meta.pipeline?.bakedLookId ?? null,
   });
 });
 
@@ -1422,56 +1486,63 @@ server.listen(PORT, "0.0.0.0", () => {
 
   // Defer job recovery so HTTP/Socket.IO accept connections first.
   setTimeout(() => {
-    const recovered = recoverPendingJobs({
-      baseDir: BASE_DIR,
-      todayFolder,
-      onJob: ({ userDir, imageId, user }) => {
-        scheduleBackgroundRemoval({
-          userFolder: userDir,
-          userSlug: user,
-          imageId,
-          todayFolder,
-          force: true,
-        });
-      },
-    });
+    try {
+      const recovered = recoverPendingJobs({
+        baseDir: BASE_DIR,
+        todayFolder,
+        onJob: ({ userDir, imageId, user }) => {
+          scheduleBackgroundRemoval({
+            userFolder: userDir,
+            userSlug: user,
+            imageId,
+            todayFolder,
+            force: true,
+          });
+        },
+      });
 
-    if (recovered > 0) {
-      console.log(`♻️ Recovered ${recovered} pending image job(s)`);
-    }
+      if (recovered > 0) {
+        console.log(`♻️ Recovered ${recovered} pending image job(s)`);
+      }
 
-    const passportRecovered = recoverIncompletePassportJobs({
-      baseDir: BASE_DIR,
-      todayFolder,
-      onJob: ({ userDir, imageId, user }) => {
-        schedulePassportBackground({
-          userFolder: userDir,
-          userSlug: user,
-          imageId,
-          todayFolder,
-        });
-      },
-    });
+      const passportRecovered = recoverIncompletePassportJobs({
+        baseDir: BASE_DIR,
+        todayFolder,
+        onJob: ({ userDir, imageId, user }) => {
+          schedulePassportBackground({
+            userFolder: userDir,
+            userSlug: user,
+            imageId,
+            todayFolder,
+          });
+        },
+      });
 
-    if (passportRecovered > 0) {
-      console.log(`♻️ Recovered ${passportRecovered} incomplete passport job(s)`);
-    }
+      if (passportRecovered > 0) {
+        console.log(`♻️ Recovered ${passportRecovered} incomplete passport job(s)`);
+      }
 
-    const themeRecovered = recoverIncompleteThemeJobs({
-      baseDir: BASE_DIR,
-      todayFolder,
-      onJob: ({ userDir, imageId, user }) => {
-        scheduleThemeGeneration({
-          userFolder: userDir,
-          userSlug: user,
-          imageId,
-          todayFolder,
-        });
-      },
-    });
+      const themeRecovered = recoverIncompleteThemeJobs({
+        baseDir: BASE_DIR,
+        todayFolder,
+        onJob: ({ userDir, imageId, user }) => {
+          scheduleThemeGeneration({
+            userFolder: userDir,
+            userSlug: user,
+            imageId,
+            todayFolder,
+          });
+        },
+      });
 
-    if (themeRecovered > 0) {
-      console.log(`♻️ Recovered ${themeRecovered} incomplete theme job(s)`);
+      if (themeRecovered > 0) {
+        console.log(`♻️ Recovered ${themeRecovered} incomplete theme job(s)`);
+      }
+    } catch (err) {
+      console.error(
+        "[startup] image job recovery failed (server stays up):",
+        err instanceof Error ? err.message : err
+      );
     }
   }, 1500);
 });

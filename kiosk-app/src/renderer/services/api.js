@@ -145,4 +145,15 @@ export function applyKioskSyncFields(setters, fields = {}) {
   if (fields.packageType) setters.setPackageType(fields.packageType);
   if (fields.passportSizeId) setters.setPassportSizeId(fields.passportSizeId);
   if (fields.themeId) setters.setThemeId(fields.themeId);
+  if (fields.lookId && setters.setLookId) setters.setLookId(fields.lookId);
+}
+
+export async function updateKioskLook(userSlug, lookId) {
+  const res = await fetch(`${API_BASE}/api/kiosk/look`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user: userSlug, lookId }),
+  });
+  if (!res.ok) throw new Error("look_update_failed");
+  return res.json();
 }

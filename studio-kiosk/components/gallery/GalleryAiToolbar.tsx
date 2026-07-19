@@ -76,18 +76,29 @@ export function GalleryAiToolbar({
           />
           <div className="min-w-0">
             <p className="text-xs tracking-[0.22em] text-white/50 uppercase">
-              Galeri & AI Sandbox
+              {packageType === "ai-photo"
+                ? "Galeri AI Photo"
+                : "Galeri & AI Tools"}
             </p>
             <p className="mt-1 text-sm text-white/80">
-              Paket:{" "}
-              <span className="font-semibold text-white">
-                {PACKAGE_LABELS[packageType]}
-              </span>
-              {packageType === "ai-photo" && sessionThemeLabel && (
+              {packageType === "ai-photo" ? (
                 <>
-                  {" "}
-                  · Tema sesi:{" "}
-                  <span className="text-violet-200">{sessionThemeLabel}</span>
+                  Bandingkan hasil, pilih favorit, lalu cetak. Paket:{" "}
+                  <span className="font-semibold text-white">AI Photo</span>
+                  {sessionThemeLabel && (
+                    <>
+                      {" "}
+                      · Tema:{" "}
+                      <span className="text-violet-200">{sessionThemeLabel}</span>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  Paket:{" "}
+                  <span className="font-semibold text-white">
+                    {PACKAGE_LABELS[packageType]}
+                  </span>
                 </>
               )}
               {collapsed && !themesLoading && (
@@ -192,7 +203,9 @@ export function GalleryAiToolbar({
 
           <div className="space-y-2">
             <label className="text-xs tracking-[0.18em] text-white/50 uppercase">
-              Tampilan grid
+              {packageType === "ai-photo"
+                ? "Tampilan grid (coba Bertema vs Original)"
+                : "Tampilan grid"}
             </label>
             <div className="flex flex-wrap gap-2">
               {GALLERY_PREVIEW_VARIANTS.map((option) => (
@@ -212,6 +225,11 @@ export function GalleryAiToolbar({
                 </button>
               ))}
             </div>
+            {packageType === "ai-photo" && (
+              <p className="text-[11px] text-white/45">
+                Tip: buka foto → geser Before/After untuk wow moment customer.
+              </p>
+            )}
           </div>
         </div>
       )}

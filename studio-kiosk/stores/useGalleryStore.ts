@@ -4,6 +4,7 @@ import {
   type SheetRecipe,
 } from "@/lib/sheetRecipe";
 import type { GalleryImageData, PackageType } from "@/lib/imageTypes";
+import type { LookId } from "@/lib/lookPresets";
 import { FaceBox } from "@/utils/faceDetect";
 import type { SheetBindingMode } from "@/lib/sheetSlotBinding";
 import type { SheetGridAlign } from "@/utils/sheetLayoutEngine";
@@ -64,12 +65,14 @@ type GalleryStore = {
     selectedForPrint: string[];
     allowedPrint: number;
     packageType: PackageType;
+    sessionLookId: LookId | null;
     galleryUser: string | null;
 
     setImages: (images: ImageData[]) => void;
     setGalleryUser: (user: string | null) => void;
     setAllowedPrint: (n: number) => void;
     setPackageType: (packageType: PackageType) => void;
+    setSessionLookId: (lookId: LookId | null) => void;
     togglePrint: (filename: string) => void;
     resetSelection: () => void;
     reset: () => void;
@@ -163,12 +166,14 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
     selectedForPrint: [],
     allowedPrint: 0,
     packageType: "self-photo",
+    sessionLookId: null,
     galleryUser: null,
 
     setImages: (images) => set({ images }),
     setGalleryUser: (galleryUser) => set({ galleryUser }),
     setAllowedPrint: (n) => set({ allowedPrint: n }),
     setPackageType: (packageType) => set({ packageType }),
+    setSessionLookId: (sessionLookId) => set({ sessionLookId }),
 
     togglePrint: (filename) => {
         const { selectedForPrint, allowedPrint } = get();
@@ -201,6 +206,7 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
             selectedForPrint: [],
             allowedPrint: 0,
             packageType: "self-photo",
+            sessionLookId: null,
             galleryUser: null,
             sheetSlotTransforms: {},
             activeAdjustSlotIndex: null,

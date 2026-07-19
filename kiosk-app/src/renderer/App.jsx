@@ -3,8 +3,15 @@ import { fetchKioskConfig, getApiBase } from "./config";
 import {
   applyKioskSyncFields,
   triggerBackendCapture,
+  updateKioskLook,
 } from "./services/api";
 import { getKioskProcessingMessage } from "./lib/processingLabels";
+import {
+  LOOK_PRESETS,
+  getLookCssFilter,
+  lookAllowsPicker,
+  normalizeLookId,
+} from "./lib/lookPresets";
 import { useKioskPreview } from "./hooks/useKioskPreview";
 import { useKioskAudio } from "./services/audio";
 import { useSessionTimer } from "./hooks/useSessionTimer";
@@ -19,7 +26,11 @@ const Screen = {
 };
 
 /** Photo review — long enough to enjoy, shorter than lingering. */
-const REVIEW_DISPLAY_MS = 3000;
+const REVIEW_DISPLAY_MS = 3200;
+/** AI themed reveal hold after magic moment. */
+const AI_REVEAL_HOLD_MS = 5200;
+/** Max wait for AI theme before dismissing review. */
+const AI_REVIEW_MAX_MS = 40000;
 const FLASH_HOLD_MS = 280;
 
 const PACKAGE_LABELS = {
@@ -55,28 +66,48 @@ export function App() {
   const [passportSizeId, setPassportSizeId] = useState("3x4");
   const [themeId, setThemeId] = useState(null);
   const [themeLabels, setThemeLabels] = useState({});
+  const [lookId, setLookId] = useState("soft");
+  const [lookUpdating, setLookUpdating] = useState(false);
   const [latestPreviewImage, setLatestPreviewImage] = useState(null);
+  const [previewLookBaked, setPreviewLookBaked] = useState(false);
+  const [reviewOriginalUrl, setReviewOriginalUrl] = useState(null);
+  const [aiRevealActive, setAiRevealActive] = useState(false);
 
   const sessionUserRef = useRef(sessionUser);
   const packageTypeRef = useRef(packageType);
   const screenRef = useRef(screen);
   const countdownTimerRef = useRef(null);
   const reviewTimerRef = useRef(null);
+  const reviewAwaitingAiRef = useRef(false);
   const sessionEndingRef = useRef(false);
   const sessionEndAudioPlayedRef = useRef(false);
+  const startCameraPreviewRef = useRef(() => {});
   sessionUserRef.current = sessionUser;
   packageTypeRef.current = packageType;
   screenRef.current = screen;
 
   const kioskSetters = useMemo(
-    () => ({ setPackageType, setPassportSizeId, setThemeId }),
+    () => ({
+      setPackageType,
+      setPassportSizeId,
+      setThemeId,
+      setLookId: (id) => setLookId(normalizeLookId(id)),
+    }),
     []
   );
 
-  const handlePreviewUpdate = useCallback(({ previewUrl, isProcessing, failed, error, image }) => {
+  const handlePreviewUpdate = useCallback(({ previewUrl, isProcessing, failed, error, image, bakedLookId }) => {
     if (previewUrl) setLastImageUrl(previewUrl);
     if (image) setLatestPreviewImage(image);
     if (typeof isProcessing === "boolean") setLastImageProcessing(isProcessing);
+
+    const resolvedBaked = bakedLookId ?? image?.bakedLookId ?? null;
+    if (resolvedBaked) {
+      setPreviewLookBaked(true);
+    } else if (isProcessing) {
+      setPreviewLookBaked(false);
+    }
+
     if (failed) {
       setProcessingError(error || "Proses foto gagal.");
     } else if (!isProcessing) {
@@ -93,6 +124,7 @@ export function App() {
     });
 
   const { videoRef, start: startCameraPreview, stop: stopCameraPreview } = useCameraPreview();
+  startCameraPreviewRef.current = startCameraPreview;
 
   const clearCaptureTimers = useCallback(() => {
     if (countdownTimerRef.current) {
@@ -105,6 +137,27 @@ export function App() {
     }
   }, []);
 
+  const endReviewAndResume = useCallback(() => {
+    reviewAwaitingAiRef.current = false;
+    setIsReviewing(false);
+    setAiRevealActive(false);
+    setReviewOriginalUrl(null);
+    startCameraPreviewRef.current();
+    reviewTimerRef.current = null;
+  }, []);
+
+  const scheduleReviewEnd = useCallback(
+    (ms) => {
+      if (reviewTimerRef.current) {
+        window.clearTimeout(reviewTimerRef.current);
+      }
+      reviewTimerRef.current = window.setTimeout(() => {
+        endReviewAndResume();
+      }, ms);
+    },
+    [endReviewAndResume]
+  );
+
   /** Celebrate real camera capture — driven by Imaging Edge file → api `new-photo`. */
   const celebrateNewCapture = useCallback(
     async (payload) => {
@@ -115,8 +168,11 @@ export function App() {
 
       unlockAudio();
       clearCaptureTimers();
+      reviewAwaitingAiRef.current = false;
       setIsCapturing(false);
       setIsReviewing(false);
+      setAiRevealActive(false);
+      setReviewOriginalUrl(null);
       setIsFlashing(true);
       setIsWaitingCapture(false);
       setShotStamp((n) => n + 1);
@@ -127,6 +183,7 @@ export function App() {
 
       setCaptureCount((c) => c + 1);
       setProcessingError(null);
+      setPreviewLookBaked(false);
 
       const flashHold = new Promise((resolve) => {
         window.setTimeout(resolve, FLASH_HOLD_MS);
@@ -158,27 +215,71 @@ export function App() {
       setIsFlashing(false);
       setIsWaitingCapture(true);
 
-      await previewPromise;
+      const result = await previewPromise;
+      const originalUrl = result?.image?.url ?? result?.previewUrl ?? null;
 
       setIsWaitingCapture(false);
       setIsReviewing(true);
       play("captureSuccess");
 
-      reviewTimerRef.current = window.setTimeout(() => {
-        setIsReviewing(false);
-        startCameraPreview();
-        reviewTimerRef.current = null;
-      }, REVIEW_DISPLAY_MS);
+      if (pkg === "ai-photo") {
+        setReviewOriginalUrl(originalUrl);
+        const waiting = Boolean(
+          result?.isProcessing ||
+            (result?.image && result.image.processingStatus !== "ready")
+        );
+        reviewAwaitingAiRef.current = waiting;
+
+        if (waiting) {
+          // Hold review until themed reveal (or max wait).
+          scheduleReviewEnd(AI_REVIEW_MAX_MS);
+        } else if (result?.image?.variants?.themed) {
+          setAiRevealActive(true);
+          scheduleReviewEnd(AI_REVEAL_HOLD_MS);
+        } else {
+          scheduleReviewEnd(REVIEW_DISPLAY_MS);
+        }
+        return;
+      }
+
+      scheduleReviewEnd(REVIEW_DISPLAY_MS);
     },
     [
       clearCaptureTimers,
       play,
       refreshPreview,
-      startCameraPreview,
+      scheduleReviewEnd,
       unlockAudio,
       waitForImageProcessing,
     ]
   );
+
+  /** AI Photo: celebrate themed reveal when processing finishes during review. */
+  useEffect(() => {
+    if (packageType !== "ai-photo" || !isReviewing) return;
+    if (lastImageProcessing) return;
+    if (!reviewAwaitingAiRef.current) return;
+
+    reviewAwaitingAiRef.current = false;
+    const hasThemed = Boolean(latestPreviewImage?.variants?.themed);
+    if (hasThemed) {
+      setAiRevealActive(true);
+      play("captureSuccess");
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate([25, 35, 70]);
+      }
+      scheduleReviewEnd(AI_REVEAL_HOLD_MS);
+    } else {
+      scheduleReviewEnd(REVIEW_DISPLAY_MS);
+    }
+  }, [
+    packageType,
+    isReviewing,
+    lastImageProcessing,
+    latestPreviewImage,
+    play,
+    scheduleReviewEnd,
+  ]);
 
   const celebrateNewCaptureRef = useRef(celebrateNewCapture);
   celebrateNewCaptureRef.current = celebrateNewCapture;
@@ -204,6 +305,8 @@ export function App() {
     setIsFlashing(false);
     setIsWaitingCapture(false);
     setIsReviewing(false);
+    setAiRevealActive(false);
+    setReviewOriginalUrl(null);
     setScreen(Screen.END);
     setSessionUser(null);
   }, [cancelPoll, clearCaptureTimers, play, stopCameraPreview]);
@@ -243,6 +346,37 @@ export function App() {
 
   const themeLabel = themeId ? themeLabels[themeId] ?? null : null;
 
+  const lookCssFilter = useMemo(() => {
+    if (isFlashing) return "none";
+    return getLookCssFilter(lookId);
+  }, [lookId, isFlashing]);
+
+  /** Result thumb/review: skip CSS when look is already baked into themed.png */
+  const resultLookCssFilter = useMemo(() => {
+    if (previewLookBaked && !lastImageProcessing) return "none";
+    return lookCssFilter;
+  }, [previewLookBaked, lastImageProcessing, lookCssFilter]);
+
+  const showLookPicker = lookAllowsPicker(packageType);
+
+  const handleSelectLook = useCallback(
+    async (nextLookId) => {
+      if (!sessionUser || lookUpdating) return;
+      if (packageType === "pas-photo") return;
+      const normalized = normalizeLookId(nextLookId, packageType);
+      setLookId(normalized);
+      setLookUpdating(true);
+      try {
+        await updateKioskLook(sessionUser, normalized);
+      } catch (err) {
+        console.warn("Look update failed", err);
+      } finally {
+        setLookUpdating(false);
+      }
+    },
+    [sessionUser, lookUpdating, packageType]
+  );
+
   useEffect(() => {
     fetchKioskConfig().then(setKioskConfig).catch(() => {});
   }, []);
@@ -276,6 +410,9 @@ export function App() {
       setCaptureCount(0);
       setLastImageUrl(null);
       setLastImageProcessing(false);
+      setPreviewLookBaked(false);
+      setAiRevealActive(false);
+      setReviewOriginalUrl(null);
       setProcessingError(null);
       setIsCapturing(false);
       setIsFlashing(false);
@@ -304,6 +441,9 @@ export function App() {
       setCaptureCount(0);
       setLastImageUrl(null);
       setLastImageProcessing(false);
+      setPreviewLookBaked(false);
+      setAiRevealActive(false);
+      setReviewOriginalUrl(null);
       setProcessingError(null);
       setIsCapturing(false);
       setIsFlashing(false);
@@ -384,6 +524,11 @@ export function App() {
     });
 
     socket.on("photo-processed", handlePhotoProcessed);
+
+    socket.on("kiosk-look-update", ({ user, lookId: nextLook }) => {
+      if (sessionUserRef.current && user !== sessionUserRef.current) return;
+      if (nextLook) setLookId(normalizeLookId(nextLook));
+    });
 
     // Real shutter moment: file landed from camera (Imaging Edge → capture/)
     socket.on("new-photo", (payload) => {
@@ -496,6 +641,11 @@ export function App() {
                     Tema: {themeLabel ?? "AI Photo"}
                   </div>
                 )}
+                {showLookPicker && lookId !== "natural" && (
+                  <div className="pill pill--look">
+                    Look: {LOOK_PRESETS.find((p) => p.id === lookId)?.label ?? lookId}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -540,7 +690,13 @@ export function App() {
                 isCapturing ? " preview-video-wrapper--countdown" : ""
               }`}
             >
-              <video className="preview-video" ref={videoRef} playsInline muted />
+              <video
+                className="preview-video"
+                ref={videoRef}
+                playsInline
+                muted
+                style={{ filter: lookCssFilter }}
+              />
               {isPasPhoto && (
                 <div className="pas-photo-frame">
                   <div
@@ -550,28 +706,75 @@ export function App() {
                 </div>
               )}
               {isAiPhoto && (
-                <div className="ai-photo-badge">Mode AI Photo</div>
+                <div className="ai-photo-badge">
+                  {themeLabel
+                    ? `AI · ${themeLabel}`
+                    : "Mode AI Photo — pilih pose terbaik"}
+                </div>
               )}
             </div>
           )}
 
           {isReviewing && lastImageUrl && (
-            <div className="capture-overlay capture-overlay--review" key={`review-${shotStamp}`}>
-              <img
-                src={lastImageUrl}
-                alt="Foto terakhir"
-                className="capture-review-image"
-              />
-              <div className="capture-review-badge">Hasil foto</div>
+            <div
+              className={`capture-overlay capture-overlay--review${
+                isAiPhoto ? " capture-overlay--ai-review" : ""
+              }${aiRevealActive ? " capture-overlay--ai-reveal" : ""}`}
+              key={`review-${shotStamp}`}
+            >
+              {isAiPhoto && reviewOriginalUrl ? (
+                <div className="ai-reveal-stack">
+                  <img
+                    src={reviewOriginalUrl}
+                    alt="Sebelum AI"
+                    className="capture-review-image ai-reveal-before"
+                    style={{
+                      filter: aiRevealActive ? undefined : resultLookCssFilter,
+                    }}
+                  />
+                  <img
+                    src={lastImageUrl}
+                    alt="Sesudah AI"
+                    className={`capture-review-image ai-reveal-after${
+                      aiRevealActive ? " ai-reveal-after--visible" : ""
+                    }`}
+                  />
+                </div>
+              ) : (
+                <img
+                  src={lastImageUrl}
+                  alt="Foto terakhir"
+                  className="capture-review-image"
+                  style={{ filter: resultLookCssFilter }}
+                />
+              )}
+              <div
+                className={`capture-review-badge${
+                  aiRevealActive ? " capture-review-badge--wow" : ""
+                }`}
+              >
+                {aiRevealActive
+                  ? "Transformasi AI"
+                  : isAiPhoto && lastImageProcessing
+                    ? "Menciptakan AI"
+                    : "Hasil foto"}
+              </div>
               {lastImageProcessing && (
                 <div className="processing-overlay">
                   <div className="processing-spinner" />
+                  <div className="processing-overlay-hint">
+                    Sedikit sabar — hasilnya worth it
+                  </div>
                 </div>
               )}
               <div className="capture-review-caption">
                 {processingMessage ||
                   (isAiPhoto
-                    ? "Foto AI siap"
+                    ? aiRevealActive
+                      ? themeLabel
+                        ? `Siap! Tema ${themeLabel} — cetak di meja studio`
+                        : "Siap! Lihat & cetak hasil AI di meja studio"
+                      : "Foto AI siap"
                     : "Lihat hasilnya — sesi lanjut sebentar lagi")}
               </div>
             </div>
@@ -579,9 +782,15 @@ export function App() {
 
           {!isReviewing && !isWaitingCapture && lastImageUrl && (
             <div
-              className={`last-shot-thumb${lastImageProcessing ? " last-shot-thumb--processing" : ""}`}
+              className={`last-shot-thumb${lastImageProcessing ? " last-shot-thumb--processing" : ""}${
+                isAiPhoto && previewLookBaked ? " last-shot-thumb--ai-ready" : ""
+              }`}
             >
-              <img src={lastImageUrl} alt="Foto terakhir" />
+              <img
+                src={lastImageUrl}
+                alt="Foto terakhir"
+                style={{ filter: resultLookCssFilter }}
+              />
               {lastImageProcessing && (
                 <div className="last-shot-thumb-overlay">
                   <div className="processing-spinner processing-spinner--sm" />
@@ -590,7 +799,9 @@ export function App() {
               <div className="last-shot-label">
                 {lastImageProcessing
                   ? processingMessage || "Memproses…"
-                  : "Foto terakhir"}
+                  : isAiPhoto && previewLookBaked
+                    ? "AI siap cetak"
+                    : "Foto terakhir"}
               </div>
             </div>
           )}
@@ -602,6 +813,23 @@ export function App() {
           {!isReviewing && !isWaitingCapture && !isFlashing && (
             <div className="preview-toolbar">
               <div className="pill-big">{remainingLabel}</div>
+              {showLookPicker && (
+                <div className="look-picker" role="group" aria-label="Look foto">
+                  {LOOK_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={`look-picker-btn${
+                        lookId === preset.id ? " look-picker-btn--active" : ""
+                      }`}
+                      onClick={() => void handleSelectLook(preset.id)}
+                      disabled={lookUpdating || isCapturing}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              )}
               {/* <button
                 type="button"
                 className={`primary-button preview-capture-button${
@@ -624,9 +852,19 @@ export function App() {
       <div className="screen screen--idle screen--end">
         <div className="headline">Terima kasih</div>
         <p className="subheadline">
-          Foto Anda sedang diproses.
-          <br />
-          Silakan hubungi tim studio bila ingin melihat atau mencetak lebih banyak.
+          {packageType === "ai-photo" ? (
+            <>
+              Hasil AI Photo siap dilihat di meja studio.
+              <br />
+              Bandingkan before/after, pilih favorit, lalu cetak — biar kenangan makin epic.
+            </>
+          ) : (
+            <>
+              Foto Anda sedang diproses.
+              <br />
+              Silakan hubungi tim studio bila ingin melihat atau mencetak lebih banyak.
+            </>
+          )}
         </p>
       </div>
     );

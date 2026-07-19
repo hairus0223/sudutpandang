@@ -40,6 +40,13 @@ import {
   DEFAULT_PASSPORT_SIZE_ID,
   PHOTO_SIZE_PRESETS,
 } from "@/lib/photoSizes";
+import {
+  LOOK_PRESETS,
+  defaultLookForPackage,
+  lookAllowsPicker,
+  normalizeLookId,
+  type LookId,
+} from "@/lib/lookPresets";
 
 type Screen = "register" | "preview" | "end";
 
@@ -80,6 +87,7 @@ async function apiRegister(payload: {
   passportBackgroundColor?: string;
   passportSizeId?: string;
   themeId?: string;
+  lookId?: LookId;
 }): Promise<Customer> {
   const res = await fetch(`${API_BASE_URL}/api/register`, {
     method: "POST",
@@ -369,7 +377,8 @@ export function SessionKioskClient() {
           packageType,
           passportBackgroundColor,
           passportSizeId,
-          themeId
+          themeId,
+          lookId
         ) => {
           const customer = await apiRegister({
             name,
@@ -380,6 +389,7 @@ export function SessionKioskClient() {
             passportBackgroundColor,
             passportSizeId,
             themeId,
+            lookId,
           });
           const s = await startSession({
             user: customer.user,
@@ -643,7 +653,18 @@ export function SessionKioskClient() {
         Terima kasih
       </h1>
       <p className="mt-5 max-w-xl text-center text-sm text-white/60 sm:text-lg">
-        Foto Anda sedang diproses.<br /> Silakan hubungi tim studio jika ingin review atau cetak.
+        {sessionMeta.packageType === "ai-photo" ? (
+          <>
+            Buka galeri customer — bandingkan before/after AI, pilih favorit, lalu cetak.
+            <br />
+            Momen “wow” di meja studio yang bikin mereka balik lagi.
+          </>
+        ) : (
+          <>
+            Foto Anda sedang diproses.
+            <br /> Silakan hubungi tim studio jika ingin review atau cetak.
+          </>
+        )}
       </p>
       <div className="mt-8 sm:mt-10 flex flex-wrap gap-3 justify-center">
         <Button
@@ -687,7 +708,8 @@ type RegisterOrCheckScreenProps = {
     packageType: PackageType,
     passportBackgroundColor?: string,
     passportSizeId?: string,
-    themeId?: string
+    themeId?: string,
+    lookId?: LookId
   ) => Promise<void>;
   onCheckByName: (name: string) => Promise<void>;
   onBack: () => void;
@@ -709,10 +731,17 @@ function RegisterOrCheckScreen({
     React.useState<string>(DEFAULT_PASSPORT_SIZE_ID);
   const { defaultThemeId, themeGroups } = useThemes();
   const [themeId, setThemeId] = React.useState<string>(defaultThemeId);
+  const [lookId, setLookId] = React.useState<LookId>(
+    defaultLookForPackage("self-photo")
+  );
 
   React.useEffect(() => {
     setThemeId(defaultThemeId);
   }, [defaultThemeId]);
+
+  React.useEffect(() => {
+    setLookId(defaultLookForPackage(packageType));
+  }, [packageType]);
 
   const themePickerGroups = React.useMemo(
     () =>
@@ -783,7 +812,10 @@ function RegisterOrCheckScreen({
                     packageType,
                     packageType === "pas-photo" ? passportBackgroundColor : undefined,
                     packageType === "pas-photo" ? passportSizeId : undefined,
-                    packageType === "ai-photo" ? themeId : undefined
+                    packageType === "ai-photo" ? themeId : undefined,
+                    lookAllowsPicker(packageType)
+                      ? normalizeLookId(lookId, packageType)
+                      : "natural"
                   );
                 } catch {
                   alert("Registrasi gagal. Hubungi staf.");
@@ -853,7 +885,8 @@ function RegisterOrCheckScreen({
                       AI Photo
                     </span>
                     <span className="mt-1 text-[11px] sm:text-xs text-white/70">
-                      Setelah capture, foto ditandai sebagai hasil AI di layar review.
+                      Hapus background + tema cinematic. Preview wow di kiosk, lalu
+                      bandingkan &amp; cetak di meja studio — biar customer ketagihan.
                     </span>
                   </button>
                 </div>
@@ -963,6 +996,33 @@ function RegisterOrCheckScreen({
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+              {lookAllowsPicker(packageType) && (
+                <div className="space-y-2">
+                  <label className="text-xs tracking-[0.22em] text-white/60">
+                    LOOK PRESET
+                  </label>
+                  <p className="text-[11px] text-white/50">
+                    Soft lighting di live preview &amp; default print — bukan beauty edit.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {LOOK_PRESETS.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setLookId(option.id)}
+                        className={cn(
+                          "rounded-lg border px-2 py-3 text-xs font-medium transition",
+                          lookId === option.id
+                            ? "border-white bg-white/10 text-white"
+                            : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
               <div className="flex gap-3 pt-2">

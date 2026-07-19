@@ -23,6 +23,7 @@ import {
 } from "@/lib/resolveImageUrl";
 import { PRINT_TEMPLATES } from "@/lib/printTemplates";
 import { configurePasPhotoPrintDefaults } from "@/lib/passportPrint";
+import { normalizeLookId } from "@/lib/lookPresets";
 import { ArrowLeft } from "lucide-react";
 
 export default function GalleryClient() {
@@ -45,6 +46,7 @@ export default function GalleryClient() {
     setSheetRecipe,
     loadPersistedSheetTransforms,
     packageType,
+    setSessionLookId,
   } = useGalleryStore();
 
   const { themeGroups, loading: themesLoading } = useThemes();
@@ -151,6 +153,12 @@ export default function GalleryClient() {
           setSelectedThemeId(d.themeId);
         }
 
+        setSessionLookId(normalizeLookId(d.lookId, resolvedPackageType));
+
+        if (resolvedPackageType === "ai-photo") {
+          setPreviewVariant("themed");
+        }
+
         configurePasPhotoPrintDefaults({
           packageType: resolvedPackageType,
           passportSizeId: d.passportSizeId,
@@ -171,6 +179,7 @@ export default function GalleryClient() {
     setPrintMode,
     setSheetRecipe,
     setSelectedThemeId,
+    setSessionLookId,
   ]);
 
   return (

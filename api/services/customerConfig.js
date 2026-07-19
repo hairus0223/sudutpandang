@@ -2,6 +2,10 @@ import fs from "fs";
 import path from "path";
 import { normalizePassportSizeId } from "./passportSizes.js";
 import { normalizeThemeId } from "./themePresets.js";
+import {
+  defaultLookForPackage,
+  normalizeLookId,
+} from "./lookPresets.js";
 
 /** @type {Record<string, string>} */
 export const PASSPORT_COLOR_PRESETS = {
@@ -72,3 +76,44 @@ export function readPassportSizeId(userFolder) {
   const data = readCustomerJson(userFolder);
   return normalizePassportSizeId(data?.passportSizeId);
 }
+
+/**
+ * @param {string} userFolder
+ */
+export function readCustomerLookId(userFolder) {
+  const data = readCustomerJson(userFolder);
+  const packageType = data?.packageType || "self-photo";
+  return normalizeLookId(data?.lookId, packageType);
+}
+
+/**
+ * Persist lookId on customer.json (creates minimal file if missing).
+ * @param {string} userFolder
+ * @param {string} lookId
+ * @param {string} [packageType]
+ * @returns {string} normalized lookId
+ */
+export function writeCustomerLookId(userFolder, lookId, packageType) {
+  const existing = readCustomerJson(userFolder) || {};
+  const pkg = packageType || existing.packageType || "self-photo";
+  const resolved =
+    pkg === "pas-photo"
+      ? "natural"
+      : normalizeLookId(lookId, pkg);
+
+  const next = {
+    ...existing,
+    packageType: pkg,
+    lookId: resolved,
+  };
+
+  fs.mkdirSync(userFolder, { recursive: true });
+  fs.writeFileSync(
+    path.join(userFolder, "customer.json"),
+    JSON.stringify(next, null, 2)
+  );
+
+  return resolved;
+}
+
+export { defaultLookForPackage, normalizeLookId };

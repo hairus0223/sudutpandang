@@ -29,6 +29,8 @@ export type GalleryImageData = {
   processingPhase?: ProcessingPhase | null;
   processingError?: string | null;
   themeBackgroundSource?: ThemeBackgroundSource | null;
+  /** Look already baked into themed.png — skip CSS look filter on print/preview. */
+  bakedLookId?: string | null;
   variants?: ImageVariants;
 };
 
@@ -43,6 +45,7 @@ export type ImageStatusResponse = {
   variants: ImageVariants;
   error: string | null;
   themeBackgroundSource?: ThemeBackgroundSource | null;
+  bakedLookId?: string | null;
 };
 
 export type ThemeCategory = string;

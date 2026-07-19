@@ -89,6 +89,7 @@ export function useKioskPreview({
           isProcessing: false,
           failed: false,
           error: null,
+          bakedLookId: payload.bakedLookId ?? null,
         });
         return;
       }

@@ -2438,7 +2438,7 @@
           var HostPortal = 4;
           var HostComponent = 5;
           var HostText = 6;
-          var Fragment = 7;
+          var Fragment2 = 7;
           var Mode = 8;
           var ContextConsumer = 9;
           var ContextProvider = 10;
@@ -3595,7 +3595,7 @@
                 return "DehydratedFragment";
               case ForwardRef:
                 return getWrappedName$1(type, type.render, "ForwardRef");
-              case Fragment:
+              case Fragment2:
                 return "Fragment";
               case HostComponent:
                 return type;
@@ -12024,7 +12024,7 @@
               }
             }
             function updateFragment2(returnFiber, current2, fragment, lanes, key) {
-              if (current2 === null || current2.tag !== Fragment) {
+              if (current2 === null || current2.tag !== Fragment2) {
                 var created = createFiberFromFragment(fragment, returnFiber.mode, lanes, key);
                 created.return = returnFiber;
                 return created;
@@ -12427,7 +12427,7 @@
                 if (child.key === key) {
                   var elementType = element.type;
                   if (elementType === REACT_FRAGMENT_TYPE) {
-                    if (child.tag === Fragment) {
+                    if (child.tag === Fragment2) {
                       deleteRemainingChildren(returnFiber, child.sibling);
                       var existing = useFiber(child, element.props.children);
                       existing.return = returnFiber;
@@ -17903,7 +17903,7 @@
                 var _resolvedProps2 = workInProgress2.elementType === type ? _unresolvedProps2 : resolveDefaultProps(type, _unresolvedProps2);
                 return updateForwardRef(current2, workInProgress2, type, _resolvedProps2, renderLanes2);
               }
-              case Fragment:
+              case Fragment2:
                 return updateFragment(current2, workInProgress2, renderLanes2);
               case Mode:
                 return updateMode(current2, workInProgress2, renderLanes2);
@@ -18175,7 +18175,7 @@
               case SimpleMemoComponent:
               case FunctionComponent:
               case ForwardRef:
-              case Fragment:
+              case Fragment2:
               case Mode:
               case Profiler:
               case ContextConsumer:
@@ -22436,7 +22436,7 @@
             return fiber;
           }
           function createFiberFromFragment(elements, mode, lanes, key) {
-            var fiber = createFiber(Fragment, elements, key, mode);
+            var fiber = createFiber(Fragment2, elements, key, mode);
             fiber.lanes = lanes;
             return fiber;
           }
@@ -24575,19 +24575,19 @@
   function getKioskProcessingMessage(packageType, isProcessing, image, isReviewing = false) {
     if (!isProcessing) {
       if (packageType === "ai-photo" && isReviewing) {
-        return "Foto AI siap";
+        return "Wow \u2014 transformasi AI siap!";
       }
       return null;
     }
     const phase = inferProcessingPhase(image, packageType);
     if (phase === "apply-theme") {
-      return "Menerapkan tema AI\u2026 harap tunggu";
+      return "Menyatuin lighting & tema AI\u2026";
     }
     if (phase === "apply-passport-bg") {
       return "Membuat pas foto\u2026 harap tunggu";
     }
     if (packageType === "ai-photo") {
-      return "Menghapus background\u2026 harap tunggu";
+      return "Memotong background\u2026 sebentar lagi magic-nya";
     }
     if (packageType === "pas-photo") {
       return "Menghapus background\u2026 harap tunggu";
@@ -24679,6 +24679,53 @@
     if (fields.packageType) setters.setPackageType(fields.packageType);
     if (fields.passportSizeId) setters.setPassportSizeId(fields.passportSizeId);
     if (fields.themeId) setters.setThemeId(fields.themeId);
+    if (fields.lookId && setters.setLookId) setters.setLookId(fields.lookId);
+  }
+  async function updateKioskLook(userSlug, lookId) {
+    const res = await fetch(`${API_BASE}/api/kiosk/look`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user: userSlug, lookId })
+    });
+    if (!res.ok) throw new Error("look_update_failed");
+    return res.json();
+  }
+
+  // src/renderer/lib/lookPresets.js
+  var LOOK_PRESETS = [
+    { id: "natural", label: "Natural" },
+    { id: "soft", label: "Soft" },
+    { id: "warm", label: "Warm" },
+    { id: "cinematic", label: "Cinematic" }
+  ];
+  var LOOK_PREVIEW_INTENSITY = 0.6;
+  function defaultLookForPackage(packageType) {
+    if (packageType === "pas-photo") return "natural";
+    if (packageType === "ai-photo") return "natural";
+    return "soft";
+  }
+  function normalizeLookId(input, packageType) {
+    const raw = String(input || "").trim().toLowerCase();
+    if (LOOK_PRESETS.some((p) => p.id === raw)) return raw;
+    return defaultLookForPackage(packageType);
+  }
+  function getLookCssFilter(lookId, intensity = LOOK_PREVIEW_INTENSITY) {
+    const i = Math.max(0, Math.min(intensity, 1));
+    const id = normalizeLookId(lookId);
+    switch (id) {
+      case "soft":
+        return `brightness(${1 + 0.08 * i}) contrast(${1 - 0.05 * i}) saturate(${1 + 0.1 * i})`;
+      case "warm":
+        return `brightness(${1 + 0.05 * i}) saturate(${1 + 0.2 * i}) sepia(${0.1 * i})`;
+      case "cinematic":
+        return `contrast(${1 + 0.15 * i}) saturate(${1 + 0.05 * i}) brightness(${1 - 0.05 * i})`;
+      case "natural":
+      default:
+        return "none";
+    }
+  }
+  function lookAllowsPicker(packageType) {
+    return packageType !== "pas-photo";
   }
 
   // src/renderer/hooks/useKioskPreview.js
@@ -24752,7 +24799,8 @@
             previewUrl: previewUrl ?? null,
             isProcessing: false,
             failed: false,
-            error: null
+            error: null,
+            bakedLookId: payload.bakedLookId ?? null
           });
           return;
         }
@@ -28540,7 +28588,9 @@
     MAIN: "main",
     END: "end"
   };
-  var REVIEW_DISPLAY_MS = 3e3;
+  var REVIEW_DISPLAY_MS = 3200;
+  var AI_REVEAL_HOLD_MS = 5200;
+  var AI_REVIEW_MAX_MS = 4e4;
   var FLASH_HOLD_MS = 280;
   var PACKAGE_LABELS = {
     "self-photo": "Self Photo",
@@ -28572,25 +28622,44 @@
     const [passportSizeId, setPassportSizeId] = (0, import_react5.useState)("3x4");
     const [themeId, setThemeId] = (0, import_react5.useState)(null);
     const [themeLabels, setThemeLabels] = (0, import_react5.useState)({});
+    const [lookId, setLookId] = (0, import_react5.useState)("soft");
+    const [lookUpdating, setLookUpdating] = (0, import_react5.useState)(false);
     const [latestPreviewImage, setLatestPreviewImage] = (0, import_react5.useState)(null);
+    const [previewLookBaked, setPreviewLookBaked] = (0, import_react5.useState)(false);
+    const [reviewOriginalUrl, setReviewOriginalUrl] = (0, import_react5.useState)(null);
+    const [aiRevealActive, setAiRevealActive] = (0, import_react5.useState)(false);
     const sessionUserRef = (0, import_react5.useRef)(sessionUser);
     const packageTypeRef = (0, import_react5.useRef)(packageType);
     const screenRef = (0, import_react5.useRef)(screen);
     const countdownTimerRef = (0, import_react5.useRef)(null);
     const reviewTimerRef = (0, import_react5.useRef)(null);
+    const reviewAwaitingAiRef = (0, import_react5.useRef)(false);
     const sessionEndingRef = (0, import_react5.useRef)(false);
     const sessionEndAudioPlayedRef = (0, import_react5.useRef)(false);
+    const startCameraPreviewRef = (0, import_react5.useRef)(() => {
+    });
     sessionUserRef.current = sessionUser;
     packageTypeRef.current = packageType;
     screenRef.current = screen;
     const kioskSetters = (0, import_react5.useMemo)(
-      () => ({ setPackageType, setPassportSizeId, setThemeId }),
+      () => ({
+        setPackageType,
+        setPassportSizeId,
+        setThemeId,
+        setLookId: (id) => setLookId(normalizeLookId(id))
+      }),
       []
     );
-    const handlePreviewUpdate = (0, import_react5.useCallback)(({ previewUrl, isProcessing, failed, error, image }) => {
+    const handlePreviewUpdate = (0, import_react5.useCallback)(({ previewUrl, isProcessing, failed, error, image, bakedLookId }) => {
       if (previewUrl) setLastImageUrl(previewUrl);
       if (image) setLatestPreviewImage(image);
       if (typeof isProcessing === "boolean") setLastImageProcessing(isProcessing);
+      const resolvedBaked = bakedLookId ?? image?.bakedLookId ?? null;
+      if (resolvedBaked) {
+        setPreviewLookBaked(true);
+      } else if (isProcessing) {
+        setPreviewLookBaked(false);
+      }
       if (failed) {
         setProcessingError(error || "Proses foto gagal.");
       } else if (!isProcessing) {
@@ -28604,6 +28673,7 @@
       onPreviewUpdate: handlePreviewUpdate
     });
     const { videoRef, start: startCameraPreview, stop: stopCameraPreview } = useCameraPreview();
+    startCameraPreviewRef.current = startCameraPreview;
     const clearCaptureTimers = (0, import_react5.useCallback)(() => {
       if (countdownTimerRef.current) {
         window.clearInterval(countdownTimerRef.current);
@@ -28614,6 +28684,25 @@
         reviewTimerRef.current = null;
       }
     }, []);
+    const endReviewAndResume = (0, import_react5.useCallback)(() => {
+      reviewAwaitingAiRef.current = false;
+      setIsReviewing(false);
+      setAiRevealActive(false);
+      setReviewOriginalUrl(null);
+      startCameraPreviewRef.current();
+      reviewTimerRef.current = null;
+    }, []);
+    const scheduleReviewEnd = (0, import_react5.useCallback)(
+      (ms) => {
+        if (reviewTimerRef.current) {
+          window.clearTimeout(reviewTimerRef.current);
+        }
+        reviewTimerRef.current = window.setTimeout(() => {
+          endReviewAndResume();
+        }, ms);
+      },
+      [endReviewAndResume]
+    );
     const celebrateNewCapture = (0, import_react5.useCallback)(
       async (payload) => {
         const user = sessionUserRef.current;
@@ -28622,8 +28711,11 @@
         if (scr !== Screen.TRIAL && scr !== Screen.MAIN) return;
         unlockAudio();
         clearCaptureTimers();
+        reviewAwaitingAiRef.current = false;
         setIsCapturing(false);
         setIsReviewing(false);
+        setAiRevealActive(false);
+        setReviewOriginalUrl(null);
         setIsFlashing(true);
         setIsWaitingCapture(false);
         setShotStamp((n) => n + 1);
@@ -28633,20 +28725,21 @@
         }
         setCaptureCount((c) => c + 1);
         setProcessingError(null);
+        setPreviewLookBaked(false);
         const flashHold = new Promise((resolve) => {
           window.setTimeout(resolve, FLASH_HOLD_MS);
         });
         const pkg = packageTypeRef.current;
         const previewPromise = (async () => {
           try {
-            const result = await refreshPreview();
-            const latest = result?.image;
+            const result2 = await refreshPreview();
+            const latest = result2?.image;
             const waitingForProcessed = pkg === "ai-photo" || pkg === "pas-photo" ? latest?.processingStatus !== "ready" : false;
             setLastImageProcessing(Boolean(waitingForProcessed));
             if (waitingForProcessed && (payload.imageId || latest?.imageId)) {
               void waitForImageProcessing(payload.imageId || latest.imageId);
             }
-            return result;
+            return result2;
           } catch (err) {
             console.warn("Preview refresh after new-photo failed", err);
             return null;
@@ -28655,25 +28748,62 @@
         await flashHold;
         setIsFlashing(false);
         setIsWaitingCapture(true);
-        await previewPromise;
+        const result = await previewPromise;
+        const originalUrl = result?.image?.url ?? result?.previewUrl ?? null;
         setIsWaitingCapture(false);
         setIsReviewing(true);
         play("captureSuccess");
-        reviewTimerRef.current = window.setTimeout(() => {
-          setIsReviewing(false);
-          startCameraPreview();
-          reviewTimerRef.current = null;
-        }, REVIEW_DISPLAY_MS);
+        if (pkg === "ai-photo") {
+          setReviewOriginalUrl(originalUrl);
+          const waiting = Boolean(
+            result?.isProcessing || result?.image && result.image.processingStatus !== "ready"
+          );
+          reviewAwaitingAiRef.current = waiting;
+          if (waiting) {
+            scheduleReviewEnd(AI_REVIEW_MAX_MS);
+          } else if (result?.image?.variants?.themed) {
+            setAiRevealActive(true);
+            scheduleReviewEnd(AI_REVEAL_HOLD_MS);
+          } else {
+            scheduleReviewEnd(REVIEW_DISPLAY_MS);
+          }
+          return;
+        }
+        scheduleReviewEnd(REVIEW_DISPLAY_MS);
       },
       [
         clearCaptureTimers,
         play,
         refreshPreview,
-        startCameraPreview,
+        scheduleReviewEnd,
         unlockAudio,
         waitForImageProcessing
       ]
     );
+    (0, import_react5.useEffect)(() => {
+      if (packageType !== "ai-photo" || !isReviewing) return;
+      if (lastImageProcessing) return;
+      if (!reviewAwaitingAiRef.current) return;
+      reviewAwaitingAiRef.current = false;
+      const hasThemed = Boolean(latestPreviewImage?.variants?.themed);
+      if (hasThemed) {
+        setAiRevealActive(true);
+        play("captureSuccess");
+        if (typeof navigator !== "undefined" && navigator.vibrate) {
+          navigator.vibrate([25, 35, 70]);
+        }
+        scheduleReviewEnd(AI_REVEAL_HOLD_MS);
+      } else {
+        scheduleReviewEnd(REVIEW_DISPLAY_MS);
+      }
+    }, [
+      packageType,
+      isReviewing,
+      lastImageProcessing,
+      latestPreviewImage,
+      play,
+      scheduleReviewEnd
+    ]);
     const celebrateNewCaptureRef = (0, import_react5.useRef)(celebrateNewCapture);
     celebrateNewCaptureRef.current = celebrateNewCapture;
     const clearSessionTimerRef = (0, import_react5.useRef)(() => {
@@ -28695,6 +28825,8 @@
       setIsFlashing(false);
       setIsWaitingCapture(false);
       setIsReviewing(false);
+      setAiRevealActive(false);
+      setReviewOriginalUrl(null);
       setScreen(Screen.END);
       setSessionUser(null);
     }, [cancelPoll, clearCaptureTimers, play, stopCameraPreview]);
@@ -28726,6 +28858,32 @@
       [packageType, lastImageProcessing, latestPreviewImage, isReviewing]
     );
     const themeLabel = themeId ? themeLabels[themeId] ?? null : null;
+    const lookCssFilter = (0, import_react5.useMemo)(() => {
+      if (isFlashing) return "none";
+      return getLookCssFilter(lookId);
+    }, [lookId, isFlashing]);
+    const resultLookCssFilter = (0, import_react5.useMemo)(() => {
+      if (previewLookBaked && !lastImageProcessing) return "none";
+      return lookCssFilter;
+    }, [previewLookBaked, lastImageProcessing, lookCssFilter]);
+    const showLookPicker = lookAllowsPicker(packageType);
+    const handleSelectLook = (0, import_react5.useCallback)(
+      async (nextLookId) => {
+        if (!sessionUser || lookUpdating) return;
+        if (packageType === "pas-photo") return;
+        const normalized = normalizeLookId(nextLookId, packageType);
+        setLookId(normalized);
+        setLookUpdating(true);
+        try {
+          await updateKioskLook(sessionUser, normalized);
+        } catch (err) {
+          console.warn("Look update failed", err);
+        } finally {
+          setLookUpdating(false);
+        }
+      },
+      [sessionUser, lookUpdating, packageType]
+    );
     (0, import_react5.useEffect)(() => {
       fetchKioskConfig().then(setKioskConfig).catch(() => {
       });
@@ -28755,6 +28913,9 @@
         setCaptureCount(0);
         setLastImageUrl(null);
         setLastImageProcessing(false);
+        setPreviewLookBaked(false);
+        setAiRevealActive(false);
+        setReviewOriginalUrl(null);
         setProcessingError(null);
         setIsCapturing(false);
         setIsFlashing(false);
@@ -28781,6 +28942,9 @@
         setCaptureCount(0);
         setLastImageUrl(null);
         setLastImageProcessing(false);
+        setPreviewLookBaked(false);
+        setAiRevealActive(false);
+        setReviewOriginalUrl(null);
         setProcessingError(null);
         setIsCapturing(false);
         setIsFlashing(false);
@@ -28848,6 +29012,10 @@
         });
       });
       socket.on("photo-processed", handlePhotoProcessed);
+      socket.on("kiosk-look-update", ({ user, lookId: nextLook }) => {
+        if (sessionUserRef.current && user !== sessionUserRef.current) return;
+        if (nextLook) setLookId(normalizeLookId(nextLook));
+      });
       socket.on("new-photo", (payload) => {
         void celebrateNewCaptureRef.current(payload);
       });
@@ -28935,6 +29103,10 @@
             isAiPhoto && themeId && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "pill pill--theme", children: [
               "Tema: ",
               themeLabel ?? "AI Photo"
+            ] }),
+            showLookPicker && lookId !== "natural" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "pill pill--look", children: [
+              "Look: ",
+              LOOK_PRESETS.find((p) => p.id === lookId)?.label ?? lookId
             ] })
           ] })
         ] }),
@@ -28966,7 +29138,16 @@
           {
             className: `preview-video-wrapper${isCapturing ? " preview-video-wrapper--countdown" : ""}`,
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("video", { className: "preview-video", ref: videoRef, playsInline: true, muted: true }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                "video",
+                {
+                  className: "preview-video",
+                  ref: videoRef,
+                  playsInline: true,
+                  muted: true,
+                  style: { filter: lookCssFilter }
+                }
+              ),
               isPasPhoto && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pas-photo-frame", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
                 "div",
                 {
@@ -28974,46 +29155,107 @@
                   style: { aspectRatio: passportAspect }
                 }
               ) }),
-              isAiPhoto && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "ai-photo-badge", children: "Mode AI Photo" })
+              isAiPhoto && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "ai-photo-badge", children: themeLabel ? `AI \xB7 ${themeLabel}` : "Mode AI Photo \u2014 pilih pose terbaik" })
             ]
           }
         ),
-        isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "capture-overlay capture-overlay--review", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "img",
-            {
-              src: lastImageUrl,
-              alt: "Foto terakhir",
-              className: "capture-review-image"
-            }
-          ),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-review-badge", children: "Hasil foto" }),
-          lastImageProcessing && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "processing-overlay", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "processing-spinner" }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-review-caption", children: processingMessage || (isAiPhoto ? "Foto AI siap" : "Lihat hasilnya \u2014 sesi lanjut sebentar lagi") })
-        ] }, `review-${shotStamp}`),
+        isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+          "div",
+          {
+            className: `capture-overlay capture-overlay--review${isAiPhoto ? " capture-overlay--ai-review" : ""}${aiRevealActive ? " capture-overlay--ai-reveal" : ""}`,
+            children: [
+              isAiPhoto && reviewOriginalUrl ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "ai-reveal-stack", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                  "img",
+                  {
+                    src: reviewOriginalUrl,
+                    alt: "Sebelum AI",
+                    className: "capture-review-image ai-reveal-before",
+                    style: {
+                      filter: aiRevealActive ? void 0 : resultLookCssFilter
+                    }
+                  }
+                ),
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                  "img",
+                  {
+                    src: lastImageUrl,
+                    alt: "Sesudah AI",
+                    className: `capture-review-image ai-reveal-after${aiRevealActive ? " ai-reveal-after--visible" : ""}`
+                  }
+                )
+              ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                "img",
+                {
+                  src: lastImageUrl,
+                  alt: "Foto terakhir",
+                  className: "capture-review-image",
+                  style: { filter: resultLookCssFilter }
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                "div",
+                {
+                  className: `capture-review-badge${aiRevealActive ? " capture-review-badge--wow" : ""}`,
+                  children: aiRevealActive ? "Transformasi AI" : isAiPhoto && lastImageProcessing ? "Menciptakan AI" : "Hasil foto"
+                }
+              ),
+              lastImageProcessing && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "processing-overlay", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "processing-spinner" }),
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "processing-overlay-hint", children: "Sedikit sabar \u2014 hasilnya worth it" })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "capture-review-caption", children: processingMessage || (isAiPhoto ? aiRevealActive ? themeLabel ? `Siap! Tema ${themeLabel} \u2014 cetak di meja studio` : "Siap! Lihat & cetak hasil AI di meja studio" : "Foto AI siap" : "Lihat hasilnya \u2014 sesi lanjut sebentar lagi") })
+            ]
+          },
+          `review-${shotStamp}`
+        ),
         !isReviewing && !isWaitingCapture && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
           "div",
           {
-            className: `last-shot-thumb${lastImageProcessing ? " last-shot-thumb--processing" : ""}`,
+            className: `last-shot-thumb${lastImageProcessing ? " last-shot-thumb--processing" : ""}${isAiPhoto && previewLookBaked ? " last-shot-thumb--ai-ready" : ""}`,
             children: [
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", { src: lastImageUrl, alt: "Foto terakhir" }),
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                "img",
+                {
+                  src: lastImageUrl,
+                  alt: "Foto terakhir",
+                  style: { filter: resultLookCssFilter }
+                }
+              ),
               lastImageProcessing && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "last-shot-thumb-overlay", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "processing-spinner processing-spinner--sm" }) }),
-              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "last-shot-label", children: lastImageProcessing ? processingMessage || "Memproses\u2026" : "Foto terakhir" })
+              /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "last-shot-label", children: lastImageProcessing ? processingMessage || "Memproses\u2026" : isAiPhoto && previewLookBaked ? "AI siap cetak" : "Foto terakhir" })
             ]
           }
         ),
         processingError && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "kiosk-processing-error", children: processingError }),
-        !isReviewing && !isWaitingCapture && !isFlashing && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "preview-toolbar", children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pill-big", children: remainingLabel }) })
+        !isReviewing && !isWaitingCapture && !isFlashing && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "preview-toolbar", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "pill-big", children: remainingLabel }),
+          showLookPicker && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "look-picker", role: "group", "aria-label": "Look foto", children: LOOK_PRESETS.map((preset) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+            "button",
+            {
+              type: "button",
+              className: `look-picker-btn${lookId === preset.id ? " look-picker-btn--active" : ""}`,
+              onClick: () => void handleSelectLook(preset.id),
+              disabled: lookUpdating || isCapturing,
+              children: preset.label
+            },
+            preset.id
+          )) })
+        ] })
       ] }) });
     }
     if (screen === Screen.END) {
       return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "screen screen--idle screen--end", children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "headline", children: "Terima kasih" }),
-        /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "subheadline", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "subheadline", children: packageType === "ai-photo" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+          "Hasil AI Photo siap dilihat di meja studio.",
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("br", {}),
+          "Bandingkan before/after, pilih favorit, lalu cetak \u2014 biar kenangan makin epic."
+        ] }) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
           "Foto Anda sedang diproses.",
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("br", {}),
           "Silakan hubungi tim studio bila ingin melihat atau mencetak lebih banyak."
-        ] })
+        ] }) })
       ] });
     }
     return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "screen screen--idle", children: [

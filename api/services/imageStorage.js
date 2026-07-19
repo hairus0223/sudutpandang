@@ -100,7 +100,40 @@ function ensureDir(dir) {
 export function readMeta(userDir, imageId) {
   const metaPath = getMetaPath(userDir, imageId);
   if (!fs.existsSync(metaPath)) return null;
-  return JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+
+  try {
+    const raw = fs.readFileSync(metaPath);
+    if (!raw.length) {
+      console.warn(`[image-storage] empty meta ignored: ${metaPath}`);
+      return null;
+    }
+    // Null-filled / binary corrupt files from interrupted writes
+    if (raw.includes(0)) {
+      console.warn(`[image-storage] corrupt meta (null bytes) ignored: ${metaPath}`);
+      quarantineCorruptMeta(metaPath);
+      return null;
+    }
+    return JSON.parse(raw.toString("utf-8"));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[image-storage] invalid meta ignored: ${metaPath} (${message})`);
+    quarantineCorruptMeta(metaPath);
+    return null;
+  }
+}
+
+/**
+ * Move unreadable meta aside so recovery/listing never crash the API.
+ * @param {string} metaPath
+ */
+function quarantineCorruptMeta(metaPath) {
+  try {
+    const dest = `${metaPath}.corrupt-${Date.now()}`;
+    fs.renameSync(metaPath, dest);
+    console.warn(`[image-storage] quarantined ${path.basename(metaPath)} → ${path.basename(dest)}`);
+  } catch {
+    // best-effort
+  }
 }
 
 /**
@@ -320,7 +353,7 @@ export function updateAfterPassportBg(
  * @param {string} userDir
  * @param {string} imageId
  * @param {string} themeId
- * @param {{ themeBackgroundSource?: string }} [options]
+ * @param {{ themeBackgroundSource?: string, bakedLookId?: string }} [options]
  */
 export function updateAfterTheme(userDir, imageId, themeId, options = {}) {
   const existing = readMeta(userDir, imageId) || { imageId, variants: {} };
@@ -342,6 +375,10 @@ export function updateAfterTheme(userDir, imageId, themeId, options = {}) {
 
   if (options.themeBackgroundSource) {
     pipeline.themeBackgroundSource = options.themeBackgroundSource;
+  }
+
+  if (options.bakedLookId) {
+    pipeline.bakedLookId = options.bakedLookId;
   }
 
   const updated = {
@@ -507,6 +544,9 @@ export function findRecoverableJobs(baseDir, todayFolder) {
     if (!fs.existsSync(processedRoot)) continue;
 
     for (const imageId of fs.readdirSync(processedRoot)) {
+      const imageDir = path.join(processedRoot, imageId);
+      if (!fs.statSync(imageDir).isDirectory()) continue;
+
       const meta = readMeta(userDir, imageId);
       if (
         !meta ||
@@ -548,6 +588,9 @@ export function findIncompletePassportJobs(baseDir, todayFolder) {
     if (!fs.existsSync(processedRoot)) continue;
 
     for (const imageId of fs.readdirSync(processedRoot)) {
+      const imageDir = path.join(processedRoot, imageId);
+      if (!fs.statSync(imageDir).isDirectory()) continue;
+
       const meta = readMeta(userDir, imageId);
       if (!meta || meta.status !== PROCESSING_STATUS.PROCESSING) continue;
 
@@ -588,6 +631,9 @@ export function findIncompleteThemeJobs(baseDir, todayFolder) {
     if (!fs.existsSync(processedRoot)) continue;
 
     for (const imageId of fs.readdirSync(processedRoot)) {
+      const imageDir = path.join(processedRoot, imageId);
+      if (!fs.statSync(imageDir).isDirectory()) continue;
+
       const meta = readMeta(userDir, imageId);
       if (!meta || meta.status !== PROCESSING_STATUS.PROCESSING) continue;
 

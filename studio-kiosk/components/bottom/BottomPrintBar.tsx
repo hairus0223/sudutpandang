@@ -1,6 +1,6 @@
 "use client";
 
-import { Printer, Trash2 } from "lucide-react";
+import { Printer, Trash2, Sparkles } from "lucide-react";
 import { useGalleryStore } from "@/stores/useGalleryStore";
 
 type BottomPrintBarProps = {
@@ -12,9 +12,12 @@ export function BottomPrintBar({ onContinue }: BottomPrintBarProps) {
     selectedForPrint,
     allowedPrint,
     resetSelection,
+    packageType,
   } = useGalleryStore();
 
   if (selectedForPrint.length === 0) return null;
+
+  const isAi = packageType === "ai-photo";
 
   return (
     <div
@@ -28,12 +31,17 @@ export function BottomPrintBar({ onContinue }: BottomPrintBarProps) {
                    px-4 sm:px-6 py-3 sm:py-4
                    flex flex-wrap items-center justify-between gap-3"
       >
-        {/* INFO */}
-        <div className="text-white text-base sm:text-lg">
-          <span className="font-semibold">{selectedForPrint.length}</span> / {allowedPrint} foto dipilih
+        <div className="min-w-0 text-white text-base sm:text-lg">
+          <span className="font-semibold">{selectedForPrint.length}</span> /{" "}
+          {allowedPrint} foto dipilih
+          {isAi && (
+            <span className="mt-0.5 flex items-center gap-1.5 text-sm text-violet-200/90">
+              <Sparkles className="size-3.5 shrink-0" />
+              Hasil AI siap dicetak — pilih yang paling “wow”
+            </span>
+          )}
         </div>
 
-        {/* ACTIONS */}
         <div className="flex items-center gap-2 sm:gap-4">
           <button
             onClick={resetSelection}
@@ -45,10 +53,14 @@ export function BottomPrintBar({ onContinue }: BottomPrintBarProps) {
 
           <button
             onClick={onContinue}
-            className="flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 rounded-lg bg-green-600 text-white text-base sm:text-lg hover:bg-green-500 transition"
+            className={
+              isAi
+                ? "flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 rounded-lg bg-violet-600 text-white text-base sm:text-lg hover:bg-violet-500 transition"
+                : "flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 rounded-lg bg-green-600 text-white text-base sm:text-lg hover:bg-green-500 transition"
+            }
           >
             <Printer size={20} />
-            Lanjut Cetak
+            {isAi ? "Cetak AI Photo" : "Lanjut Cetak"}
           </button>
         </div>
       </div>

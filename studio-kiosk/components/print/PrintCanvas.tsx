@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGalleryStore, PhotoTransform } from "@/stores/useGalleryStore";
+import { LOOK_PRINT_INTENSITY, lookIdToPhotoFilter } from "@/lib/lookPresets";
 import { chunkPhotos } from "@/utils/printChunk";
 import { draw4RLayout } from "./canvas/draw4Rlayout";
 import type { PrintTemplate } from "@/lib/printTemplates";
@@ -21,11 +22,7 @@ import { getSlotSizeKey, resolveSlotImage } from "@/lib/sheetSlotBinding";
 import { buildSlotTransformKey } from "@/lib/slotTransformKey";
 import { buildSheetSlotDraws } from "@/utils/sheetRender";
 import { packSheetRecipe } from "@/utils/sheetLayoutEngine";
-
-type ImageData = {
-    filename: string;
-    url: string;
-};
+import type { ImageData } from "@/stores/useGalleryStore";
 
 const SHEET_DISPLAY_MAX_WIDTH = 920;
 
@@ -98,8 +95,9 @@ function CanvasPage({
         offsetX: 0,
         offsetY: 0,
     });
+    const lookSeededRef = useRef(new Set<string>());
 
-    const { photoTransforms, setPhotoTransform, faceBoxes, setFaceBoxes } =
+    const { photoTransforms, setPhotoTransform, faceBoxes, setFaceBoxes, sessionLookId } =
         useGalleryStore();
 
     const [activeFilename, setActiveFilename] = useState<string | null>(
@@ -234,7 +232,14 @@ function CanvasPage({
     /* ================= AUTO CENTER (ONCE) ================= */
     useEffect(() => {
         if (!activeFilename) return;
-        if (photoTransforms[activeFilename]) return;
+
+        const existing = photoTransforms[activeFilename];
+        const alreadyFramed =
+            existing &&
+            (Math.abs((existing.scale ?? 1) - 1) > 0.001 ||
+                Math.abs(existing.offsetX ?? 0) > 0.5 ||
+                Math.abs(existing.offsetY ?? 0) > 0.5);
+        if (alreadyFramed) return;
 
         const img = imageCacheRef.current.find(
             (i) => i.filename === activeFilename
@@ -253,10 +258,50 @@ function CanvasPage({
             "auto"
         );
 
+        const lookFilter = lookIdToPhotoFilter(sessionLookId);
+        const galleryImage = images.find((i) => i.filename === activeFilename);
+        const lookAlreadyBaked = Boolean(
+            galleryImage?.bakedLookId && galleryImage?.variants?.themed
+        );
+        const resolvedLookFilter = lookAlreadyBaked ? "none" : lookFilter;
+        const next: PhotoTransform = {
+            ...auto,
+            filter:
+                existing?.filter && existing.filter !== "none"
+                    ? existing.filter
+                    : resolvedLookFilter,
+            intensity:
+                existing?.intensity ??
+                (resolvedLookFilter !== "none" ? LOOK_PRINT_INTENSITY : 1),
+        };
 
-        transformRef.current = auto;
-        setPhotoTransform(activeFilename, auto);
-    }, [activeFilename]);
+        transformRef.current = next;
+        setPhotoTransform(activeFilename, next);
+    }, [activeFilename, sessionLookId, images]);
+
+    /* Seed session look onto print slots (does not block auto-center). */
+    useEffect(() => {
+        lookSeededRef.current = new Set();
+    }, [sessionLookId]);
+
+    useEffect(() => {
+        if (!sessionLookId || images.length === 0) return;
+        const lookFilter = lookIdToPhotoFilter(sessionLookId);
+        for (const img of images) {
+            if (lookSeededRef.current.has(img.filename)) continue;
+            lookSeededRef.current.add(img.filename);
+            // Themed AI photos bake look into pixels — avoid double grade.
+            if (img.bakedLookId && img.variants?.themed) continue;
+            const existing = photoTransforms[img.filename];
+            if (existing?.filter && existing.filter !== "none") continue;
+            if (lookFilter === "none") continue;
+            setPhotoTransform(img.filename, {
+                filter: lookFilter,
+                intensity: LOOK_PRINT_INTENSITY,
+            });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [images, sessionLookId, setPhotoTransform]);
 
 
     /* ================= DRAW ================= */

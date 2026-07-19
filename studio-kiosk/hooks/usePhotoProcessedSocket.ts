@@ -10,6 +10,7 @@ export type PhotoProcessedPayload = {
   subjectUrl?: string;
   passportUrl?: string;
   themedUrl?: string;
+  bakedLookId?: string;
   error?: string;
 };
 

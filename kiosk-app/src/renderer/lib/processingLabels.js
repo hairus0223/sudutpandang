@@ -34,7 +34,7 @@ export function getKioskProcessingMessage(
 ) {
   if (!isProcessing) {
     if (packageType === "ai-photo" && isReviewing) {
-      return "Foto AI siap";
+      return "Wow — transformasi AI siap!";
     }
     return null;
   }
@@ -42,7 +42,7 @@ export function getKioskProcessingMessage(
   const phase = inferProcessingPhase(image, packageType);
 
   if (phase === "apply-theme") {
-    return "Menerapkan tema AI… harap tunggu";
+    return "Menyatuin lighting & tema AI…";
   }
 
   if (phase === "apply-passport-bg") {
@@ -50,7 +50,7 @@ export function getKioskProcessingMessage(
   }
 
   if (packageType === "ai-photo") {
-    return "Menghapus background… harap tunggu";
+    return "Memotong background… sebentar lagi magic-nya";
   }
 
   if (packageType === "pas-photo") {
