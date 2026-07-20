@@ -1,6 +1,9 @@
 {
   "name": "sudut-pandang-kiosk",
+  "productName": "Sudut Pandang Kiosk",
   "version": "0.1.0",
+  "description": "Aplikasi layar kiosk Sudut Pandang",
+  "author": "Sudut Pandang",
   "private": true,
   "main": "src/main.js",
   "scripts": {
@@ -8,15 +11,19 @@
     "dev:vite": "vite",
     "dev:electron": "wait-on http://localhost:5180 && electron src/main.js",
     "build": "vite build",
-    "build:main": "mkdirp dist && copy src\\main.js dist\\main.js && copy src\\preload.js dist\\preload.js",
+    "pack": "npm run build && electron-builder --dir",
+    "dist:win": "npm run build && electron-builder --win nsis portable",
     "build:renderer": "esbuild src/renderer/main.jsx --bundle --outfile=src/renderer/bundle.js --platform=browser --format=iife --jsx=automatic --sourcemap"
   },
-  "dependencies": {
+  "devDependencies": {
     "@vitejs/plugin-react": "^6.0.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "concurrently": "^9.2.1",
     "electron": "^33.2.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.27.4",
+    "mkdirp": "^3.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "socket.io-client": "^4.8.3",
@@ -24,8 +31,34 @@
     "vite": "^8.0.0",
     "wait-on": "^9.0.4"
   },
-  "devDependencies": {
-    "esbuild": "^0.27.4",
-    "mkdirp": "^3.0.1"
+  "build": {
+    "appId": "id.sudutpandang.kiosk",
+    "productName": "Sudut Pandang Kiosk",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/main.js",
+      "src/preload.js",
+      "dist/renderer/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Sudut Pandang Kiosk"
+    },
+    "portable": {
+      "artifactName": "Sudut-Pandang-Kiosk-Portable-${version}.exe"
+    }
   }
 }

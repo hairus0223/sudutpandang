@@ -1,0 +1,5 @@
+{
+  "apiBase": "http://localhost:4000",
+  "monitorIndex": 1,
+  "fullscreen": true
+}

@@ -1,24 +1,81 @@
-const { app, BrowserWindow, ipcMain, screen } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, screen } = require("electron");
+const fs = require("fs");
 const path = require("path");
-const { spawn } = require("child_process");
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
 
-function createWindow() {
+const DEFAULT_CONFIG = Object.freeze({
+  apiBase: "http://localhost:4000",
+  monitorIndex: 1,
+  fullscreen: true,
+});
+
+function writeLog(message) {
+  const line = `${new Date().toISOString()} ${message}\n`;
+  try {
+    const logDir = path.join(app.getPath("userData"), "logs");
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(path.join(logDir, "kiosk.log"), line, "utf8");
+  } catch {
+    // Logging must never prevent the kiosk from starting.
+  }
+  console.log(message);
+}
+
+function loadRuntimeConfig() {
+  const programData =
+    process.env.PROGRAMDATA || path.dirname(app.getPath("userData"));
+  const configPath =
+    process.env.KIOSK_CONFIG_PATH ||
+    path.join(programData, "SudutPandang", "config.json");
+
+  let fileConfig = {};
+  try {
+    if (fs.existsSync(configPath)) {
+      fileConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    }
+  } catch (error) {
+    writeLog(`Config tidak dapat dibaca (${configPath}): ${error.message}`);
+  }
+
+  const apiBase = String(
+    process.env.KIOSK_API_BASE || fileConfig.apiBase || DEFAULT_CONFIG.apiBase
+  ).replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(apiBase)) {
+    throw new Error("apiBase harus berupa alamat http:// atau https://");
+  }
+
+  const monitorIndex = Number(
+    process.env.KIOSK_MONITOR_INDEX ??
+      fileConfig.monitorIndex ??
+      DEFAULT_CONFIG.monitorIndex
+  );
+
+  return {
+    apiBase,
+    monitorIndex:
+      Number.isInteger(monitorIndex) && monitorIndex >= 0 ? monitorIndex : 1,
+    fullscreen:
+      fileConfig.fullscreen == null
+        ? DEFAULT_CONFIG.fullscreen
+        : Boolean(fileConfig.fullscreen),
+  };
+}
+
+function createWindow(config) {
   const displays = screen.getAllDisplays();
-  console.log('displays', displays)
-  const targetDisplay = displays.length > 1 ? displays[1] : displays[0];
-  console.log('targetDisplay', targetDisplay)
+  const targetDisplay =
+    displays[Math.min(config.monitorIndex, displays.length - 1)] || displays[0];
 
   const { x, y, width, height } = targetDisplay.bounds;
 
   mainWindow = new BrowserWindow({
-    x: x,
-    y: y,
-    width: width,
-    height: height,
-    fullscreen: true,
+    x,
+    y,
+    width,
+    height,
+    fullscreen: config.fullscreen,
     autoHideMenuBar: true,
     backgroundColor: "#000000",
     webPreferences: {
@@ -28,13 +85,22 @@ function createWindow() {
     },
   });
 
-  // DEV MODE → load Vite dev server
-  mainWindow.loadURL("http://localhost:5180")
-  // mainWindow.webContents.openDevTools()
+  if (app.isPackaged) {
+    mainWindow.loadFile(
+      path.join(__dirname, "..", "dist", "renderer", "index.html")
+    );
+  } else {
+    mainWindow.loadURL(
+      process.env.KIOSK_DEV_SERVER_URL || "http://localhost:5180"
+    );
+  }
 
-  // In dev we serve the static HTML from src/renderer
-  // const indexFile = path.join(__dirname, "renderer", "index.html");
-  // mainWindow.loadFile(indexFile);
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("file:") && !url.startsWith("http://localhost:5180")) {
+      event.preventDefault();
+    }
+  });
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -90,14 +156,41 @@ class CameraService {
 
 const cameraService = new CameraService();
 
+const singleInstanceLock = app.requestSingleInstanceLock();
+if (!singleInstanceLock) {
+  app.quit();
+}
+
 app.whenReady().then(() => {
-  createWindow();
+  try {
+    const config = loadRuntimeConfig();
+    process.env.KIOSK_API_BASE = config.apiBase;
+    writeLog(
+      `Kiosk dimulai (${app.isPackaged ? "production" : "development"}), API ${config.apiBase}`
+    );
+    createWindow(config);
+  } catch (error) {
+    writeLog(`Kiosk gagal dimulai: ${error.stack || error.message}`);
+    dialog.showErrorBox(
+      "Sudut Pandang Kiosk gagal dimulai",
+      `${error.message}\n\nPeriksa konfigurasi dan file log aplikasi.`
+    );
+    app.quit();
+    return;
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      createWindow(loadRuntimeConfig());
     }
   });
+});
+
+app.on("second-instance", () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
 });
 
 app.on("window-all-closed", () => {

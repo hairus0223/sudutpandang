@@ -85,6 +85,23 @@ async function run() {
   assert(kioskConfig.ok, `/api/kiosk-config failed (${kioskConfig.status})`);
   console.log("✓ GET /api/kiosk-config");
 
+  const promoHealth = await fetchJson(base, "/api/promo-tools/health");
+  assert(
+    promoHealth.status === 200 || promoHealth.status === 503,
+    `/api/promo-tools/health unexpected ${promoHealth.status}`
+  );
+  assert(promoHealth.body.service === "promo-tools", "promo-tools service id missing");
+  console.log(
+    `✓ GET /api/promo-tools/health (db=${promoHealth.body.db?.ok ? "OK" : "FAIL"}, schema=v${promoHealth.body.schemaVersion ?? "?"})`
+  );
+
+  const promoMeta = await fetchJson(base, "/api/promo-tools/meta");
+  assert(promoMeta.ok, `/api/promo-tools/meta failed (${promoMeta.status})`);
+  assert(promoMeta.body.phase >= 3, "expected promo-tools phase 3+");
+  assert(promoMeta.body.features?.products === true, "products feature should be enabled");
+  assert(promoMeta.body.features?.orders === true, "orders feature should be enabled");
+  console.log(`✓ GET /api/promo-tools/meta (api=${promoMeta.body.apiVersion}, phase=${promoMeta.body.phase})`);
+
   if (health.body.config?.wc2026AssetsReady === false) {
     console.warn(
       "⚠ WC2026 assets missing — run: npm run generate:wc2026-assets"

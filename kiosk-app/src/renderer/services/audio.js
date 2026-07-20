@@ -190,11 +190,12 @@ export function useKioskAudio() {
   }
 
   const sounds = useMemo(() => {
+    const assetUrl = (relativePath) =>
+      new URL(relativePath, document.baseURI).toString();
     const map = {
-      welcome: new Audio("/audio/welcome-id.mp3"),
-      timeWarning: new Audio("/audio/time-warning-id.mp3"),
+      timeWarning: new Audio(assetUrl("./audio/time-warning-id.mp3")),
       // Original Indonesian voice — correct session-end UX
-      sessionEnd: new Audio("/audio/session-end-id.mp3"),
+      sessionEnd: new Audio(assetUrl("./audio/session-end-id.mp3")),
     };
     Object.values(map).forEach((audio) => {
       audio.volume = 1;

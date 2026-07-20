@@ -76,6 +76,9 @@ import {
   checkManualProcessAllowed,
   getProcessRateLimitConfig,
 } from "./services/processRateLimit.js";
+import { initPromoToolsDb } from "./services/promo-tools/db.js";
+import { resolvePromoToolsUploadDir } from "./services/promo-tools/paths.js";
+import { createPromoToolsRouter } from "./routes/promo-tools/index.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -102,6 +105,7 @@ const upload = multer({
 // ======================
 const BASE_DIR = resolveBaseDir();
 bootstrapStudioDirs(BASE_DIR);
+initPromoToolsDb(BASE_DIR);
 
 const STUDIO_PUBLIC_CONFIG = getPublicStudioConfig({
   baseDir: BASE_DIR,
@@ -137,6 +141,14 @@ function getTodayFolder() {
   return `${String(today.getDate()).padStart(2, "0")}-${String(
     today.getMonth() + 1
   ).padStart(2, "0")}-${today.getFullYear()}`;
+}
+
+/** Physical print copies from people count (studio default). */
+function copiesForPeopleCount(peopleCount) {
+  const people = Math.max(1, Number(peopleCount) || 1);
+  if (people === 1) return 2;
+  if (people === 2) return 3;
+  return 5;
 }
 
 // Konversi pixel → point untuk PDF
@@ -466,6 +478,17 @@ app.use(
   express.static(path.join(BASE_DIR, "headline"))
 );
 
+app.use(
+  "/promo-tools/files",
+  (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    next();
+  },
+  express.static(resolvePromoToolsUploadDir(BASE_DIR))
+);
+
+app.use("/api/promo-tools", createPromoToolsRouter({ publicHost: PUBLIC_HOST }));
+
 // ======================
 // SESSION STATE & CONFIG
 // ======================
@@ -608,6 +631,8 @@ app.get("/api/print-config/:user", (req, res) => {
   const packageType = data.packageType || "self-photo";
   res.json({
     allowedPrint: data.printLimit,
+    peopleCount: data.peopleCount ?? 1,
+    printCopies: copiesForPeopleCount(data.peopleCount ?? 1),
     templateId: data.templateId,
     name: data.name,
     packageType,
@@ -1231,7 +1256,6 @@ function silentPrint(filePath, printerName = null) {
   });
 }
 
-
 app.post("/api/print", async (req, res) => {
   const {
     images,
@@ -1244,6 +1268,8 @@ app.post("/api/print", async (req, res) => {
     recipeId,
     recipeLabel,
     slotCount,
+    peopleCount,
+    copies: copiesFromBody,
   } = req.body;
 
   if (!Array.isArray(images) || images.length === 0)
@@ -1288,16 +1314,20 @@ app.post("/api/print", async (req, res) => {
   const iccPath = path.join(__dirname, "profiles", "sRGB-v4.icc");
   const hasIcc = fs.existsSync(iccPath);
 
-  // Tentukan jumlah copy sesuai session
-  // const copies = activeSession
-  //   ? activeSession.peopleCount === 1
-  //     ? 2
-  //     : activeSession.peopleCount === 2
-  //     ? 3
-  //     : 5
-  //   : 1;
-  const copies = 1;
-  
+  // Tentukan jumlah copy: body → session → peopleCount → 1
+  let copies = 1;
+  if (
+    copiesFromBody != null &&
+    Number.isFinite(Number(copiesFromBody)) &&
+    Number(copiesFromBody) > 0
+  ) {
+    copies = Math.min(10, Math.round(Number(copiesFromBody)));
+  } else if (peopleCount != null) {
+    copies = copiesForPeopleCount(peopleCount);
+  } else if (activeSession?.peopleCount) {
+    copies = copiesForPeopleCount(activeSession.peopleCount);
+  }
+
   try {
     for (const imgData of images) {
       const buffer = Buffer.from(imgData.replace(/^data:image\/png;base64,/, ""), "base64");
@@ -1473,6 +1503,7 @@ server.listen(PORT, "0.0.0.0", () => {
     `📊 Image queue: pending=${imageProcessingQueue.pendingCount} (rate limit ${getProcessRateLimitConfig().maxJobsPerUser}/user)`
   );
   console.log(`❤️  Health: GET /api/health · GET /api/health/image-processing`);
+  console.log(`📦 Promo Tools: GET /api/promo-tools/products · GET /api/promo-tools/orders`);
 
   if (BG_REMOVAL_PREWARM) {
     void prewarmBackgroundRemoval();

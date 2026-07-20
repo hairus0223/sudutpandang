@@ -604,7 +604,7 @@ export function App() {
   if (screen === Screen.IDLE) {
     return (
       <div className="screen screen--idle">
-        <img src="/logo-light.png" height={150} alt="Sudut Pandang" />
+        <img src="./logo-light.png" height={150} alt="Sudut Pandang" />
         <div className="pill">Self Photo Session</div>
         <p className="subheadline text-center">
           Menunggu sesi dari operator.
@@ -872,7 +872,7 @@ export function App() {
 
   return (
     <div className="screen screen--idle">
-      <img src="/logo-light.png" height={150} alt="Sudut Pandang" />
+      <img src="./logo-light.png" height={150} alt="Sudut Pandang" />
       <div className="pill">Self Photo Session</div>
       <p className="subheadline text-center">
         Menunggu sesi dari operator.

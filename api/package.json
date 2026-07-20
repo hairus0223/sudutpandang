@@ -7,7 +7,9 @@
     "generate:theme-assets": "node scripts/generate-theme-assets.js",
     "validate:theme-assets": "node scripts/validate-theme-assets.js",
     "event:preflight": "node scripts/validate-theme-assets.js --event",
-    "smoke-test": "node scripts/smoke-test.js"
+    "smoke-test": "node scripts/smoke-test.js",
+    "smoke-test:promo-products": "node scripts/promo-tools-products-smoke.js",
+    "smoke-test:promo-orders": "node scripts/promo-tools-orders-smoke.js"
   },
   "dependencies": {
     "@imgly/background-removal-node": "^1.4.5",

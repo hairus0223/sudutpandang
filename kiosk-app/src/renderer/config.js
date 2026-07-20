@@ -1,8 +1,10 @@
 export const DEFAULT_API_BASE = "http://localhost:4000";
 
 export function getApiBase() {
-  if (typeof window !== "undefined" && window.__KIOSK_CONFIG__?.apiBase) {
-    return window.__KIOSK_CONFIG__.apiBase;
+  if (typeof window !== "undefined") {
+    const configuredBase =
+      window.kiosk?.config?.apiBase || window.__KIOSK_CONFIG__?.apiBase;
+    if (configuredBase) return configuredBase.replace(/\/+$/, "");
   }
   return DEFAULT_API_BASE;
 }
