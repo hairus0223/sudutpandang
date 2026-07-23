@@ -1,6 +1,6 @@
 import path from "path";
 import url from "url";
-import { CLASSIC_THEME_IDS, WC2026_THEME_IDS } from "./themeAssetSvgs.js";
+import { CLASSIC_THEME_IDS, WC2026_THEME_IDS, AI_SELF_PHOTO_THEME_IDS } from "./themeAssetSvgs.js";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
@@ -44,6 +44,15 @@ export const THEME_CATEGORY_REGISTRY = [
     assetsSubdir: "classic",
     themeIds: CLASSIC_THEME_IDS,
     sortOrder: 20,
+    pickerCompact: true,
+  },
+  {
+    id: "ai-self-photo",
+    label: "AI Self Photo",
+    kind: "permanent",
+    assetsSubdir: "ai-self-photo",
+    themeIds: AI_SELF_PHOTO_THEME_IDS,
+    sortOrder: 30,
     pickerCompact: true,
   },
 ];

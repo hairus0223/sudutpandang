@@ -8,15 +8,8 @@ import {
 /**
  * Sync latest shot preview with socket + polling fallback.
  */
-export function useKioskPreview({
-  userSlug,
-  packageType,
-  enabled,
-  onPreviewUpdate,
-}) {
+export function useKioskPreview({ userSlug, enabled, onPreviewUpdate }) {
   const pollAbortRef = useRef(null);
-  const packageTypeRef = useRef(packageType);
-  packageTypeRef.current = packageType;
 
   const cancelPoll = useCallback(() => {
     pollAbortRef.current?.abort();
@@ -26,7 +19,7 @@ export function useKioskPreview({
   const refreshPreview = useCallback(async () => {
     if (!userSlug || !enabled) return;
 
-    const result = await refreshLatestPreview(userSlug, packageTypeRef.current);
+    const result = await refreshLatestPreview(userSlug);
     onPreviewUpdate({
       previewUrl: result.previewUrl,
       isProcessing: result.isProcessing,
@@ -50,10 +43,7 @@ export function useKioskPreview({
           signal: controller.signal,
         });
 
-        const latest = await refreshLatestPreview(
-          userSlug,
-          packageTypeRef.current
-        );
+        const latest = await refreshLatestPreview(userSlug);
         onPreviewUpdate({
           previewUrl: latest.previewUrl,
           isProcessing: false,
@@ -82,14 +72,12 @@ export function useKioskPreview({
       cancelPoll();
 
       if (payload.status === "ready") {
-        const previewUrl =
-          payload.themedUrl || payload.passportUrl || payload.subjectUrl;
+        const previewUrl = payload.originalUrl ?? payload.subjectUrl ?? null;
         onPreviewUpdate({
-          previewUrl: previewUrl ?? null,
+          previewUrl,
           isProcessing: false,
           failed: false,
           error: null,
-          bakedLookId: payload.bakedLookId ?? null,
         });
         return;
       }

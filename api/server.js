@@ -14,71 +14,57 @@ import multer from "multer";
 import {
   PROCESSING_STATUS,
   createPendingMeta,
-  ingestLegacyPhoto,
   readMeta,
   saveOriginalFromCapture,
   saveUploadedToCaptures,
-  updateStatus,
 } from "./services/imageStorage.js";
-import {
-  normalizePassportColor,
-  readCustomerJson,
-  readCustomerLookId,
-  readCustomerPackageType,
-  readCustomerThemeId,
-  readPassportBackgroundColor,
-  writeCustomerLookId,
-} from "./services/customerConfig.js";
-import {
-  LOOK_PRESETS,
-  defaultLookForPackage,
-  normalizeLookId,
-} from "./services/lookPresets.js";
-import {
-  enqueueApplyPassportBg,
-  enqueueApplyTheme,
-  enqueueRemoveBackground,
-  imageProcessingQueue,
-  recoverIncompletePassportJobs,
-  recoverIncompleteThemeJobs,
-  recoverPendingJobs,
-} from "./services/imageProcessingQueue.js";
-import {
-  BG_REMOVAL_ENABLED,
-  BG_REMOVAL_PREWARM,
-  checkBackgroundRemovalHealth,
-  getRemovalModel,
-  prewarmBackgroundRemoval,
-  validateBackgroundRemovalAssets,
-} from "./services/backgroundRemoval.js";
-import { THEME_GENERATION_ENABLED } from "./services/themeGeneration.js";
-import {
-  listThemeCategoriesForApi,
-  listThemesForApi,
-  normalizeThemeId,
-  resolveDefaultThemeId,
-  validateClassicThemeAssets,
-  validateWorldCupThemeAssets,
-} from "./services/themePresets.js";
-import { getThemeSourceStats } from "./services/themeSourceStats.js";
-import {
-  DEFAULT_PASSPORT_SIZE_ID,
-  normalizePassportSizeId,
-  PASSPORT_SIZE_PRESETS,
-} from "./services/passportSizes.js";
 import { bootstrapStudioDirs, resolveBaseDir } from "./services/studioPaths.js";
+import { readCustomerJson } from "./services/customerConfig.js";
+import {
+  normalizePackageType,
+  getPackageDurations,
+  getPackageDurationMinutes,
+  resolveAiGenerateLimit,
+  readAiQuotaFromCustomer,
+  getAiGenerationConfig,
+  isAiGenerationEnabled,
+  PACKAGE_TYPES,
+} from "./services/packageTypes.js";
+import { listAiThemesPublic, getAiTheme, buildAiJobId, toPublicAiTheme } from "./services/aiThemes.js";
+import { BUNDLED_THEME_PREVIEWS_DIR } from "./services/aiThemePreviews.js";
+import {
+  findAiSelectionByJobId,
+  findAiSelectionForImage,
+  readAiQuotaWithPending,
+  readSessionTheme,
+  reserveAiQuota,
+  setSessionTheme,
+  lockSessionTheme,
+  upsertAiSelection,
+  getAiSelections,
+} from "./services/aiCustomer.js";
+import { enqueueAiGenerationJob, getAiQueueStats } from "./services/aiGenerationQueue.js";
+import { getAiPipelineStatus } from "./services/aiGeneration.js";
+import { logAiAnalyticsEvent, getAiAnalyticsSummary } from "./services/aiAnalytics.js";
 import {
   getPublicStudioConfig,
   logStartupValidation,
   validateStudioConfig,
 } from "./services/studioConfig.js";
-import {
-  checkManualProcessAllowed,
-  getProcessRateLimitConfig,
-} from "./services/processRateLimit.js";
 import { initPromoToolsDb } from "./services/promo-tools/db.js";
 import { resolvePromoToolsUploadDir } from "./services/promo-tools/paths.js";
 import { createPromoToolsRouter } from "./routes/promo-tools/index.js";
+import { createAdminRouter } from "./routes/admin/index.js";
+import { isAdminApiEnabled } from "./services/adminAuth.js";
+import {
+  prewarmPersonSegmentation,
+  validatePersonSegmentationAssets,
+} from "./services/personSegmentation.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const BUNDLED_THEME_ASSETS_DIR = path.join(__dirname, "assets", "themes");
 
 const app = express();
 const server = http.createServer(app);
@@ -124,14 +110,10 @@ logStartupValidation({
   config: STUDIO_PUBLIC_CONFIG,
 });
 
+validatePersonSegmentationAssets();
+
 // Folder INPUT dari Imaging Edge
 const CAPTURE_DIR = path.join(BASE_DIR, "capture");
-
-// ======================
-// __dirname fix untuk ES Module
-// ======================
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 // ======================
 // HELPERS
@@ -171,208 +153,71 @@ function buildVariantUrls(host, todayFolder, userSlug, meta) {
     );
   }
 
-  if (meta?.variants?.subject) {
-    variants.subject = buildPublicImageUrl(
-      todayFolder,
-      userSlug,
-      String(meta.variants.subject),
-      host
-    );
-  }
-
-  if (meta?.status === PROCESSING_STATUS.READY && meta?.variants?.passport) {
-    variants.passport = buildPublicImageUrl(
-      todayFolder,
-      userSlug,
-      String(meta.variants.passport),
-      host
-    );
-  }
-
-  if (meta?.status === PROCESSING_STATUS.READY && meta?.variants?.themed) {
-    variants.themed = buildPublicImageUrl(
-      todayFolder,
-      userSlug,
-      String(meta.variants.themed),
-      host
-    );
+  if (meta?.variants?.ai && typeof meta.variants.ai === "object") {
+    /** @type {Record<string, string>} */
+    variants.ai = {};
+    for (const [themeId, relPath] of Object.entries(meta.variants.ai)) {
+      if (!relPath) continue;
+      variants.ai[themeId] = buildPublicImageUrl(
+        todayFolder,
+        userSlug,
+        String(relPath),
+        host
+      );
+    }
   }
 
   return variants;
+}
+
+function buildAiSelectionsIndex(userPath) {
+  const customer = readCustomerJson(userPath);
+  /** @type {Map<string, Record<string, unknown>>} */
+  const byImage = new Map();
+
+  for (const entry of getAiSelections(customer)) {
+    const imageId = String(entry.imageId || "");
+    if (!imageId) continue;
+    byImage.set(imageId, entry);
+  }
+
+  return byImage;
 }
 
 function getUserPathForToday(userSlug) {
   return path.join(BASE_DIR, getTodayFolder(), userSlug);
 }
 
-function readCustomerSessionMeta(userSlug) {
+function buildKioskSyncFields(userSlug, fallback = {}) {
   const userFolder = getUserPathForToday(userSlug);
   const data = readCustomerJson(userFolder);
-  if (!data) return null;
-
-  const packageType = data.packageType || "self-photo";
-  return {
-    packageType,
-    passportBackgroundColor: normalizePassportColor(data.passportBackgroundColor),
-    passportSizeId: normalizePassportSizeId(data.passportSizeId),
-    themeId: normalizeThemeId(data.themeId),
-    lookId: normalizeLookId(data.lookId, packageType),
-  };
-}
-
-/**
- * Package/theme/look fields for kiosk socket sync (customer.json is source of truth).
- * @param {string} userSlug
- * @param {{ packageType?: string }} [fallback]
- */
-function buildKioskSyncFields(userSlug, fallback = {}) {
-  const customerMeta = readCustomerSessionMeta(userSlug);
-  const packageType =
-    customerMeta?.packageType ?? fallback.packageType ?? "self-photo";
+  const packageType = normalizePackageType(
+    data?.packageType ?? fallback.packageType ?? activeSession?.packageType
+  );
+  const peopleCount =
+    data?.peopleCount ?? activeSession?.peopleCount ?? fallback.peopleCount ?? 1;
+  const sessionTheme = readSessionTheme(data);
+  const aiQuota = readAiQuotaFromCustomer(data);
+  const themePublic =
+    sessionTheme.themeId
+      ? toPublicAiTheme(getAiTheme(sessionTheme.themeId, BASE_DIR), BASE_DIR, PUBLIC_HOST)
+      : null;
 
   return {
     packageType,
-    passportSizeId:
-      customerMeta?.passportSizeId ?? DEFAULT_PASSPORT_SIZE_ID,
-    themeId: customerMeta?.themeId ?? null,
-    lookId:
-      customerMeta?.lookId ?? defaultLookForPackage(packageType),
+    peopleCount,
+    aiThemeId: sessionTheme.themeId,
+    aiThemeLabel: sessionTheme.label,
+    aiThemePreviewUrl: themePublic?.previewUrl ?? null,
+    aiThemePreviewColor: themePublic?.previewColor ?? null,
+    aiThemeType: themePublic?.type ?? null,
+    aiGenerateLimit: aiQuota.limit,
   };
-}
-
-const PACKAGES_WITH_AUTO_BG = new Set(["ai-photo", "pas-photo"]);
-
-function shouldAutoRemoveBackground(packageType) {
-  return PACKAGES_WITH_AUTO_BG.has(packageType || "self-photo");
-}
-
-function scheduleBackgroundRemoval({
-  userFolder,
-  userSlug,
-  imageId,
-  todayFolder,
-  packageType,
-  passportColor,
-  themeId,
-  lookId,
-  force = false,
-}) {
-  if (!BG_REMOVAL_ENABLED) return;
-
-  const resolvedPackageType =
-    packageType ?? readCustomerPackageType(userFolder);
-  if (!force && !shouldAutoRemoveBackground(resolvedPackageType)) return;
-
-  const resolvedPassportColor =
-    passportColor ?? readPassportBackgroundColor(userFolder);
-  const resolvedThemeId = themeId ?? readCustomerThemeId(userFolder);
-  const resolvedLookId = lookId ?? readCustomerLookId(userFolder);
-
-  enqueueRemoveBackground({
-    userDir: userFolder,
-    imageId,
-    user: userSlug,
-    packageType: resolvedPackageType,
-    passportColor: resolvedPassportColor,
-    themeId: resolvedThemeId,
-    lookId: resolvedLookId,
-    onComplete: (result) => {
-      emitPhotoProcessed({
-        user: userSlug,
-        imageId,
-        status: "ready",
-        todayFolder,
-        meta: result?.meta,
-      });
-    },
-    onError: (err) => {
-      emitPhotoProcessed({
-        user: userSlug,
-        imageId,
-        status: "failed",
-        todayFolder,
-        error: err.message,
-      });
-    },
-  });
-}
-
-function scheduleThemeGeneration({
-  userFolder,
-  userSlug,
-  imageId,
-  todayFolder,
-  themeId,
-  lookId,
-}) {
-  const resolvedThemeId = themeId ?? readCustomerThemeId(userFolder);
-  const resolvedLookId = lookId ?? readCustomerLookId(userFolder);
-
-  enqueueApplyTheme({
-    userDir: userFolder,
-    imageId,
-    user: userSlug,
-    themeId: resolvedThemeId,
-    lookId: resolvedLookId,
-    onComplete: (result) => {
-      emitPhotoProcessed({
-        user: userSlug,
-        imageId,
-        status: "ready",
-        todayFolder,
-        meta: result?.meta,
-      });
-    },
-    onError: (err) => {
-      emitPhotoProcessed({
-        user: userSlug,
-        imageId,
-        status: "failed",
-        todayFolder,
-        error: err.message,
-      });
-    },
-  });
-}
-
-function schedulePassportBackground({
-  userFolder,
-  userSlug,
-  imageId,
-  todayFolder,
-  passportColor,
-}) {
-  const resolvedPassportColor =
-    passportColor ?? readPassportBackgroundColor(userFolder);
-
-  enqueueApplyPassportBg({
-    userDir: userFolder,
-    imageId,
-    user: userSlug,
-    passportColor: resolvedPassportColor,
-    onComplete: (result) => {
-      emitPhotoProcessed({
-        user: userSlug,
-        imageId,
-        status: "ready",
-        todayFolder,
-        meta: result?.meta,
-      });
-    },
-    onError: (err) => {
-      emitPhotoProcessed({
-        user: userSlug,
-        imageId,
-        status: "failed",
-        todayFolder,
-        error: err.message,
-      });
-    },
-  });
 }
 
 function listUserImages(userPath, host, todayFolder, userSlug) {
   const images = [];
+  const aiByImage = buildAiSelectionsIndex(userPath);
 
   if (fs.existsSync(userPath)) {
     for (const filename of fs.readdirSync(userPath)) {
@@ -386,6 +231,7 @@ function listUserImages(userPath, host, todayFolder, userSlug) {
         variants: {
           original: `http://${host}/images/${todayFolder}/${userSlug}/${filename}`,
         },
+        aiSelection: aiByImage.get(imageId) ?? null,
       });
     }
   }
@@ -404,49 +250,15 @@ function listUserImages(userPath, host, todayFolder, userSlug) {
         filename,
         url: variants.original,
         imageId,
-        processingStatus: meta?.status ?? "pending",
-        processingPhase: meta?.processingPhase ?? null,
+        processingStatus: meta?.status ?? "none",
         processingError: meta?.error ?? null,
-        themeBackgroundSource: meta?.pipeline?.themeBackgroundSource ?? null,
-        bakedLookId: meta?.pipeline?.bakedLookId ?? null,
         variants,
+        aiSelection: aiByImage.get(imageId) ?? null,
       });
     }
   }
 
   return images.sort((a, b) => a.filename.localeCompare(b.filename));
-}
-
-function emitPhotoProcessed({ user, imageId, status, todayFolder, meta, error }) {
-  const payload = { user, imageId, status };
-  if (status === "ready" && meta?.variants?.themed) {
-    payload.themedUrl = buildPublicImageUrl(
-      todayFolder,
-      user,
-      String(meta.variants.themed)
-    );
-  }
-  if (status === "ready" && meta?.variants?.passport) {
-    payload.passportUrl = buildPublicImageUrl(
-      todayFolder,
-      user,
-      String(meta.variants.passport)
-    );
-  }
-  if (status === "ready" && meta?.variants?.subject) {
-    payload.subjectUrl = buildPublicImageUrl(
-      todayFolder,
-      user,
-      String(meta.variants.subject)
-    );
-  }
-  if (status === "ready" && meta?.pipeline?.bakedLookId) {
-    payload.bakedLookId = meta.pipeline.bakedLookId;
-  }
-  if (status === "failed" && error) {
-    payload.error = error;
-  }
-  io.emit("photo-processed", payload);
 }
 
 // Ukuran 4R @300DPI
@@ -479,6 +291,33 @@ app.use(
 );
 
 app.use(
+  "/themes",
+  (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    next();
+  },
+  express.static(path.join(BASE_DIR, "themes"))
+);
+
+app.use(
+  "/theme-previews",
+  (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    next();
+  },
+  express.static(BUNDLED_THEME_PREVIEWS_DIR)
+);
+
+app.use(
+  "/theme-assets",
+  (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    next();
+  },
+  express.static(BUNDLED_THEME_ASSETS_DIR)
+);
+
+app.use(
   "/promo-tools/files",
   (req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -487,7 +326,20 @@ app.use(
   express.static(resolvePromoToolsUploadDir(BASE_DIR))
 );
 
+app.use(
+  "/research/files",
+  (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    next();
+  },
+  express.static(path.join(BASE_DIR, "research"))
+);
+
 app.use("/api/promo-tools", createPromoToolsRouter({ publicHost: PUBLIC_HOST }));
+app.use(
+  "/api/admin",
+  createAdminRouter({ baseDir: BASE_DIR, publicHost: PUBLIC_HOST })
+);
 
 // ======================
 // SESSION STATE & CONFIG
@@ -513,17 +365,14 @@ const TRIAL_DURATION_SECONDS =
     ? Number(process.env.TRIAL_DURATION_SECONDS)
     : 60;
 
-const PACKAGE_DURATIONS = {
-  "self-photo": SESSION_DURATION_MINUTES,
-  "pas-photo": 5,
-  "ai-photo": SESSION_DURATION_MINUTES,
-};
+const PACKAGE_DURATIONS = getPackageDurations();
 
 function buildSessionTimerUpdate(session) {
   if (!session) return null;
 
   const kioskFields = buildKioskSyncFields(session.user, {
     packageType: session.packageType,
+    peopleCount: session.peopleCount,
   });
 
   return {
@@ -534,10 +383,7 @@ function buildSessionTimerUpdate(session) {
       ? session.remainingMs
       : Math.max(0, session.endsAt - Date.now()),
     phase: session.phase ?? null,
-    packageType: kioskFields.packageType,
-    passportSizeId: kioskFields.passportSizeId,
-    themeId: kioskFields.themeId,
-    lookId: kioskFields.lookId,
+    ...kioskFields,
   };
 }
 
@@ -555,20 +401,35 @@ app.post("/api/register", (req, res) => {
     phone = "",
     peopleCount = 1,
     templateId = "4R",
-    packageType = "self-photo",
-    passportBackgroundColor,
-    passportSizeId,
-    themeId,
-    lookId,
+    packageType: rawPackageType,
+    aiThemeId: rawAiThemeId,
   } = req.body;
 
   if (!name || typeof name !== "string" || name.trim() === "")
     return res.status(400).json({ error: "invalid data" });
 
   const people = Math.max(1, Math.min(8, Number(peopleCount) || 1));
+  const packageType = normalizePackageType(rawPackageType);
+  const aiGenerateLimit = resolveAiGenerateLimit(packageType, people);
+
+  let aiThemeId = null;
+  let aiThemeLabel = null;
+  if (packageType === "ai-self-photo") {
+    const theme = getAiTheme(rawAiThemeId, BASE_DIR);
+    if (!theme) {
+      return res.status(400).json({ error: "theme_required" });
+    }
+    aiThemeId = theme.id;
+    aiThemeLabel = theme.label;
+  }
+
   const slugName = name.trim().replace(/\s+/g, "_");
   const todayFolder = getTodayFolder();
   const userFolder = path.join(BASE_DIR, todayFolder, slugName);
+
+  const registeredAt = new Date().toISOString();
+  const aiThemeLockedAt =
+    packageType === "ai-self-photo" && aiThemeId ? registeredAt : null;
 
   const customerData = {
     name: name.trim(),
@@ -577,23 +438,14 @@ app.post("/api/register", (req, res) => {
     user: slugName,
     templateId,
     packageType,
-    passportBackgroundColor:
-      packageType === "pas-photo"
-        ? normalizePassportColor(passportBackgroundColor)
-        : null,
-    passportSizeId:
-      packageType === "pas-photo"
-        ? normalizePassportSizeId(passportSizeId)
-        : null,
-    themeId:
-      packageType === "ai-photo" ? normalizeThemeId(themeId) : null,
-    lookId:
-      packageType === "pas-photo"
-        ? "natural"
-        : normalizeLookId(lookId, packageType),
     printLimit: people,
+    aiGenerateLimit,
+    aiGenerateUsed: 0,
+    aiThemeId,
+    aiThemeLockedAt,
+    aiSelections: [],
     folderPath: `/images/${todayFolder}/${slugName}`,
-    registeredAt: new Date().toISOString(),
+    registeredAt,
   };
 
   fs.mkdirSync(userFolder, { recursive: true });
@@ -602,7 +454,36 @@ app.post("/api/register", (req, res) => {
     JSON.stringify(customerData, null, 2)
   );
 
-  res.json({ success: true, customer: customerData });
+  if (packageType === "ai-self-photo" && aiThemeId) {
+    logAiAnalyticsEvent(BASE_DIR, {
+      type: "theme_selected",
+      user: slugName,
+      themeId: aiThemeId,
+      source: "register",
+    });
+  }
+
+  const host = req.headers.host || PUBLIC_HOST;
+  const themePublic =
+    packageType === "ai-self-photo" && aiThemeId
+      ? toPublicAiTheme(getAiTheme(aiThemeId, BASE_DIR), BASE_DIR, host)
+      : null;
+
+  res.json({
+    success: true,
+    customer: {
+      ...customerData,
+      aiThemeLabel,
+      aiThemeLocked: Boolean(aiThemeLockedAt),
+      ...(themePublic
+        ? {
+            aiThemeType: themePublic.type,
+            aiThemePreviewUrl: themePublic.previewUrl,
+            aiThemePreviewBeforeUrl: themePublic.previewBeforeUrl ?? null,
+          }
+        : {}),
+    },
+  });
 });
 
 // Cek customer by name (today's folder) untuk kontrol sesi dari studio-kiosk
@@ -617,7 +498,28 @@ app.get("/api/customer-by-name", (req, res) => {
   if (!fs.existsSync(file)) return res.status(404).json({ error: "not found" });
 
   const data = JSON.parse(fs.readFileSync(file, "utf-8"));
-  res.json({ success: true, customer: data });
+  const packageType = normalizePackageType(data.packageType);
+  const sessionTheme = readSessionTheme(data);
+  const aiQuota = readAiQuotaFromCustomer(data);
+  const host = req.headers.host || PUBLIC_HOST;
+  const themePublic =
+    sessionTheme.themeId
+      ? toPublicAiTheme(getAiTheme(sessionTheme.themeId, BASE_DIR), BASE_DIR, host)
+      : null;
+
+  res.json({
+    success: true,
+    customer: {
+      ...data,
+      packageType,
+      aiThemeLabel: sessionTheme.label,
+      aiThemeLocked: sessionTheme.locked,
+      aiGenerateLimit: aiQuota.limit,
+      aiThemePreviewUrl: themePublic?.previewUrl ?? null,
+      aiThemeType: themePublic?.type ?? null,
+      aiThemePreviewBeforeUrl: themePublic?.previewBeforeUrl ?? null,
+    },
+  });
 });
 
 app.get("/api/print-config/:user", (req, res) => {
@@ -628,7 +530,14 @@ app.get("/api/print-config/:user", (req, res) => {
   if (!fs.existsSync(file)) return res.status(404).json({ error: "not found" });
 
   const data = JSON.parse(fs.readFileSync(file, "utf-8"));
-  const packageType = data.packageType || "self-photo";
+  const packageType = normalizePackageType(data.packageType);
+  const aiQuota = readAiQuotaFromCustomer(data);
+  const sessionTheme = readSessionTheme(data);
+  const host = req.headers.host || PUBLIC_HOST;
+  const themePublic =
+    sessionTheme.themeId
+      ? toPublicAiTheme(getAiTheme(sessionTheme.themeId, BASE_DIR), BASE_DIR, host)
+      : null;
   res.json({
     allowedPrint: data.printLimit,
     peopleCount: data.peopleCount ?? 1,
@@ -636,97 +545,343 @@ app.get("/api/print-config/:user", (req, res) => {
     templateId: data.templateId,
     name: data.name,
     packageType,
-    passportBackgroundColor: normalizePassportColor(data.passportBackgroundColor),
-    passportSizeId: normalizePassportSizeId(data.passportSizeId),
-    themeId: normalizeThemeId(data.themeId),
-    lookId: normalizeLookId(data.lookId, packageType),
-  });
-});
-
-app.get("/api/looks", (_req, res) => {
-  res.json({
-    looks: LOOK_PRESETS,
-    defaultIntensity: 0.6,
-  });
-});
-
-app.get("/api/passport-sizes", (_req, res) => {
-  res.json({
-    sizes: PASSPORT_SIZE_PRESETS.map(({ id, label, widthMm, heightMm }) => ({
-      id,
-      label,
-      widthMm,
-      heightMm,
-    })),
-    defaultSizeId: DEFAULT_PASSPORT_SIZE_ID,
+    aiGenerateLimit: aiQuota.limit,
+    aiGenerateUsed: aiQuota.used,
+    aiGenerateRemaining: aiQuota.remaining,
+    aiThemeId: sessionTheme.themeId,
+    aiThemeLabel: sessionTheme.label,
+    aiThemeLocked: sessionTheme.locked,
+    aiThemePreviewUrl: themePublic?.previewUrl ?? null,
+    aiThemeType: themePublic?.type ?? null,
+    aiThemePreviewBeforeUrl: themePublic?.previewBeforeUrl ?? null,
   });
 });
 
 app.get("/api/themes", (_req, res) => {
-  res.json({
-    defaultThemeId: resolveDefaultThemeId(),
-    themes: listThemesForApi(),
-    categories: listThemeCategoriesForApi(),
-  });
+  res.status(404).json({ error: "not_available" });
 });
 
-app.get("/api/health", async (_req, res) => {
-  const backgroundRemoval = await checkBackgroundRemovalHealth();
-  const queue = {
-    pending: imageProcessingQueue.pendingCount,
-    queued: imageProcessingQueue.queuedCount,
-    processing: imageProcessingQueue.isProcessing,
-  };
+app.post("/api/images/:user/:imageId/process", (_req, res) => {
+  res.status(404).json({ error: "not_available" });
+});
 
-  const themeSourceStats = getThemeSourceStats();
-  const ok =
-    STARTUP_VALIDATION.ok &&
-    (!BG_REMOVAL_ENABLED || backgroundRemoval.ok) &&
-    STUDIO_PUBLIC_CONFIG.bundledThemeAssetsReady;
+app.get("/api/health", (_req, res) => {
+  const ok = STARTUP_VALIDATION.ok;
 
   res.status(ok ? 200 : 503).json({
     ok,
+    mode: "studio",
+    packages: PACKAGE_TYPES,
+    aiGeneration: getAiPipelineStatus(),
+    aiQueue: getAiQueueStats(),
     uptimeSec: Math.floor(process.uptime()),
     config: STUDIO_PUBLIC_CONFIG,
     validation: {
       warnings: STARTUP_VALIDATION.warnings,
       errors: STARTUP_VALIDATION.errors,
     },
-    backgroundRemoval,
-    themeGenerationEnabled: THEME_GENERATION_ENABLED,
-    themeSourceStats,
-    queue,
-    rateLimit: getProcessRateLimitConfig(),
   });
 });
 
-app.get("/api/health/image-processing", async (req, res) => {
-  const deep = req.query.deep === "1" || req.query.deep === "true";
-  const backgroundRemoval = await checkBackgroundRemovalHealth({ deep });
-  const queue = {
-    pending: imageProcessingQueue.pendingCount,
-    queued: imageProcessingQueue.queuedCount,
-    processing: imageProcessingQueue.isProcessing,
-  };
-
-  const ok =
-    (!BG_REMOVAL_ENABLED || backgroundRemoval.ok) &&
-    STUDIO_PUBLIC_CONFIG.bundledThemeAssetsReady;
+app.get("/api/health/image-processing", (_req, res) => {
+  const ok = STARTUP_VALIDATION.ok;
+  const pipeline = getAiPipelineStatus();
 
   res.status(ok ? 200 : 503).json({
     ok,
-    backgroundRemoval,
-    themeGenerationEnabled: THEME_GENERATION_ENABLED,
-    themeSourceStats: getThemeSourceStats(),
-    config: {
-      wc2026AssetsReady: STUDIO_PUBLIC_CONFIG.wc2026AssetsReady,
-      classicAssetsReady: STUDIO_PUBLIC_CONFIG.classicAssetsReady,
-      bundledThemeAssetsReady: STUDIO_PUBLIC_CONFIG.bundledThemeAssetsReady,
-      externalThemeApiConfigured:
-        STUDIO_PUBLIC_CONFIG.externalThemeApiConfigured,
-      themeBackgroundCache: STUDIO_PUBLIC_CONFIG.themeBackgroundCache,
-    },
-    queue,
+    mode: "studio",
+    packages: PACKAGE_TYPES,
+    aiGeneration: pipeline,
+    aiQueue: getAiQueueStats(),
+    message: pipeline.enabled
+      ? "AI Self Photo pipeline ready"
+      : "AI generation disabled",
+  });
+});
+
+app.get("/api/ai-quota/:user", (req, res) => {
+  const { user } = req.params;
+  const todayFolder = getTodayFolder();
+  const file = path.join(BASE_DIR, todayFolder, user, "customer.json");
+
+  if (!fs.existsSync(file)) {
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  const data = JSON.parse(fs.readFileSync(file, "utf-8"));
+  const packageType = normalizePackageType(data.packageType);
+  const aiQuota = readAiQuotaFromCustomer(data);
+  const pendingQuota = readAiQuotaWithPending(path.dirname(file));
+  const sessionTheme = readSessionTheme(data);
+
+  res.json({
+    user,
+    packageType,
+    peopleCount: data.peopleCount ?? 1,
+    aiGenerateLimit: aiQuota.limit,
+    aiGenerateUsed: aiQuota.used,
+    aiGenerateRemaining: aiQuota.remaining,
+    aiGeneratePending: pendingQuota.pending,
+    aiGenerateAvailable: pendingQuota.available,
+    aiThemeId: sessionTheme.themeId,
+    aiThemeLabel: sessionTheme.label,
+    aiThemeLocked: sessionTheme.locked,
+    aiEnabled: packageType === "ai-self-photo" && getAiGenerationConfig().enabled,
+  });
+});
+
+app.get("/api/ai-themes", (req, res) => {
+  if (!isAiGenerationEnabled()) {
+    return res.status(503).json({ error: "ai_disabled" });
+  }
+
+  const host = req.headers.host || PUBLIC_HOST;
+  res.json({
+    themes: listAiThemesPublic(BASE_DIR, host),
+    pipeline: getAiPipelineStatus(),
+  });
+});
+
+app.get("/api/ai-analytics/summary", (req, res) => {
+  const days = Number(req.query.days) || 30;
+  res.json(getAiAnalyticsSummary(BASE_DIR, { days }));
+});
+
+app.patch("/api/ai-theme/:user", (req, res) => {
+  const { user } = req.params;
+  const { themeId } = req.body ?? {};
+
+  if (!themeId || typeof themeId !== "string") {
+    return res.status(400).json({ error: "theme_id_required" });
+  }
+
+  const todayFolder = getTodayFolder();
+  const userPath = path.join(BASE_DIR, todayFolder, user);
+
+  if (!fs.existsSync(path.join(userPath, "customer.json"))) {
+    return res.status(404).json({ error: "customer_not_found" });
+  }
+
+  try {
+    const result = setSessionTheme(userPath, themeId);
+    logAiAnalyticsEvent(BASE_DIR, {
+      type: "theme_selected",
+      user,
+      themeId: result.themeId,
+      source: "patch",
+    });
+    res.json({
+      success: true,
+      user,
+      aiThemeId: result.themeId,
+      aiThemeLabel: result.label,
+      aiThemeLocked: false,
+    });
+  } catch (err) {
+    const code = err instanceof Error ? err.message : String(err);
+    if (code === "theme_locked") {
+      return res.status(409).json({ error: "theme_locked" });
+    }
+    if (code === "invalid_theme") {
+      return res.status(400).json({ error: "invalid_theme" });
+    }
+    if (code === "package_not_ai") {
+      return res.status(403).json({ error: "package_not_ai" });
+    }
+    return res.status(400).json({ error: code });
+  }
+});
+
+app.post("/api/ai-generate", (req, res) => {
+  if (!isAiGenerationEnabled()) {
+    return res.status(503).json({ error: "ai_disabled" });
+  }
+
+  const { user, imageId, themeId: rawThemeId } = req.body ?? {};
+
+  if (!user || typeof user !== "string") {
+    return res.status(400).json({ error: "user_required" });
+  }
+  if (!imageId || typeof imageId !== "string") {
+    return res.status(400).json({ error: "image_id_required" });
+  }
+
+  const todayFolder = getTodayFolder();
+  const userPath = path.join(BASE_DIR, todayFolder, user);
+  const customerPath = path.join(userPath, "customer.json");
+
+  if (!fs.existsSync(customerPath)) {
+    return res.status(404).json({ error: "customer_not_found" });
+  }
+
+  const customer = JSON.parse(fs.readFileSync(customerPath, "utf-8"));
+  const packageType = normalizePackageType(customer.packageType);
+  if (packageType !== "ai-self-photo") {
+    return res.status(403).json({ error: "package_not_ai" });
+  }
+
+  const sessionTheme = readSessionTheme(customer);
+  if (!sessionTheme.themeId) {
+    return res.status(400).json({ error: "theme_required" });
+  }
+
+  if (
+    rawThemeId &&
+    typeof rawThemeId === "string" &&
+    rawThemeId !== sessionTheme.themeId
+  ) {
+    return res.status(409).json({ error: "theme_mismatch" });
+  }
+
+  const theme = getAiTheme(sessionTheme.themeId, BASE_DIR);
+  if (!theme) {
+    return res.status(400).json({ error: "invalid_theme" });
+  }
+
+  const captureExists =
+    fs.existsSync(path.join(userPath, "captures", `${imageId}.jpg`)) ||
+    fs.existsSync(path.join(userPath, "captures", `${imageId}.jpeg`)) ||
+    fs.existsSync(path.join(userPath, "captures", `${imageId}.png`)) ||
+    fs.existsSync(path.join(userPath, `${imageId}.jpg`)) ||
+    fs.existsSync(path.join(userPath, `${imageId}.jpeg`)) ||
+    fs.existsSync(path.join(userPath, `${imageId}.png`));
+
+  if (!captureExists && !readMeta(userPath, imageId)) {
+    return res.status(404).json({ error: "image_not_found" });
+  }
+
+  const existing = findAiSelectionForImage(customer, imageId);
+  if (existing?.status === "ready" && existing.outputPath) {
+    const relativePath = String(existing.outputPath);
+    const host = req.headers.host || PUBLIC_HOST;
+    return res.json({
+      jobId: existing.jobId || buildAiJobId(imageId, theme.id),
+      status: "ready",
+      imageId,
+      themeId: theme.id,
+      aiUrl: buildPublicImageUrl(todayFolder, user, relativePath, host),
+      outputPath: relativePath,
+      quota: readAiQuotaWithPending(userPath),
+      aiThemeId: theme.id,
+      aiThemeLabel: theme.label,
+      aiThemeLocked: Boolean(customer.aiThemeLockedAt),
+    });
+  }
+
+  if (
+    existing &&
+    ["pending", "queued", "processing"].includes(String(existing.status))
+  ) {
+    return res.json({
+      jobId: existing.jobId || buildAiJobId(imageId, theme.id),
+      status: existing.status,
+      imageId,
+      themeId: theme.id,
+      phase: existing.phase ?? null,
+      quota: readAiQuotaWithPending(userPath),
+      aiThemeId: theme.id,
+      aiThemeLabel: theme.label,
+      aiThemeLocked: Boolean(customer.aiThemeLockedAt),
+    });
+  }
+
+  try {
+    reserveAiQuota(userPath);
+  } catch (err) {
+    const code = err instanceof Error ? err.message : String(err);
+    if (code === "quota_exhausted") {
+      return res.status(409).json({ error: "quota_exhausted" });
+    }
+    return res.status(400).json({ error: code });
+  }
+
+  lockSessionTheme(userPath);
+
+  const jobId = buildAiJobId(imageId, theme.id);
+  const host = req.headers.host || PUBLIC_HOST;
+
+  upsertAiSelection(userPath, {
+    imageId,
+    themeId: theme.id,
+    jobId,
+    status: "queued",
+    phase: null,
+    error: null,
+    outputPath: null,
+  });
+
+  enqueueAiGenerationJob({
+    user,
+    userDir: userPath,
+    imageId,
+    themeId: theme.id,
+    todayFolder,
+    host,
+    emitProgress: (payload) => io.emit("ai-generation-progress", payload),
+    emitComplete: (payload) => io.emit("ai-generation-complete", payload),
+  });
+
+  res.status(202).json({
+    jobId,
+    status: "queued",
+    imageId,
+    themeId: theme.id,
+    quota: readAiQuotaWithPending(userPath),
+    queue: getAiQueueStats(),
+    aiThemeId: theme.id,
+    aiThemeLabel: theme.label,
+    aiThemeLocked: true,
+  });
+});
+
+app.get("/api/images/:user/:imageId/ai-status", (req, res) => {
+  const { user, imageId } = req.params;
+  const themeId = (req.query.themeId || "").toString();
+  const jobId = (req.query.jobId || "").toString();
+
+  const todayFolder = getTodayFolder();
+  const userPath = path.join(BASE_DIR, todayFolder, user);
+
+  if (!fs.existsSync(userPath)) {
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  const customer = readCustomerJson(userPath);
+  let selection = null;
+
+  if (jobId) {
+    selection = findAiSelectionByJobId(userPath, jobId);
+  } else {
+    selection = findAiSelectionForImage(customer, imageId);
+    if (themeId && selection?.themeId && selection.themeId !== themeId) {
+      selection = undefined;
+    }
+  }
+
+  if (!selection) {
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  const sessionTheme = readSessionTheme(customer);
+
+  const host = req.headers.host || PUBLIC_HOST;
+  const outputPath = selection.outputPath ? String(selection.outputPath) : null;
+
+  res.json({
+    jobId: selection.jobId,
+    imageId: selection.imageId,
+    themeId: selection.themeId,
+    status: selection.status,
+    phase: selection.phase ?? null,
+    error: selection.error ?? null,
+    aiUrl: outputPath
+      ? buildPublicImageUrl(todayFolder, user, outputPath, host)
+      : null,
+    outputPath,
+    quota: readAiQuotaWithPending(userPath),
+    aiThemeId: sessionTheme.themeId,
+    aiThemeLabel: sessionTheme.label,
+    aiThemeLocked: sessionTheme.locked,
   });
 });
 
@@ -736,15 +891,30 @@ app.get("/api/health/image-processing", async (req, res) => {
 app.get("/api/session", (req, res) => res.json({ activeSession, sessionLocked }));
 
 app.post("/api/session/start", (req, res) => {
-  const { user, duration = SESSION_DURATION_MINUTES, peopleCount, packageType } = req.body;
+  const {
+    user,
+    duration,
+    peopleCount,
+    packageType: bodyPackageType,
+  } = req.body;
   if (!user || !peopleCount)
     return res.status(400).json({ error: "user & peopleCount required" });
+
+  const userFolder = getUserPathForToday(user);
+  const customer = readCustomerJson(userFolder);
+  const packageType = normalizePackageType(
+    bodyPackageType ?? customer?.packageType ?? activeSession?.packageType
+  );
+  const durationMinutes =
+    duration != null && !Number.isNaN(Number(duration))
+      ? Number(duration)
+      : getPackageDurationMinutes(packageType);
 
   activeSession = {
     user,
     peopleCount,
-    packageType: packageType || "self-photo",
-    endsAt: Date.now() + duration * 60 * 1000,
+    packageType,
+    endsAt: Date.now() + durationMinutes * 60 * 1000,
     pausedAt: null,
     remainingMs: null,
   };
@@ -776,10 +946,7 @@ app.post("/api/kiosk/trial-start", (req, res) => {
     user,
     durationMs: durationSeconds * 1000,
     endsAt,
-    packageType: kioskFields.packageType,
-    passportSizeId: kioskFields.passportSizeId,
-    themeId: kioskFields.themeId,
-    lookId: kioskFields.lookId,
+    ...kioskFields,
   });
   emitSessionTimerUpdate();
 
@@ -796,13 +963,22 @@ app.post("/api/kiosk/trial-skip", (req, res) => {
 app.post("/api/kiosk/main-start", (req, res) => {
   const {
     user,
-    durationSeconds = SESSION_DURATION_MINUTES * 60,
-    packageType = "self-photo",
+    durationSeconds,
+    packageType: bodyPackageType,
   } = req.body || {};
   if (!user) return res.status(400).json({ error: "user required" });
   if (!activeSession) return res.status(400).json({ error: "no active session" });
 
-  const endsAt = Date.now() + durationSeconds * 1000;
+  const packageType = normalizePackageType(
+    bodyPackageType ?? activeSession.packageType
+  );
+  const defaultSeconds = getPackageDurationMinutes(packageType) * 60;
+  const resolvedSeconds =
+    durationSeconds != null && !Number.isNaN(Number(durationSeconds))
+      ? Number(durationSeconds)
+      : defaultSeconds;
+
+  const endsAt = Date.now() + resolvedSeconds * 1000;
 
   activeSession.endsAt = endsAt;
   activeSession.packageType = packageType;
@@ -812,49 +988,44 @@ app.post("/api/kiosk/main-start", (req, res) => {
 
   io.emit("kiosk-main-start", {
     user,
-    durationMs: durationSeconds * 1000,
+    durationMs: resolvedSeconds * 1000,
     endsAt,
-    packageType: kioskFields.packageType,
-    passportSizeId: kioskFields.passportSizeId,
-    themeId: kioskFields.themeId,
-    lookId: kioskFields.lookId,
+    ...kioskFields,
   });
   emitSessionTimerUpdate();
 
   res.json({ success: true, endsAt });
 });
 
-/** Soft look preset — customer or operator; persists to customer.json + socket sync. */
-app.post("/api/kiosk/look", (req, res) => {
-  const { user, lookId } = req.body || {};
-  if (!user) return res.status(400).json({ error: "user required" });
-
-  const userFolder = getUserPathForToday(user);
-  if (!fs.existsSync(userFolder)) {
-    return res.status(404).json({ error: "customer not found" });
+/** Operator triggers synchronized countdown + shutter on customer display. */
+app.post("/api/kiosk/trigger-capture", (req, res) => {
+  const { user } = req.body || {};
+  const sessionUser = user || activeSession?.user;
+  if (!sessionUser) return res.status(400).json({ error: "user required" });
+  if (!activeSession || sessionLocked) {
+    return res.status(400).json({ error: "no active session" });
+  }
+  if (activeSession.user !== sessionUser) {
+    return res.status(400).json({ error: "session_user_mismatch" });
   }
 
-  const packageType = readCustomerPackageType(userFolder);
-  const resolved = writeCustomerLookId(userFolder, lookId, packageType);
+  io.emit("kiosk-capture-start", {
+    user: sessionUser,
+    countdownSeconds: CAPTURE_COUNTDOWN_SECONDS,
+  });
 
-  const payload = {
-    user,
-    lookId: resolved,
-    packageType,
-  };
-  io.emit("kiosk-look-update", payload);
-  emitSessionTimerUpdate();
-
-  res.json({ success: true, ...payload });
+  res.json({ success: true, countdownSeconds: CAPTURE_COUNTDOWN_SECONDS });
 });
 
 // Kiosk configuration for frontend (session duration, countdown, etc)
-app.get("/api/kiosk-config", (req, res) => {
+app.get("/api/kiosk-config", (_req, res) => {
   res.json({
     sessionDurationMinutes: SESSION_DURATION_MINUTES,
     captureCountdownSeconds: CAPTURE_COUNTDOWN_SECONDS,
     trialDurationSeconds: TRIAL_DURATION_SECONDS,
     packageDurations: PACKAGE_DURATIONS,
+    packages: PACKAGE_TYPES,
+    aiSelfPhoto: getAiGenerationConfig(),
   });
 });
 
@@ -957,6 +1128,41 @@ app.post("/api/capture", (req, res) => {
   });
 });
 
+// Dev-only: kiosk posts a webcam frame; API drops it into capture/ for the chokidar pipeline.
+const DEV_WEBCAM_CAPTURE = process.env.DEV_WEBCAM_CAPTURE === "true";
+
+app.post("/api/capture/webcam", (req, res) => {
+  if (!DEV_WEBCAM_CAPTURE) {
+    return res.status(403).json({ error: "dev_webcam_disabled" });
+  }
+
+  upload.single("file")(req, res, (uploadErr) => {
+    if (uploadErr) {
+      if (uploadErr.code === "LIMIT_FILE_SIZE") {
+        return res.status(413).json({ error: "file_too_large" });
+      }
+      if (uploadErr.message === "invalid_file_type") {
+        return res.status(400).json({ error: "invalid_file_type" });
+      }
+      return res.status(400).json({ error: "upload_failed" });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "file_required" });
+    }
+
+    try {
+      const filename = `webcam-${Date.now()}.jpg`;
+      const destPath = path.join(CAPTURE_DIR, filename);
+      fs.writeFileSync(destPath, req.file.buffer);
+      res.json({ success: true, filename, path: destPath });
+    } catch (err) {
+      console.error("Webcam capture save failed:", err);
+      res.status(500).json({ error: "capture_failed" });
+    }
+  });
+});
+
 // ======================
 // GET IMAGES
 // ======================
@@ -990,12 +1196,8 @@ app.get("/api/images/:user/:imageId/status", (req, res) => {
   const host = req.headers.host;
   res.json({
     imageId,
-    status: meta.status,
-    processingPhase: meta.processingPhase ?? null,
+    status: meta.status ?? PROCESSING_STATUS.NONE,
     variants: buildVariantUrls(host, todayFolder, user, meta),
-    error: meta.error ?? null,
-    themeBackgroundSource: meta.pipeline?.themeBackgroundSource ?? null,
-    bakedLookId: meta.pipeline?.bakedLookId ?? null,
   });
 });
 
@@ -1030,17 +1232,12 @@ app.post("/api/images/:user/upload", (req, res) => {
         req.file.originalname
       );
 
-      const packageType = readCustomerPackageType(userPath);
-      const autoRemoveBg = shouldAutoRemoveBackground(packageType);
-
       createPendingMeta({
         userDir: userPath,
         imageId,
         sourceFilename,
         ext,
-        status: autoRemoveBg
-          ? PROCESSING_STATUS.PENDING
-          : PROCESSING_STATUS.NONE,
+        status: PROCESSING_STATUS.NONE,
       });
 
       io.emit("new-photo", {
@@ -1048,14 +1245,6 @@ app.post("/api/images/:user/upload", (req, res) => {
         imageId,
         filename: path.basename(destPath),
         fullPath: destPath,
-      });
-
-      scheduleBackgroundRemoval({
-        userFolder: userPath,
-        userSlug: user,
-        imageId,
-        todayFolder,
-        packageType,
       });
 
       res.status(201).json({
@@ -1067,130 +1256,12 @@ app.post("/api/images/:user/upload", (req, res) => {
           path.join("captures", path.basename(destPath)),
           req.headers.host
         ),
-        status: autoRemoveBg
-          ? PROCESSING_STATUS.PENDING
-          : PROCESSING_STATUS.NONE,
+        status: PROCESSING_STATUS.NONE,
       });
     } catch (err) {
       console.error("Upload failed:", err);
       res.status(500).json({ error: "upload_failed" });
     }
-  });
-});
-
-app.post("/api/images/:user/:imageId/process", (req, res) => {
-  const { user, imageId } = req.params;
-  const { operation = "remove-bg", color, themeId } = req.body ?? {};
-
-  if (
-    operation !== "remove-bg" &&
-    operation !== "apply-passport-bg" &&
-    operation !== "apply-theme"
-  ) {
-    return res.status(400).json({ error: "unsupported_operation" });
-  }
-
-  const todayFolder = getTodayFolder();
-  const userPath = path.join(BASE_DIR, todayFolder, user);
-
-  if (!fs.existsSync(userPath)) {
-    return res.status(404).json({ error: "not_found" });
-  }
-
-  const rateCheck = checkManualProcessAllowed(user, () =>
-    imageProcessingQueue.countJobsForUserDir(userPath)
-  );
-
-  if (!rateCheck.allowed) {
-    return res.status(rateCheck.status).json({
-      error: rateCheck.error,
-      message: rateCheck.message,
-    });
-  }
-
-  const passportColor = color ? normalizePassportColor(color) : undefined;
-  const resolvedThemeId = themeId ? normalizeThemeId(themeId) : undefined;
-
-  if (operation === "apply-theme") {
-    const meta = readMeta(userPath, imageId);
-    if (!meta) {
-      return res.status(404).json({ error: "not_found" });
-    }
-
-    updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, {
-      error: null,
-      processingPhase: "apply-theme",
-    });
-
-    scheduleThemeGeneration({
-      userFolder: userPath,
-      userSlug: user,
-      imageId,
-      todayFolder,
-      themeId: resolvedThemeId,
-    });
-
-    return res.json({
-      success: true,
-      imageId,
-      status: PROCESSING_STATUS.PENDING,
-    });
-  }
-
-  if (operation === "apply-passport-bg") {
-    const meta = readMeta(userPath, imageId);
-    if (!meta) {
-      return res.status(404).json({ error: "not_found" });
-    }
-
-    updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, {
-      error: null,
-      processingPhase: "apply-passport-bg",
-    });
-
-    schedulePassportBackground({
-      userFolder: userPath,
-      userSlug: user,
-      imageId,
-      todayFolder,
-      passportColor,
-    });
-
-    return res.json({
-      success: true,
-      imageId,
-      status: PROCESSING_STATUS.PENDING,
-    });
-  }
-
-  let meta = readMeta(userPath, imageId);
-  if (!meta) {
-    const ingested = ingestLegacyPhoto(userPath, imageId);
-    if (!ingested) {
-      return res.status(404).json({ error: "not_found" });
-    }
-    meta = readMeta(userPath, imageId);
-  } else {
-    updateStatus(userPath, imageId, PROCESSING_STATUS.PENDING, {
-      error: null,
-      processingPhase: "remove-bg",
-    });
-  }
-
-  scheduleBackgroundRemoval({
-    userFolder: userPath,
-    userSlug: user,
-    imageId,
-    todayFolder,
-    force: true,
-    passportColor,
-    themeId: resolvedThemeId,
-  });
-
-  res.json({
-    success: true,
-    imageId,
-    status: PROCESSING_STATUS.PENDING,
   });
 });
 
@@ -1418,20 +1489,12 @@ chokidar
         filePath
       );
 
-      const packageType =
-        activeSession.packageType ||
-        readCustomerPackageType(userFolder) ||
-        "self-photo";
-      const autoRemoveBg = shouldAutoRemoveBackground(packageType);
-
       createPendingMeta({
         userDir: userFolder,
         imageId,
         sourceFilename,
         ext,
-        status: autoRemoveBg
-          ? PROCESSING_STATUS.PENDING
-          : PROCESSING_STATUS.NONE,
+        status: PROCESSING_STATUS.NONE,
       });
 
       io.emit("new-photo", {
@@ -1439,14 +1502,6 @@ chokidar
         imageId,
         filename: path.basename(destPath),
         fullPath: destPath,
-      });
-
-      scheduleBackgroundRemoval({
-        userFolder,
-        userSlug,
-        imageId,
-        todayFolder,
-        packageType,
       });
     } catch (err) {
       console.error("Image processing failed:", err);
@@ -1469,111 +1524,22 @@ io.on("connection", (socket) => {
 // ======================
 // START SERVER
 // ======================
-validateBackgroundRemovalAssets();
-
-const wcThemeAssets = validateWorldCupThemeAssets();
-if (wcThemeAssets.missing.length > 0) {
-  console.warn(
-    `[theme] Missing WC2026 assets (${wcThemeAssets.missing.join(", ")}). Run: npm run generate:wc2026-assets — API/cache/gradient fallback until assets exist.`
-  );
-} else {
-  console.log(`[theme] WC2026 assets OK (${wcThemeAssets.dir})`);
-}
-
-const classicThemeAssets = validateClassicThemeAssets();
-if (classicThemeAssets.missing.length > 0) {
-  console.warn(
-    `[theme] Missing classic assets (${classicThemeAssets.missing.join(", ")}). Run: npm run generate:classic-assets — API/cache/gradient fallback until assets exist.`
-  );
-} else {
-  console.log(`[theme] Classic assets OK (${classicThemeAssets.dir})`);
-}
-
 server.listen(PORT, "0.0.0.0", () => {
-  const todayFolder = getTodayFolder();
-
   console.log(`🚀 Server running http://localhost:${PORT}`);
   console.log(`📁 BASE_DIR: ${BASE_DIR}`);
   console.log(`🌐 Public host: ${PUBLIC_HOST}`);
+  console.log(`📸 Packages: ${PACKAGE_TYPES.join(", ")}`);
   console.log(
-    `🎭 BG removal: ${BG_REMOVAL_ENABLED ? "enabled" : "disabled"} (model=${getRemovalModel()})`
-  );
-  console.log(`🎨 Default theme: ${resolveDefaultThemeId()}`);
-  console.log(
-    `📊 Image queue: pending=${imageProcessingQueue.pendingCount} (rate limit ${getProcessRateLimitConfig().maxJobsPerUser}/user)`
+    `🤖 AI Self Photo: ${getAiPipelineStatus().enabled ? "enabled" : "disabled"} (pipeline=${getAiPipelineStatus().pipeline}, OpenAI: ${getAiPipelineStatus().openaiConfigured ? "yes" : "no"}, segmentation: ${getAiPipelineStatus().personSegmentation?.enabled ? getAiPipelineStatus().personSegmentation.assetsFound ? "ready" : "assets-missing" : "off"}, face-refine: ${getAiPipelineStatus().faceRefine?.available ? "on" : getAiPipelineStatus().faceRefine?.enabled ? "assets-missing" : "off"})`
   );
   console.log(`❤️  Health: GET /api/health · GET /api/health/image-processing`);
   console.log(`📦 Promo Tools: GET /api/promo-tools/products · GET /api/promo-tools/orders`);
-
-  if (BG_REMOVAL_PREWARM) {
-    void prewarmBackgroundRemoval();
-  } else {
-    console.log("[bg-removal] pre-warm skipped (set BG_REMOVAL_PREWARM=true to enable)");
+  console.log(
+    `🧪 AI Theme Research: ${isAdminApiEnabled() ? "enabled (ADMIN_API_TOKEN set)" : "disabled — set ADMIN_API_TOKEN"}`
+  );
+  if (isAdminApiEnabled()) {
+    console.log(`   GET /api/admin/ai-theme-research/meta · POST .../preview · POST .../publish`);
   }
 
-  if (process.platform === "win32" && BG_REMOVAL_ENABLED) {
-    console.log("[bg-removal] Windows worker isolation enabled for remove-bg jobs");
-  }
-
-  // Defer job recovery so HTTP/Socket.IO accept connections first.
-  setTimeout(() => {
-    try {
-      const recovered = recoverPendingJobs({
-        baseDir: BASE_DIR,
-        todayFolder,
-        onJob: ({ userDir, imageId, user }) => {
-          scheduleBackgroundRemoval({
-            userFolder: userDir,
-            userSlug: user,
-            imageId,
-            todayFolder,
-            force: true,
-          });
-        },
-      });
-
-      if (recovered > 0) {
-        console.log(`♻️ Recovered ${recovered} pending image job(s)`);
-      }
-
-      const passportRecovered = recoverIncompletePassportJobs({
-        baseDir: BASE_DIR,
-        todayFolder,
-        onJob: ({ userDir, imageId, user }) => {
-          schedulePassportBackground({
-            userFolder: userDir,
-            userSlug: user,
-            imageId,
-            todayFolder,
-          });
-        },
-      });
-
-      if (passportRecovered > 0) {
-        console.log(`♻️ Recovered ${passportRecovered} incomplete passport job(s)`);
-      }
-
-      const themeRecovered = recoverIncompleteThemeJobs({
-        baseDir: BASE_DIR,
-        todayFolder,
-        onJob: ({ userDir, imageId, user }) => {
-          scheduleThemeGeneration({
-            userFolder: userDir,
-            userSlug: user,
-            imageId,
-            todayFolder,
-          });
-        },
-      });
-
-      if (themeRecovered > 0) {
-        console.log(`♻️ Recovered ${themeRecovered} incomplete theme job(s)`);
-      }
-    } catch (err) {
-      console.error(
-        "[startup] image job recovery failed (server stays up):",
-        err instanceof Error ? err.message : err
-      );
-    }
-  }, 1500);
+  prewarmPersonSegmentation().catch(() => {});
 });

@@ -67,11 +67,14 @@ export function PrintEditorLayout({
 
         <main
           className={cn(
-            "relative flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center overflow-auto p-2 sm:p-3",
-            mobileTab ? "pb-[min(42vh,360px)] md:pb-3" : "pb-16 md:pb-3"
+            "relative flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-x-hidden overflow-y-auto",
+            "justify-start px-2 py-4 sm:px-4 sm:py-5",
+            mobileTab ? "pb-[min(42vh,360px)] md:pb-5" : "pb-16 md:pb-5"
           )}
         >
-          {children}
+          <div className="flex w-full max-w-[min(100%,960px)] flex-col items-center">
+            {children}
+          </div>
         </main>
 
         <div className="hidden h-full shrink-0 md:flex">

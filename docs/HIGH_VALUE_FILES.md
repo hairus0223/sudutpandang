@@ -73,7 +73,7 @@ Rankings reflect: centrality to architecture, number of features affected, blast
 
 **Risks:**
 - **~650 lines** — easy to break hook order or timer cleanup
-- Inline `fetch` duplicates `RegisterForm` and `kiosk-app/services/api.js`
+- Inline `fetch` duplicates `kiosk-app/services/api.js`
 - Browser session timer and API session can drift if `endsAt` handling changes
 - Capture here does not trigger Sony directly — assumptions about external capture must stay clear
 
@@ -81,7 +81,7 @@ Rankings reflect: centrality to architecture, number of features affected, blast
 
 ## 3. `kiosk-app/src/renderer/App.jsx`
 
-**Purpose:** Customer-facing fullscreen kiosk — screen state machine (`idle` → `trial` → `main` → `end`), Socket.IO listeners, capture countdown, live preview, package-aware UI (pas-photo frame, ai-photo messaging).
+**Purpose:** Customer-facing fullscreen kiosk — screen state machine (`idle` → `trial` → `main` → `end`), Socket.IO listeners, capture countdown, live preview (self-photo only).
 
 **Importance:** What the customer sees during a session. Must stay in sync with operator commands from `SessionKioskClient` via API Socket events.
 
@@ -272,7 +272,7 @@ Rankings reflect: centrality to architecture, number of features affected, blast
 
 ## 13. `studio-kiosk/components/kiosk/HeadlineGallery.tsx`
 
-**Purpose:** Home page — rotating headline photo grid, entry buttons for session mode, access photo, register; hosts `AccessForm` / `RegisterForm` overlays.
+**Purpose:** Home page — rotating headline photo grid, entry buttons for session mode and access photo; hosts `AccessForm` overlay.
 
 **Importance:** First screen staff/customers see; marketing plus primary navigation hub.
 
@@ -284,7 +284,6 @@ Rankings reflect: centrality to architecture, number of features affected, blast
 
 **Risks:**
 - Complex `useEffect` + interval rotation — race conditions if headlines list small
-- `RegisterForm` here does not start session (unlike `/session`) — behavior inconsistency by design
 - Inline fetch — not using a shared headlines service
 
 ---
@@ -360,7 +359,7 @@ Rankings reflect: centrality to architecture, number of features affected, blast
 
 **Purpose:** `getUserMedia` live preview — prefers HDMI/capture card devices by label; optional Electron camera IPC connect.
 
-**Importance:** Core self-photo experience on customer display; pas-photo frame overlays depend on stable video stream.
+**Importance:** Core self-photo experience on customer display; stable video stream required for live preview.
 
 **When to modify:**
 - Device selection heuristics (Elgato, USB capture cards)

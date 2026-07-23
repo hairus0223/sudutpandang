@@ -5,10 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { API_BASE_URL } from "@/lib/env";
 import { cn } from "@/lib/utils";
-import { msToMMSS } from "@/utils/time";
 import { useNewPhotoSocket } from "@/hooks/useNewPhotoSocket";
 import { usePhotoProcessedSocket } from "@/hooks/usePhotoProcessedSocket";
-import { useThemes } from "@/hooks/useThemes";
 import { useSessionTimer } from "@/hooks/useSessionTimer";
 import {
   type PackageType,
@@ -24,29 +22,24 @@ import {
   stopSession,
   trialSkip,
   trialStart,
+  triggerKioskCapture,
 } from "@/services/session.service";
+import {
+  resolveAiGenerateLimit,
+} from "@/lib/packageTypes";
 import { fetchImages } from "@/services/image.service";
 import { resolveImageUrl } from "@/lib/resolveImageUrl";
+import { RegisterWizard, getRegisterWizardContainerClass } from "@/components/kiosk/RegisterWizard";
 import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
-import { toUiThemeOptions } from "@/lib/aiThemes";
-import { getProcessingStatusLabel } from "@/lib/processingLabels";
-import type { ProcessingPhase } from "@/lib/imageTypes";
+import { useToast } from "@/components/ui/ToastProvider";
+import { useSocketStatus } from "@/hooks/useSocketStatus";
+import { ConnectionBanner } from "@/components/kiosk/ConnectionBanner";
+import { SessionStepIndicator } from "@/components/kiosk/SessionStepIndicator";
 import {
-  DEFAULT_PASSPORT_COLOR,
-  PASSPORT_COLOR_OPTIONS,
-} from "@/lib/passportColors";
-import {
-  DEFAULT_PASSPORT_SIZE_ID,
-  PHOTO_SIZE_PRESETS,
-} from "@/lib/photoSizes";
-import {
-  LOOK_PRESETS,
-  defaultLookForPackage,
-  lookAllowsPicker,
-  normalizeLookId,
-  type LookId,
-} from "@/lib/lookPresets";
+  SessionPreviewScreen,
+  type SessionAction,
+  type SessionMeta,
+} from "@/components/kiosk/SessionPreviewScreen";
 
 type Screen = "register" | "preview" | "end";
 
@@ -56,16 +49,15 @@ type Customer = {
   phone: string;
   peopleCount: number;
   templateId: string;
-  packageType?: PackageType;
+  packageType: PackageType;
+  aiGenerateLimit?: number;
+  aiThemeId?: string | null;
+  aiThemeLabel?: string | null;
+  aiThemePreviewUrl?: string | null;
+  aiThemeType?: string | null;
 };
 
 const TRIAL_PRESETS = [30, 60, 90] as const;
-
-const PACKAGE_LABELS: Record<PackageType, string> = {
-  "self-photo": "Self Photo",
-  "pas-photo": "Pas Photo",
-  "ai-photo": "AI Photo",
-};
 
 const DEFAULT_KIOSK_CONFIG = {
   sessionDurationMinutes: 10,
@@ -73,8 +65,7 @@ const DEFAULT_KIOSK_CONFIG = {
   trialDurationSeconds: 60,
   packageDurations: {
     "self-photo": 10,
-    "pas-photo": 5,
-    "ai-photo": 10,
+    "ai-self-photo": 12,
   } as Record<PackageType, number>,
 };
 
@@ -84,10 +75,7 @@ async function apiRegister(payload: {
   peopleCount: number;
   templateId: string;
   packageType: PackageType;
-  passportBackgroundColor?: string;
-  passportSizeId?: string;
-  themeId?: string;
-  lookId?: LookId;
+  aiThemeId?: string;
 }): Promise<Customer> {
   const res = await fetch(`${API_BASE_URL}/api/register`, {
     method: "POST",
@@ -124,6 +112,7 @@ function syncTimerFromSession(
 
 export function SessionKioskClient() {
   const router = useRouter();
+  const { toast } = useToast();
   const [screen, setScreen] = React.useState<Screen>("register");
   const [isCapturing, setIsCapturing] = React.useState(false);
   const [captureCountdown, setCaptureCountdown] = React.useState(3);
@@ -131,39 +120,53 @@ export function SessionKioskClient() {
   const [session, setSession] = React.useState<Session | null>(null);
   const [lastImageUrl, setLastImageUrl] = React.useState<string | null>(null);
   const [lastImageProcessing, setLastImageProcessing] = React.useState(false);
-  const [lastProcessingPhase, setLastProcessingPhase] =
-    React.useState<ProcessingPhase | null>(null);
-  const [sessionMeta, setSessionMeta] = React.useState<{
-    packageType: PackageType;
-    themeId?: string;
-    themeLabel?: string;
-  }>({ packageType: "self-photo" });
   const [kioskConfig, setKioskConfig] = React.useState(DEFAULT_KIOSK_CONFIG);
   const [trialSeconds, setTrialSeconds] = React.useState(60);
+  const [pendingAction, setPendingAction] = React.useState<SessionAction | null>(
+    null
+  );
+  const [endedPackageType, setEndedPackageType] =
+    React.useState<PackageType>("self-photo");
+  const [sessionMeta, setSessionMeta] = React.useState<SessionMeta | null>(null);
+  const [endedSessionUser, setEndedSessionUser] = React.useState<string | null>(
+    null
+  );
+  const [endedSessionMeta, setEndedSessionMeta] = React.useState<SessionMeta | null>(
+    null
+  );
 
-  const { themes } = useThemes();
-  const themeLabelById = React.useMemo(() => {
-    const map = new Map<string, string>();
-    for (const theme of toUiThemeOptions(themes)) {
-      map.set(theme.id, theme.label);
-    }
-    return map;
-  }, [themes]);
-
+  const connected = useSocketStatus(true);
   const captureTimerRef = React.useRef<number | null>(null);
   const syncFromServerRef = React.useRef<
     ReturnType<typeof useSessionTimer>["syncFromServer"]
   >(() => {});
 
+  const sessionRef = React.useRef(session);
+  const sessionMetaRef = React.useRef(sessionMeta);
+  sessionRef.current = session;
+  sessionMetaRef.current = sessionMeta;
+  const clearSessionTimerRef = React.useRef<() => void>(() => {});
+
+  const finishSessionToEnd = React.useCallback(async () => {
+    const s = sessionRef.current;
+    const meta = sessionMetaRef.current;
+    if (s?.packageType) setEndedPackageType(s.packageType as PackageType);
+    if (s?.user) setEndedSessionUser(s.user);
+    if (meta) setEndedSessionMeta(meta);
+    await stopSession().catch(() => {});
+    clearSessionTimerRef.current();
+    setScreen("end");
+    setSession(null);
+    setLastImageUrl(null);
+  }, []);
+
   const sessionTimer = useSessionTimer({
     durationMs: kioskConfig.sessionDurationMinutes * 60 * 1000,
     onExpire: () => {
-      void stopSession().catch(() => {});
-      setScreen("end");
-      setSession(null);
-      setLastImageUrl(null);
+      void finishSessionToEnd();
     },
   });
+  clearSessionTimerRef.current = sessionTimer.clear;
 
   React.useEffect(() => {
     syncFromServerRef.current = sessionTimer.syncFromServer;
@@ -205,15 +208,12 @@ export function SessionKioskClient() {
   const refreshLastImage = React.useCallback(async () => {
     if (!session?.user) return;
 
-    const pkg =
-      sessionMeta.packageType || session.packageType || ("self-photo" as PackageType);
-
     try {
       const res = await fetchImages(session.user);
       const latest = res.images[res.images.length - 1];
       if (!latest) return;
 
-      const url = resolveImageUrl(latest, pkg, "kiosk");
+      const url = resolveImageUrl(latest);
       if (url) setLastImageUrl(url);
 
       const isProcessing =
@@ -221,30 +221,10 @@ export function SessionKioskClient() {
         latest.processingStatus === "processing";
 
       setLastImageProcessing(isProcessing);
-      setLastProcessingPhase(
-        isProcessing ? (latest.processingPhase ?? null) : null
-      );
     } catch {
       // ignore transient fetch errors
     }
-  }, [session?.user, session?.packageType, sessionMeta.packageType]);
-
-  React.useEffect(() => {
-    if (!session?.user) return;
-
-    fetch(`${API_BASE_URL}/api/print-config/${encodeURIComponent(session.user)}`)
-      .then((r) => r.json())
-      .then((d) => {
-        const pkg: PackageType = d.packageType || session.packageType || "self-photo";
-        const themeId = d.themeId as string | undefined;
-        setSessionMeta({
-          packageType: pkg,
-          themeId,
-          themeLabel: themeId ? themeLabelById.get(themeId) ?? themeId : undefined,
-        });
-      })
-      .catch(() => {});
-  }, [session?.user, session?.packageType, themeLabelById]);
+  }, [session?.user]);
 
   React.useEffect(() => {
     if (screen !== "preview" || !session?.user) return;
@@ -262,20 +242,8 @@ export function SessionKioskClient() {
   usePhotoProcessedSocket({
     user: session?.user ?? "",
     enabled: screen === "preview" && Boolean(session?.user),
-    onPhotoProcessed: (payload) => {
-      if (payload.status === "ready") {
-        const url =
-          payload.themedUrl || payload.passportUrl || payload.subjectUrl;
-        if (url) setLastImageUrl(url);
-        setLastImageProcessing(false);
-        setLastProcessingPhase(null);
-        return;
-      }
-
-      if (payload.status === "failed") {
-        setLastImageProcessing(false);
-        setLastProcessingPhase(null);
-      }
+    onPhotoProcessed: () => {
+      void refreshLastImage();
     },
   });
 
@@ -313,7 +281,7 @@ export function SessionKioskClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
 
-  const handleCapture = React.useCallback(async () => {
+  const handleCaptureDone = React.useCallback(async () => {
     setCaptureCount((c) => c + 1);
     window.setTimeout(() => {
       refreshLastImage();
@@ -322,31 +290,33 @@ export function SessionKioskClient() {
 
   const startCaptureCountdown = React.useCallback(() => {
     if (isCapturing || !session) return;
+
+    const total = kioskConfig.captureCountdownSeconds || 3;
     setIsCapturing(true);
-    setCaptureCountdown(3);
-    let local = 3;
+    setCaptureCountdown(total);
+    let local = total;
+
+    void triggerKioskCapture(session.user).catch(() => {
+      // Operator countdown still runs if kiosk socket unreachable
+    });
 
     if (captureTimerRef.current) window.clearInterval(captureTimerRef.current);
     captureTimerRef.current = window.setInterval(async () => {
       if (local <= 1) {
         if (captureTimerRef.current) window.clearInterval(captureTimerRef.current);
         captureTimerRef.current = null;
-        await handleCapture();
+        await handleCaptureDone();
         setIsCapturing(false);
         return;
       }
       local -= 1;
       setCaptureCountdown(local);
     }, 1000);
-  }, [handleCapture, isCapturing, session]);
+  }, [handleCaptureDone, isCapturing, kioskConfig.captureCountdownSeconds, session]);
 
   const endSession = React.useCallback(async () => {
-    await stopSession().catch(() => {});
-    sessionTimer.clear();
-    setScreen("end");
-    setSession(null);
-    setLastImageUrl(null);
-  }, [sessionTimer]);
+    await finishSessionToEnd();
+  }, [finishSessionToEnd]);
 
   const beginPreview = React.useCallback(
     (s: Session) => {
@@ -359,725 +329,410 @@ export function SessionKioskClient() {
     [sessionTimer]
   );
 
-  const mainDurationMinutes = session
-    ? getPackageDurationMinutes(
-        session.packageType || "self-photo",
-        kioskConfig.packageDurations
-      )
-    : kioskConfig.sessionDurationMinutes;
+  const mainDurationMinutes = getPackageDurationMinutes(
+    (session?.packageType ?? "self-photo") as PackageType,
+    kioskConfig.packageDurations
+  );
+
+  React.useEffect(() => {
+    if (screen !== "preview" || isCapturing) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space" && event.key !== " ") return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT"
+      ) {
+        return;
+      }
+      event.preventDefault();
+      startCaptureCountdown();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [screen, isCapturing, startCaptureCountdown]);
+
+  const runAction = React.useCallback(
+    async (action: SessionAction, fn: () => Promise<void>) => {
+      setPendingAction(action);
+      try {
+        await fn();
+      } catch {
+        toast("Aksi gagal. Coba lagi.", "error");
+      } finally {
+        setPendingAction(null);
+      }
+    },
+    [toast]
+  );
 
   if (screen === "register") {
     return (
       <RegisterOrCheckScreen
+        connected={connected}
         packageDurations={kioskConfig.packageDurations}
-        onRegister={async (
-          name,
-          phone,
-          peopleCount,
-          packageType,
-          passportBackgroundColor,
-          passportSizeId,
-          themeId,
-          lookId
-        ) => {
+        onRegister={async (name, phone, peopleCount, packageType, aiThemeId) => {
           const customer = await apiRegister({
             name,
             phone,
             peopleCount,
             templateId: "4R",
             packageType,
-            passportBackgroundColor,
-            passportSizeId,
-            themeId,
-            lookId,
+            aiThemeId,
           });
+          const meta: SessionMeta = {
+            peopleCount: customer.peopleCount,
+            aiGenerateLimit:
+              customer.aiGenerateLimit ??
+              resolveAiGenerateLimit(packageType, peopleCount),
+            aiThemeLabel: customer.aiThemeLabel ?? null,
+            aiThemePreviewUrl: customer.aiThemePreviewUrl ?? null,
+            aiThemeType:
+              (customer.aiThemeType as SessionMeta["aiThemeType"]) ?? null,
+          };
+          setSessionMeta(meta);
           const s = await startSession({
             user: customer.user,
             peopleCount: customer.peopleCount,
-            duration: getPackageDurationMinutes(packageType, kioskConfig.packageDurations),
+            duration: getPackageDurationMinutes(
+              packageType,
+              kioskConfig.packageDurations
+            ),
             packageType,
           });
+          const quotaNote =
+            packageType === "ai-self-photo"
+              ? ` · kuota AI: ${customer.aiGenerateLimit ?? resolveAiGenerateLimit(packageType, peopleCount)}`
+              : "";
+          const themeNote =
+            packageType === "ai-self-photo" && customer.aiThemeLabel
+              ? ` · tema: ${customer.aiThemeLabel}`
+              : "";
+          toast(`Sesi dimulai untuk ${customer.name}${quotaNote}${themeNote}`, "success");
           beginPreview(s);
         }}
         onCheckByName={async (name) => {
           const customer = await apiCustomerByName(name);
           if (!customer) {
-            alert("Nama tidak ditemukan untuk hari ini.");
+            toast("Nama tidak ditemukan untuk hari ini.", "error");
             return;
           }
-          const pkg: PackageType = customer.packageType || "self-photo";
+          const packageType = (customer.packageType ?? "self-photo") as PackageType;
+          const meta: SessionMeta = {
+            peopleCount: customer.peopleCount,
+            aiGenerateLimit:
+              customer.aiGenerateLimit ??
+              resolveAiGenerateLimit(packageType, customer.peopleCount),
+            aiThemeLabel: customer.aiThemeLabel ?? null,
+            aiThemePreviewUrl: customer.aiThemePreviewUrl ?? null,
+            aiThemeType:
+              (customer.aiThemeType as SessionMeta["aiThemeType"]) ?? null,
+          };
+          setSessionMeta(meta);
           const s = await startSession({
             user: customer.user,
             peopleCount: customer.peopleCount,
-            duration: getPackageDurationMinutes(pkg, kioskConfig.packageDurations),
-            packageType: pkg,
+            duration: getPackageDurationMinutes(
+              packageType,
+              kioskConfig.packageDurations
+            ),
+            packageType,
           });
+          toast(`Sesi dilanjutkan untuk ${customer.name}`, "success");
           beginPreview(s);
         }}
         onBack={() => router.push("/")}
+        onError={(message) => toast(message, "error")}
       />
     );
   }
 
   if (screen === "preview") {
     return (
-      <main className="relative flex h-screen w-full flex-col items-center justify-center bg-black gap-4">
-        <header className="absolute top-0 left-0 z-index-10 p-4 mx-auto flex w-full flex-wrap items-center justify-between gap-3">
-          <button
-            onClick={() => router.push("/")}
-            className="flex items-center gap-2 text-sm sm:text-base text-white/90 hover:text-white"
-          >
-            <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" /> Back
-          </button>
-          <div className="flex flex-wrap gap-2">
-            <Pill label={`Sesi: ${session?.user ?? "-"}`} />
-            <Pill
-              label={
-                PACKAGE_LABELS[
-                  sessionMeta.packageType || session?.packageType || "self-photo"
-                ]
-              }
-            />
-            {sessionMeta.themeLabel && (
-              <Pill label={`Tema: ${sessionMeta.themeLabel}`} />
-            )}
-            {lastImageProcessing && (
-              <Pill
-                label={
-                  getProcessingStatusLabel("processing", {
-                    packageType: sessionMeta.packageType,
-                    processingPhase: lastProcessingPhase,
-                  }) ?? "Memproses foto…"
-                }
-                intent="warn"
-              />
-            )}
-            <Pill label={`Shot: ${captureCount}`} />
-            <Pill
-              label={
-                sessionTimer.isPaused
-                  ? `Waktu: ${msToMMSS(sessionTimer.remainingMs)} (PAUSED)`
-                  : `Waktu: ${msToMMSS(sessionTimer.remainingMs)}`
-              }
-              intent={sessionTimer.remainingMs <= 60_000 ? "warn" : "default"}
-            />
-          </div>
-        </header>
-
-        <section className="mx-auto flex w-full flex-1 flex-col gap-4">
-          <div className="flex flex-1 items-center justify-center overflow-hidden">
-            {lastImageUrl ? (
-              <div className="relative h-full w-full">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={lastImageUrl}
-                  alt="Preview foto terakhir"
-                  className="h-full w-full object-contain"
-                />
-                {lastImageProcessing && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/45">
-                    <span className="rounded-full bg-amber-500/90 px-4 py-2 text-sm text-white">
-                      {getProcessingStatusLabel("processing", {
-                        packageType: sessionMeta.packageType,
-                        processingPhase: lastProcessingPhase,
-                      }) ?? "Memproses foto…"}
-                    </span>
-                  </div>
-                )}
-                {isCapturing && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-                    <div className="text-6xl font-extrabold tracking-[0.18em] text-white sm:text-8xl">
-                      {captureCountdown}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center gap-4 text-white/50">
-                <p className="text-center text-sm sm:text-base">
-                  Belum ada foto. Klik &quot;Ambil Foto&quot; untuk capture.
-                </p>
-                {isCapturing && (
-                  <div className="text-6xl font-extrabold tracking-[0.18em] text-white sm:text-8xl">
-                    {captureCountdown}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </section>
-        <div className="absolute bottom-0 left-0 p-4 flex flex-wrap items-center justify-center gap-2 sm:gap-3 pb-4">
-          <Button
-            variant="destructive"
-            className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
-            onClick={endSession}
-          >
-            Akhiri Sesi
-          </Button>
-          {session && (
-            <>
-              <select
-                value={trialSeconds}
-                onChange={(e) => setTrialSeconds(Number(e.target.value))}
-                className="h-11 rounded border border-white/20 bg-white/10 px-2 text-sm text-white"
-              >
-                {TRIAL_PRESETS.map((seconds) => (
-                  <option key={seconds} value={seconds} className="text-black">
-                    Trial {seconds}s
-                  </option>
-                ))}
-              </select>
-              <Button
-                className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
-                onClick={async () => {
-                  if (!session?.user) return;
-
-                  try {
-                    const data = await trialStart(session.user, trialSeconds);
-                    sessionTimer.startWithEndsAt(data.endsAt);
-                  } catch {
-                    alert("Gagal start trial");
-                  }
-                }}
-              >
-                Start Trial
-              </Button>
-              <Button
-                className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
-                onClick={() => {
-                  if (!session?.user) return;
-                  trialSkip(session.user).catch(() => {});
-                }}
-              >
-                Skip Trial
-              </Button>
-              <Button
-                className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
-                onClick={async () => {
-                  if (!session?.user) return;
-
-                  const pkg: PackageType = session.packageType || "self-photo";
-                  const mainSeconds =
-                    getPackageDurationMinutes(pkg, kioskConfig.packageDurations) * 60;
-
-                  try {
-                    const data = await mainStart(session.user, mainSeconds, pkg);
-                    sessionTimer.startWithEndsAt(data.endsAt);
-                  } catch {
-                    alert("Gagal mulai sesi");
-                  }
-                }}
-              >
-                Mulai Sesi Utama ({mainDurationMinutes}m)
-              </Button>
-              <Button
-                className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
-                disabled={sessionTimer.isPaused}
-                onClick={async () => {
-                  try {
-                    await pauseSession();
-                    const { activeSession } = await getSession();
-                    if (activeSession) {
-                      syncTimerFromSession(activeSession, sessionTimer.syncFromServer);
-                    }
-                  } catch {
-                    alert("Gagal pause sesi");
-                  }
-                }}
-              >
-                Pause
-              </Button>
-              <Button
-                className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
-                disabled={!sessionTimer.isPaused}
-                onClick={async () => {
-                  try {
-                    const resumed = await resumeSession();
-                    syncTimerFromSession(resumed, sessionTimer.syncFromServer);
-                  } catch {
-                    alert("Gagal resume sesi");
-                  }
-                }}
-              >
-                Resume
-              </Button>
-              <Button
-                className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
-                onClick={async () => {
-                  try {
-                    await addTime(1);
-                    const { activeSession } = await getSession();
-                    if (activeSession) {
-                      syncTimerFromSession(activeSession, sessionTimer.syncFromServer);
-                    }
-                  } catch {
-                    alert("Gagal tambah waktu");
-                  }
-                }}
-              >
-                +1 min
-              </Button>
-              <Button
-                className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
-                onClick={async () => {
-                  try {
-                    await addTime(5);
-                    const { activeSession } = await getSession();
-                    if (activeSession) {
-                      syncTimerFromSession(activeSession, sessionTimer.syncFromServer);
-                    }
-                  } catch {
-                    alert("Gagal tambah waktu");
-                  }
-                }}
-              >
-                +5 min
-              </Button>
-            </>
-          )}
-          <Button
-            className="rounded bg-blue-600 h-11 text-white shadow-lg hover:bg-blue-700 text-sm sm:text-base"
-            onClick={startCaptureCountdown}
-            disabled={isCapturing}
-          >
-            Ambil Foto
-          </Button>
-        </div>
-      </main>
+      <SessionPreviewScreen
+        connected={connected}
+        session={session}
+        sessionMeta={sessionMeta}
+        sessionTimer={{
+          remainingMs: sessionTimer.remainingMs,
+          isPaused: sessionTimer.isPaused,
+        }}
+        mainDurationMinutes={mainDurationMinutes}
+        trialSeconds={trialSeconds}
+        onTrialSecondsChange={setTrialSeconds}
+        captureCount={captureCount}
+        captureCountdown={captureCountdown}
+        isCapturing={isCapturing}
+        lastImageUrl={lastImageUrl}
+        lastImageProcessing={lastImageProcessing}
+        pendingAction={pendingAction}
+        onBack={() => router.push("/")}
+        onCapture={startCaptureCountdown}
+        onTrialStart={() =>
+          runAction("trial", async () => {
+            if (!session?.user) return;
+            const data = await trialStart(session.user, trialSeconds);
+            sessionTimer.startWithEndsAt(data.endsAt);
+            toast("Trial dimulai", "success");
+          })
+        }
+        onTrialSkip={() => {
+          if (!session?.user) return;
+          trialSkip(session.user).catch(() => {
+            toast("Gagal skip trial", "error");
+          });
+        }}
+        onMainStart={() =>
+          runAction("main", async () => {
+            if (!session?.user) return;
+            const mainSeconds = mainDurationMinutes * 60;
+            const data = await mainStart(
+              session.user,
+              mainSeconds,
+              (session.packageType ?? "self-photo") as PackageType
+            );
+            sessionTimer.startWithEndsAt(data.endsAt);
+            toast("Sesi utama dimulai", "success");
+          })
+        }
+        onPause={() =>
+          runAction("pause", async () => {
+            await pauseSession();
+            const { activeSession } = await getSession();
+            if (activeSession) {
+              syncTimerFromSession(activeSession, sessionTimer.syncFromServer);
+            }
+            toast("Sesi dijeda", "default");
+          })
+        }
+        onResume={() =>
+          runAction("resume", async () => {
+            const resumed = await resumeSession();
+            syncTimerFromSession(resumed, sessionTimer.syncFromServer);
+            toast("Sesi dilanjutkan", "success");
+          })
+        }
+        onAddTime={(minutes) =>
+          runAction(minutes === 1 ? "add1" : "add5", async () => {
+            await addTime(minutes);
+            const { activeSession } = await getSession();
+            if (activeSession) {
+              syncTimerFromSession(activeSession, sessionTimer.syncFromServer);
+            }
+            toast(`+${minutes} menit ditambahkan`, "success");
+          })
+        }
+        onEndSession={() => void runAction("end", endSession)}
+      />
     );
   }
 
   return (
-    <main className="flex min-h-screen w-full flex-col items-center justify-center bg-black px-4 sm:px-6 py-8">
-      <h1 className="text-center text-3xl font-semibold tracking-wide text-white sm:text-5xl">
-        Terima kasih
-      </h1>
-      <p className="mt-5 max-w-xl text-center text-sm text-white/60 sm:text-lg">
-        {sessionMeta.packageType === "ai-photo" ? (
-          <>
-            Buka galeri customer — bandingkan before/after AI, pilih favorit, lalu cetak.
-            <br />
-            Momen “wow” di meja studio yang bikin mereka balik lagi.
-          </>
-        ) : (
-          <>
-            Foto Anda sedang diproses.
-            <br /> Silakan hubungi tim studio jika ingin review atau cetak.
-          </>
-        )}
-      </p>
-      <div className="mt-8 sm:mt-10 flex flex-wrap gap-3 justify-center">
-        <Button
-          className="rounded bg-blue-600 px-6 py-3 text-white shadow-lg hover:bg-blue-700"
-          onClick={() => {
-            sessionTimer.clear();
-            setSession(null);
-            setCaptureCount(0);
-            setLastImageUrl(null);
-            setScreen("register");
-          }}
-        >
-          Kembali ke awal
-        </Button>
+    <main className="flex min-h-[100dvh] w-full flex-col bg-black">
+      <ConnectionBanner connected={connected} />
+      <div className="flex flex-1 flex-col items-center justify-center px-4 py-8 sm:px-6">
+        <SessionStepIndicator current="done" className="mb-8" />
+        <h1 className="text-center text-3xl font-semibold tracking-wide text-white sm:text-5xl">
+          Terima kasih
+        </h1>
+        <p className="mt-5 max-w-xl text-center text-sm text-white/60 sm:text-lg">
+          Foto sudah tersimpan.{" "}
+          {endedPackageType === "ai-self-photo" ? (
+            <>
+              Lanjut ke galeri untuk pilih foto dan generate AI
+              {endedSessionMeta?.aiThemeLabel
+                ? ` (${endedSessionMeta.aiThemeLabel})`
+                : ""}
+              {endedSessionMeta?.aiGenerateLimit
+                ? ` · kuota ${endedSessionMeta.aiGenerateLimit}×`
+                : ""}
+              .
+            </>
+          ) : (
+            "Customer bisa review dan cetak dari meja studio."
+          )}
+        </p>
+        <div className="mt-8 flex flex-wrap justify-center gap-3 sm:mt-10">
+          {endedPackageType === "ai-self-photo" && endedSessionUser ? (
+            <Button
+              className="bg-violet-500 px-6 py-3 font-semibold text-white hover:bg-violet-400"
+              onClick={() =>
+                router.push(
+                  `/gallery?user=${encodeURIComponent(endedSessionUser)}`
+                )
+              }
+            >
+              Buka Galeri AI
+            </Button>
+          ) : null}
+          <Button
+            className="bg-[#B59240] px-6 py-3 font-semibold text-black hover:bg-[#C9A855]"
+            onClick={() => {
+              sessionTimer.clear();
+              setSession(null);
+              setSessionMeta(null);
+              setCaptureCount(0);
+              setLastImageUrl(null);
+              setScreen("register");
+            }}
+          >
+            Sesi baru
+          </Button>
+          <Button
+            variant="outline"
+            className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+            onClick={() => router.push("/")}
+          >
+            Ke beranda
+          </Button>
+        </div>
       </div>
     </main>
   );
 }
 
-function Pill({ label, intent = "default" }: { label: string; intent?: "default" | "warn" }) {
-  return (
-    <div
-      className={cn(
-        "rounded-md border px-4 py-1 text-md tracking-[0.22em]",
-        intent === "warn"
-          ? "border-amber-400/40 bg-amber-400/10 text-amber-200"
-          : "border-white/15 bg-white/5 text-white/70"
-      )}
-    >
-      {label}
-    </div>
-  );
-}
-
 type RegisterOrCheckScreenProps = {
+  connected: boolean;
   packageDurations: Record<PackageType, number>;
   onRegister: (
     name: string,
     phone: string,
     peopleCount: number,
     packageType: PackageType,
-    passportBackgroundColor?: string,
-    passportSizeId?: string,
-    themeId?: string,
-    lookId?: LookId
+    aiThemeId?: string
   ) => Promise<void>;
   onCheckByName: (name: string) => Promise<void>;
   onBack: () => void;
+  onError: (message: string) => void;
 };
 
 function RegisterOrCheckScreen({
+  connected,
   packageDurations,
   onRegister,
   onCheckByName,
   onBack,
+  onError,
 }: RegisterOrCheckScreenProps) {
   const [mode, setMode] = React.useState<"register" | "check">("register");
   const [checkName, setCheckName] = React.useState("");
-  const [checkLoading, setCheckLoading] = React.useState(false);
-  const [packageType, setPackageType] = React.useState<PackageType>("self-photo");
-  const [passportBackgroundColor, setPassportBackgroundColor] =
-    React.useState<string>(DEFAULT_PASSPORT_COLOR);
-  const [passportSizeId, setPassportSizeId] =
-    React.useState<string>(DEFAULT_PASSPORT_SIZE_ID);
-  const { defaultThemeId, themeGroups } = useThemes();
-  const [themeId, setThemeId] = React.useState<string>(defaultThemeId);
-  const [lookId, setLookId] = React.useState<LookId>(
-    defaultLookForPackage("self-photo")
-  );
+  const [submitting, setSubmitting] = React.useState(false);
+  const [registerStep, setRegisterStep] = React.useState<1 | 2 | 3>(1);
 
-  React.useEffect(() => {
-    setThemeId(defaultThemeId);
-  }, [defaultThemeId]);
-
-  React.useEffect(() => {
-    setLookId(defaultLookForPackage(packageType));
-  }, [packageType]);
-
-  const themePickerGroups = React.useMemo(
-    () =>
-      themeGroups.map((group) => ({
-        ...group,
-        uiThemes: toUiThemeOptions(group.themes),
-      })),
-    [themeGroups]
-  );
-
-  const passportSizeOptions = PHOTO_SIZE_PRESETS.filter((preset) =>
-    ["2x3", "3x4", "4x6"].includes(preset.id)
-  );
-
-  const selfPhotoMinutes = packageDurations["self-photo"];
-  const pasPhotoMinutes = packageDurations["pas-photo"];
+  const registerContainerClass =
+    mode === "register"
+      ? getRegisterWizardContainerClass(registerStep)
+      : "max-w-md";
 
   return (
-    <main className="flex min-h-screen w-full items-center justify-center bg-black px-4 py-6 sm:px-6">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-6 backdrop-blur">
-        <div className="flex gap-2 mb-4">
-          <button
-            type="button"
-            onClick={() => setMode("register")}
-            className={cn(
-              "flex-1 rounded-lg px-3 py-2 text-sm font-medium transition",
-              mode === "register"
-                ? "bg-white/20 text-white"
-                : "bg-white/5 text-white/70 hover:bg-white/10"
-            )}
-          >
-            Registrasi Baru
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("check")}
-            className={cn(
-              "flex-1 rounded-lg px-3 py-2 text-sm font-medium transition",
-              mode === "check"
-                ? "bg-white/20 text-white"
-                : "bg-white/5 text-white/70 hover:bg-white/10"
-            )}
-          >
-            Cek by Name
-          </button>
-        </div>
+    <main className="flex min-h-[100dvh] w-full flex-col bg-black">
+      <ConnectionBanner connected={connected} />
+      <div className="flex flex-1 items-center justify-center px-4 py-6 sm:px-6">
+        <div
+          className={cn(
+            "w-full rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-6 backdrop-blur transition-[max-width]",
+            registerContainerClass
+          )}
+        >
+          <SessionStepIndicator current="register" className="mb-6" />
 
-        {mode === "register" && (
-          <>
-            <h2 className="text-lg sm:text-xl font-semibold tracking-wide text-white">Registrasi</h2>
-            <p className="mt-2 text-xs sm:text-sm text-white/60">
-              Nama dipakai untuk folder foto. Nomor WhatsApp opsional.
-            </p>
-            <form
-              className="mt-5 space-y-4"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                const fd = new FormData(e.currentTarget);
-                const name = (fd.get("name") ?? "").toString().trim();
-                const phone = (fd.get("phone") ?? "").toString().trim();
-                const peopleCount = Number((fd.get("peopleCount") ?? "1").toString());
-                if (!name) return;
-                try {
-                  await onRegister(
-                    name,
-                    phone,
-                    Math.max(1, Math.min(8, peopleCount)),
-                    packageType,
-                    packageType === "pas-photo" ? passportBackgroundColor : undefined,
-                    packageType === "pas-photo" ? passportSizeId : undefined,
-                    packageType === "ai-photo" ? themeId : undefined,
-                    lookAllowsPicker(packageType)
-                      ? normalizeLookId(lookId, packageType)
-                      : "natural"
-                  );
-                } catch {
-                  alert("Registrasi gagal. Hubungi staf.");
-                }
-              }}
+          <div className="mb-4 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setMode("register")}
+              className={cn(
+                "flex-1 rounded-lg px-3 py-2 text-sm font-medium transition",
+                mode === "register"
+                  ? "bg-[#B59240]/25 text-[#E8C872] ring-1 ring-[#B59240]/40"
+                  : "bg-white/5 text-white/70 hover:bg-white/10"
+              )}
             >
-              <div className="space-y-2">
-                <label className="text-xs tracking-[0.22em] text-white/60">NAMA</label>
-                <Input name="name" autoComplete="off" className="h-11" required />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs tracking-[0.22em] text-white/60">WHATSAPP (OPSIONAL)</label>
-                <Input name="phone" autoComplete="off" className="h-11" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs tracking-[0.22em] text-white/60">JUMLAH ORANG</label>
-                <Input name="peopleCount" type="number" min={1} max={8} defaultValue={1} className="h-11" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs tracking-[0.22em] text-white/60">PAKET FOTO</label>
-                <div className="grid grid-cols-1 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPackageType("self-photo")}
-                    className={cn(
-                      "flex w-full flex-col items-start rounded-lg border px-3 py-2 text-left text-xs sm:text-sm transition",
-                      packageType === "self-photo"
-                        ? "border-white bg-white/10 text-white"
-                        : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
-                    )}
-                  >
-                    <span className="font-semibold tracking-[0.18em] uppercase">
-                      Self Photo Studio
-                    </span>
-                    <span className="mt-1 text-[11px] sm:text-xs text-white/70">
-                      Durasi utama {selfPhotoMinutes} menit, pengalaman self photo bebas pose.
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPackageType("pas-photo")}
-                    className={cn(
-                      "flex w-full flex-col items-start rounded-lg border px-3 py-2 text-left text-xs sm:text-sm transition",
-                      packageType === "pas-photo"
-                        ? "border-white bg-white/10 text-white"
-                        : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
-                    )}
-                  >
-                    <span className="font-semibold tracking-[0.18em] uppercase">
-                      Pas Photo
-                    </span>
-                    <span className="mt-1 text-[11px] sm:text-xs text-white/70">
-                      Durasi utama {pasPhotoMinutes} menit dengan frame pas foto di layar live preview.
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPackageType("ai-photo")}
-                    className={cn(
-                      "flex w-full flex-col items-start rounded-lg border px-3 py-2 text-left text-xs sm:text-sm transition",
-                      packageType === "ai-photo"
-                        ? "border-white bg-white/10 text-white"
-                        : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
-                    )}
-                  >
-                    <span className="font-semibold tracking-[0.18em] uppercase">
-                      AI Photo
-                    </span>
-                    <span className="mt-1 text-[11px] sm:text-xs text-white/70">
-                      Hapus background + tema cinematic. Preview wow di kiosk, lalu
-                      bandingkan &amp; cetak di meja studio — biar customer ketagihan.
-                    </span>
-                  </button>
-                </div>
-              </div>
-              {packageType === "pas-photo" && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-xs tracking-[0.22em] text-white/60">
-                      UKURAN PAS FOTO
-                    </label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {passportSizeOptions.map((option) => (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() => setPassportSizeId(option.id)}
-                          className={cn(
-                            "flex flex-col items-center gap-2 rounded-lg border px-2 py-3 text-xs transition",
-                            passportSizeId === option.id
-                              ? "border-white bg-white/10 text-white"
-                              : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
-                          )}
-                        >
-                          <span
-                            className="w-8 rounded-sm border border-white/30 bg-white/10"
-                            style={{
-                              aspectRatio: `${option.widthMm} / ${option.heightMm}`,
-                            }}
-                          />
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs tracking-[0.22em] text-white/60">
-                      WARNA LATAR PAS FOTO
-                    </label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {PASSPORT_COLOR_OPTIONS.map((option) => (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() => setPassportBackgroundColor(option.value)}
-                          className={cn(
-                            "flex flex-col items-center gap-2 rounded-lg border px-2 py-3 text-xs transition",
-                            passportBackgroundColor === option.value
-                              ? "border-white bg-white/10 text-white"
-                              : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
-                          )}
-                        >
-                          <span
-                            className="h-8 w-8 rounded-full border border-white/30"
-                            style={{ backgroundColor: option.value }}
-                          />
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </>
+              Registrasi Baru
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("check")}
+              className={cn(
+                "flex-1 rounded-lg px-3 py-2 text-sm font-medium transition",
+                mode === "check"
+                  ? "bg-[#B59240]/25 text-[#E8C872] ring-1 ring-[#B59240]/40"
+                  : "bg-white/5 text-white/70 hover:bg-white/10"
               )}
-              {packageType === "ai-photo" && (
-                <div className="space-y-4">
-                  {themePickerGroups.map((group) => (
-                    <div key={group.id} className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="text-xs tracking-[0.22em] text-white/60 uppercase">
-                          {group.label}
-                        </label>
-                        {!group.assetsReady && (
-                          <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] text-amber-200">
-                            Asset belum lengkap
-                          </span>
-                        )}
-                      </div>
-                      <div
-                        className={cn(
-                          "grid gap-2",
-                          group.pickerCompact
-                            ? "grid-cols-2 sm:grid-cols-3"
-                            : "grid-cols-2 sm:grid-cols-2"
-                        )}
-                      >
-                        {group.uiThemes.map((option) => (
-                          <button
-                            key={option.id}
-                            type="button"
-                            onClick={() => setThemeId(option.id)}
-                            className={cn(
-                              "relative flex flex-col items-center gap-2 rounded-lg border px-2 py-3 text-xs transition",
-                              themeId === option.id
-                                ? "border-white bg-white/10 text-white"
-                                : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
-                            )}
-                          >
-                            <span
-                              className="h-8 w-full rounded-md border border-white/30"
-                              style={{ background: option.preview }}
-                            />
-                            {option.label}
-                            {option.assetAvailable ? (
-                              <span className="absolute right-2 top-2 size-1.5 rounded-full bg-emerald-400" />
-                            ) : null}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {lookAllowsPicker(packageType) && (
-                <div className="space-y-2">
-                  <label className="text-xs tracking-[0.22em] text-white/60">
-                    LOOK PRESET
-                  </label>
-                  <p className="text-[11px] text-white/50">
-                    Soft lighting di live preview &amp; default print — bukan beauty edit.
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {LOOK_PRESETS.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => setLookId(option.id)}
-                        className={cn(
-                          "rounded-lg border px-2 py-3 text-xs font-medium transition",
-                          lookId === option.id
-                            ? "border-white bg-white/10 text-white"
-                            : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
-                        )}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className="flex gap-3 pt-2">
-                <Button type="button" className="h-11 flex-1" onClick={onBack}>
-                  Kembali
-                </Button>
-                <Button type="submit" className="h-11 flex-1">
-                  Mulai
-                </Button>
-              </div>
-            </form>
-          </>
-        )}
+            >
+              Cek Nama
+            </button>
+          </div>
 
-        {mode === "check" && (
-          <>
-            <h2 className="text-lg sm:text-xl font-semibold tracking-wide text-white">Cek by Name</h2>
-            <p className="mt-2 text-xs sm:text-sm text-white/60">
-              Masukkan nama yang sudah terdaftar hari ini untuk mengontrol sesi.
-            </p>
-            <div className="mt-5 space-y-4">
-              <div className="space-y-2">
-                <label className="text-xs tracking-[0.22em] text-white/60">NAMA</label>
-                <Input
-                  value={checkName}
-                  onChange={(e) => setCheckName(e.target.value)}
-                  autoComplete="off"
-                  className="h-11"
-                  placeholder="Nama lengkap"
-                />
+          {mode === "register" ? (
+            <RegisterWizard
+              packageDurations={packageDurations}
+              onBack={onBack}
+              onError={onError}
+              onStepChange={setRegisterStep}
+              onSubmit={async (name, phone, peopleCount, packageType, aiThemeId) => {
+                await onRegister(
+                  name,
+                  phone,
+                  peopleCount,
+                  packageType,
+                  aiThemeId
+                );
+              }}
+            />
+          ) : null}
+
+          {mode === "check" ? (
+            <>
+              <h2 className="text-lg font-semibold tracking-wide text-white sm:text-xl">
+                Cek by Name
+              </h2>
+              <p className="mt-2 text-xs text-white/60 sm:text-sm">
+                Lanjutkan sesi customer yang sudah terdaftar hari ini.
+              </p>
+              <div className="mt-5 space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs tracking-[0.22em] text-white/60">NAMA</label>
+                  <Input
+                    value={checkName}
+                    onChange={(e) => setCheckName(e.target.value)}
+                    autoComplete="off"
+                    className="h-11"
+                    placeholder="Nama lengkap"
+                  />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 flex-1 border-white/20 bg-white/5 text-white hover:bg-white/10"
+                    onClick={onBack}
+                  >
+                    Kembali
+                  </Button>
+                  <Button
+                    type="button"
+                    className="h-11 flex-1 bg-[#B59240] font-semibold text-black hover:bg-[#C9A855]"
+                    disabled={!checkName.trim() || submitting}
+                    onClick={async () => {
+                      if (!checkName.trim()) return;
+                      setSubmitting(true);
+                      try {
+                        await onCheckByName(checkName.trim());
+                      } finally {
+                        setSubmitting(false);
+                      }
+                    }}
+                  >
+                    {submitting ? "Mencari…" : "Cek & Mulai"}
+                  </Button>
+                </div>
               </div>
-              <div className="flex gap-3 pt-2">
-                <Button type="button" className="h-11 flex-1" onClick={onBack}>
-                  Kembali
-                </Button>
-                <Button
-                  type="button"
-                  className="h-11 flex-1"
-                  disabled={!checkName.trim() || checkLoading}
-                  onClick={async () => {
-                    if (!checkName.trim()) return;
-                    setCheckLoading(true);
-                    try {
-                      await onCheckByName(checkName.trim());
-                    } finally {
-                      setCheckLoading(false);
-                    }
-                  }}
-                >
-                  {checkLoading ? "Cek..." : "Cek & Mulai"}
-                </Button>
-              </div>
-            </div>
-          </>
-        )}
+            </>
+          ) : null}
+        </div>
       </div>
     </main>
   );

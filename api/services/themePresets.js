@@ -10,7 +10,7 @@ import {
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 
-/** @typedef {'world-cup-2026' | 'classic'} ThemeCategory */
+/** @typedef {'world-cup-2026' | 'classic' | 'ai-self-photo'} ThemeCategory */
 
 /**
  * @typedef {object} ThemePreset
@@ -125,6 +125,16 @@ export const THEME_PRESETS = [
     gradient: { from: "#fbbf24", to: "#f43f5e", angle: 120 },
     previewGradient: "linear-gradient(120deg, #fbbf24, #f43f5e)",
     assetFilename: "golden-hour.png",
+  },
+  {
+    id: "wild-west",
+    label: "Wild West",
+    category: "ai-self-photo",
+    prompt:
+      "Old West frontier town at golden hour, weathered wooden saloon buildings, dusty ground, warm sunset backlight, cinematic portrait backdrop, no people",
+    gradient: { from: "#78350f", to: "#fbbf24", angle: 160 },
+    previewGradient: "linear-gradient(160deg, #78350f, #fbbf24)",
+    assetFilename: "wild-west.png",
   },
 ];
 
@@ -260,6 +270,10 @@ export function validateWorldCupThemeAssets() {
 
 export function validateClassicThemeAssets() {
   return validateCategoryAssetIds("classic");
+}
+
+export function validateAiSelfPhotoThemeAssets() {
+  return validateCategoryAssetIds("ai-self-photo");
 }
 
 export function validateAllBundledThemeAssets() {

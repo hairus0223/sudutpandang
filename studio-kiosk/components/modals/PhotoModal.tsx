@@ -7,31 +7,48 @@ import {
   ChevronRight,
   CheckSquare,
   Square,
+  Sparkles,
+  Loader2,
+  RotateCcw,
+  ZoomIn,
+  ZoomOut,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 import { useGalleryStore } from "@/stores/useGalleryStore";
-import { cn } from "@/lib/utils";
 import {
-  GALLERY_PREVIEW_VARIANTS,
-  hasSubjectVariant,
-  hasThemedVariant,
+  canGenerateAiSelection,
+  getAiSelectionStatus,
+  getAiSelectionStatusLabel,
+} from "@/lib/aiGalleryUtils";
+import {
+  hasAiPrintVariant,
   resolveGalleryPreviewUrl,
-  type GalleryPreviewVariant,
+  resolvePrintUrl,
 } from "@/lib/resolveImageUrl";
-import { getProcessingStatusLabel } from "@/lib/processingLabels";
-import type { GalleryImageData, PackageType } from "@/lib/imageTypes";
+import type { GalleryImageData, PrintVariant } from "@/lib/imageTypes";
+import {
+  btnIcon,
+  btnNeutral,
+  btnPrimary,
+  btnPrint,
+  btnSegment,
+  btnSuccess,
+  btnWarning,
+} from "@/lib/galleryUiStyles";
+import { cn } from "@/lib/utils";
 
 type PhotoModalProps = {
   open: boolean;
   index: number | null;
   images: GalleryImageData[];
-  packageType: PackageType;
-  previewVariant: GalleryPreviewVariant;
-  onPreviewVariantChange: (variant: GalleryPreviewVariant) => void;
   onClose: () => void;
   onChange: (index: number) => void;
-  onRemoveBackground?: (imageId: string) => void;
-  onApplyTheme?: (imageId: string) => void;
-  isProcessing?: (imageId: string) => boolean;
+  aiMode?: boolean;
+  selectedImageIds?: string[];
+  onToggleGallerySelection?: (imageId: string) => void;
+  onGenerateAi?: (imageId: string) => void | Promise<void>;
+  generating?: boolean;
 };
 
 function getBottomBarHeight() {
@@ -39,36 +56,56 @@ function getBottomBarHeight() {
   return el ? el.clientHeight : 0;
 }
 
+const MIN_SCALE = 1;
+const MAX_SCALE = 4;
+
 export function PhotoModal({
   open,
   index,
   images,
-  packageType,
-  previewVariant,
-  onPreviewVariantChange,
   onClose,
   onChange,
-  onRemoveBackground,
-  onApplyTheme,
-  isProcessing,
+  aiMode = false,
+  selectedImageIds = [],
+  onToggleGallerySelection,
+  onGenerateAi,
+  generating = false,
 }: PhotoModalProps) {
-  const { selectedForPrint, togglePrint } = useGalleryStore();
+  const {
+    selectedForPrint,
+    togglePrint,
+    printVariantByFilename,
+    aiThemeId,
+    packageType,
+  } = useGalleryStore();
   const [bottomOffset, setBottomOffset] = useState(32);
   const [showUI, setShowUI] = useState(true);
-  const [comparePos, setComparePos] = useState(55);
-  const [compareMode, setCompareMode] = useState(false);
+  const [viewVariant, setViewVariant] = useState<PrintVariant>("original");
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const hideUITimer = useRef<NodeJS.Timeout | null>(null);
   const touchStartX = useRef<number | null>(null);
   const scale = useRef(1);
   const lastScale = useRef(1);
   const startDistance = useRef<number | null>(null);
+  const panX = useRef(0);
+  const panY = useRef(0);
+  const lastPan = useRef({ x: 0, y: 0 });
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0 });
 
-  useEffect(() => {
-    if (!open) return;
-    setComparePos(55);
-    setCompareMode(false);
-  }, [open, index]);
+  const applyTransform = useCallback(() => {
+    if (!imageRef.current) return;
+    imageRef.current.style.transform = `translate(${panX.current}px, ${panY.current}px) scale(${scale.current})`;
+  }, []);
+
+  const resetZoom = useCallback(() => {
+    scale.current = 1;
+    lastScale.current = 1;
+    panX.current = 0;
+    panY.current = 0;
+    applyTransform();
+  }, [applyTransform]);
 
   useEffect(() => {
     if (!open) return;
@@ -84,10 +121,17 @@ export function PhotoModal({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open || index === null || !images[index]) return;
+    const filename = images[index].filename;
+    setViewVariant(printVariantByFilename[filename] ?? "original");
+    resetZoom();
+  }, [open, index, images, printVariantByFilename, resetZoom]);
+
   const resetHideUI = useCallback(() => {
     setShowUI(true);
     if (hideUITimer.current) clearTimeout(hideUITimer.current);
-    hideUITimer.current = setTimeout(() => setShowUI(false), 2500);
+    hideUITimer.current = setTimeout(() => setShowUI(false), 4000);
   }, []);
 
   useEffect(() => {
@@ -95,344 +139,491 @@ export function PhotoModal({
     resetHideUI();
     window.addEventListener("mousemove", resetHideUI);
     window.addEventListener("keydown", resetHideUI);
+    window.addEventListener("touchstart", resetHideUI, { passive: true });
 
     return () => {
       window.removeEventListener("mousemove", resetHideUI);
       window.removeEventListener("keydown", resetHideUI);
+      window.removeEventListener("touchstart", resetHideUI);
       if (hideUITimer.current) clearTimeout(hideUITimer.current);
     };
   }, [open, resetHideUI]);
-
-  const resetZoom = useCallback(() => {
-    scale.current = 1;
-    if (imageRef.current) {
-      imageRef.current.style.transform = "scale(1)";
-    }
-  }, []);
 
   useEffect(() => {
     if (!open || index === null) return;
 
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      if (scale.current > 1) return;
-
-      if (e.key === "ArrowRight" && index < images.length - 1) {
-        resetZoom();
-        onChange(index + 1);
+      if (e.key === "ArrowLeft" && index > 0) onChange(index - 1);
+      if (e.key === "ArrowRight" && index < images.length - 1) onChange(index + 1);
+      if (e.key === "+" || e.key === "=") {
+        scale.current = Math.min(MAX_SCALE, scale.current + 0.25);
+        applyTransform();
       }
-      if (e.key === "ArrowLeft" && index > 0) {
-        resetZoom();
-        onChange(index - 1);
+      if (e.key === "-") {
+        scale.current = Math.max(MIN_SCALE, scale.current - 0.25);
+        if (scale.current <= 1) {
+          panX.current = 0;
+          panY.current = 0;
+        }
+        applyTransform();
       }
     };
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open, index, images.length, onClose, onChange, resetZoom]);
+  }, [open, index, images.length, onClose, onChange, applyTransform]);
 
   useEffect(() => {
-    if (index === null) return;
-    [index + 1, index - 1].forEach((i) => {
-      const img = images[i];
-      if (!img) return;
-      const preload = new Image();
-      preload.src = resolveGalleryPreviewUrl(img, packageType, previewVariant);
-    });
-  }, [index, images, packageType, previewVariant]);
+    if (!open || !viewportRef.current) return;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.15 : 0.15;
+      scale.current = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale.current + delta));
+      if (scale.current <= 1) {
+        panX.current = 0;
+        panY.current = 0;
+      }
+      applyTransform();
+      resetHideUI();
+    };
+
+    const el = viewportRef.current;
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [open, applyTransform, resetHideUI]);
 
   if (!open || index === null || !images[index]) return null;
 
   const image = images[index];
-  const displayUrl = resolveGalleryPreviewUrl(
-    image,
-    packageType,
-    previewVariant
-  );
-  const originalUrl = image.variants?.original ?? image.url;
-  const themedUrl = image.variants?.themed;
-  const canCompare =
-    packageType === "ai-photo" &&
-    Boolean(themedUrl) &&
-    Boolean(originalUrl) &&
-    themedUrl !== originalUrl;
-  const isSelected = selectedForPrint.includes(image.filename);
-  const busy = image.imageId ? isProcessing?.(image.imageId) : false;
-  const canRemoveBg =
-    Boolean(image.imageId && onRemoveBackground) &&
-    (image.processingStatus === "none" ||
-      image.processingStatus === "failed" ||
-      !image.processingStatus) &&
-    !busy;
-  const canApplyTheme =
-    Boolean(image.imageId && onApplyTheme && hasSubjectVariant(image)) &&
-    image.processingStatus !== "pending" &&
-    image.processingStatus !== "processing" &&
-    !busy;
+  const selectionKey = image.imageId ?? image.filename;
+  const canSwitchVariant =
+    packageType === "ai-self-photo" && hasAiPrintVariant(image, aiThemeId);
+  const printTargetVariant = canSwitchVariant ? viewVariant : "original";
+  const displayUrl = canSwitchVariant
+    ? resolvePrintUrl(image, viewVariant, aiThemeId)
+    : resolveGalleryPreviewUrl(image);
+  const isPrintSelected = selectedForPrint.includes(image.filename);
+  const selectedVariant = printVariantByFilename[image.filename] ?? "original";
+  const isPrintActive =
+    isPrintSelected && selectedVariant === printTargetVariant;
+  const isGallerySelected = selectedImageIds.includes(selectionKey);
+  const aiStatus = aiMode ? getAiSelectionStatus(image) : null;
+  const aiStatusLabel = getAiSelectionStatusLabel(aiStatus);
+  const canGenerate = aiMode && canGenerateAiSelection(aiStatus);
+  const isAiReady = aiStatus === "ready";
+  const isAiFailed = aiStatus === "failed";
+  const isAiProcessing = ["pending", "queued", "processing"].includes(aiStatus || "");
 
-  const getDistance = (touches: React.TouchList) => {
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-  };
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    resetHideUI();
-
-    if (e.touches.length === 1) {
-      touchStartX.current = e.touches[0].clientX;
-    }
-
+  const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
-      startDistance.current = getDistance(e.touches);
+      const [a, b] = [e.touches[0], e.touches[1]];
+      startDistance.current = Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY);
       lastScale.current = scale.current;
+    } else if (e.touches.length === 1) {
+      if (scale.current > 1) {
+        isPanning.current = true;
+        panStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        lastPan.current = { x: panX.current, y: panY.current };
+      } else {
+        touchStartX.current = e.touches[0].clientX;
+      }
     }
   };
 
-  const onTouchMove = (e: React.TouchEvent) => {
-    if (
-      e.touches.length === 2 &&
-      startDistance.current &&
-      imageRef.current
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && startDistance.current) {
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const dist = Math.hypot(a.pageX - b.pageX, a.pageY - b.pageY);
+      scale.current = Math.min(
+        MAX_SCALE,
+        Math.max(MIN_SCALE, (dist / startDistance.current) * lastScale.current)
+      );
+      applyTransform();
+    } else if (e.touches.length === 1 && isPanning.current && scale.current > 1) {
+      panX.current = lastPan.current.x + (e.touches[0].clientX - panStart.current.x);
+      panY.current = lastPan.current.y + (e.touches[0].clientY - panStart.current.y);
+      applyTransform();
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (isPanning.current) {
+      isPanning.current = false;
+    } else if (
+      scale.current <= 1.05 &&
+      touchStartX.current !== null &&
+      e.changedTouches.length === 1
     ) {
-      const zoom = getDistance(e.touches) / startDistance.current;
-      scale.current = Math.min(Math.max(lastScale.current * zoom, 1), 4);
-      imageRef.current.style.transform = `scale(${scale.current})`;
+      const dx = e.changedTouches[0].clientX - touchStartX.current;
+      if (Math.abs(dx) > 80) {
+        if (dx > 0 && index > 0) onChange(index - 1);
+        if (dx < 0 && index < images.length - 1) onChange(index + 1);
+      }
     }
-  };
-
-  const onTouchEnd = (e: React.TouchEvent) => {
-    if (scale.current > 1) return;
-    if (touchStartX.current === null) return;
-
-    const diff = e.changedTouches[0].clientX - touchStartX.current;
-    const threshold = 60;
-
-    if (diff > threshold && index > 0) {
-      onChange(index - 1);
-    }
-    if (diff < -threshold && index < images.length - 1) {
-      onChange(index + 1);
-    }
-
     touchStartX.current = null;
     startDistance.current = null;
   };
 
-  const isVariantDisabled = (variant: GalleryPreviewVariant) => {
-    if (variant === "auto" || variant === "original") return false;
-    if (variant === "subject") return !hasSubjectVariant(image);
-    if (variant === "themed") return !hasThemedVariant(image);
-    return false;
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (scale.current <= 1) return;
+    isPanning.current = true;
+    panStart.current = { x: e.clientX, y: e.clientY };
+    lastPan.current = { x: panX.current, y: panY.current };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isPanning.current || scale.current <= 1) return;
+    panX.current = lastPan.current.x + (e.clientX - panStart.current.x);
+    panY.current = lastPan.current.y + (e.clientY - panStart.current.y);
+    applyTransform();
+  };
+
+  const handleMouseUp = () => {
+    isPanning.current = false;
+  };
+
+  const zoomIn = () => {
+    scale.current = Math.min(MAX_SCALE, scale.current + 0.5);
+    applyTransform();
+    resetHideUI();
+  };
+
+  const zoomOut = () => {
+    scale.current = Math.max(MIN_SCALE, scale.current - 0.5);
+    if (scale.current <= 1) {
+      panX.current = 0;
+      panY.current = 0;
+    }
+    applyTransform();
+    resetHideUI();
   };
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center"
-      onClick={onClose}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
+      className="fixed inset-0 z-[100] bg-black/95"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Preview foto"
     >
+      {/* Backdrop — tap area to close */}
+      <button
+        type="button"
+        className="absolute inset-0 z-0 cursor-default"
+        aria-label="Tutup preview"
+        onClick={onClose}
+      />
+
+      {/* Image layer — behind controls, only image captures pointer events */}
+      <div
+        ref={viewportRef}
+        className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
+      >
+        <img
+          ref={imageRef}
+          src={displayUrl}
+          alt={image.filename}
+          draggable={false}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            if (scale.current > 1) resetZoom();
+            else {
+              scale.current = 2;
+              applyTransform();
+            }
+          }}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          className="pointer-events-auto max-h-[78vh] max-w-[92vw] select-none rounded-lg object-contain shadow-2xl will-change-transform cursor-zoom-in"
+          style={{ transform: "scale(1)" }}
+        />
+      </div>
+
+      {/* Controls layer — always above image */}
       <div
         className={cn(
-          "fixed inset-0 z-[100] transition-opacity duration-300",
-          showUI ? "opacity-100" : "opacity-0 pointer-events-none"
+          "absolute inset-0 z-40 transition-opacity duration-300",
+          showUI ? "opacity-100" : "pointer-events-none opacity-0"
         )}
       >
-        <button
-          onClick={onClose}
-          className="absolute top-6 right-6 text-white/80 hover:text-white"
-        >
-          <X size={32} />
-        </button>
+        {/* Top bar */}
+        <div className="absolute left-0 right-0 top-0 flex items-start justify-between gap-3 bg-linear-to-b from-black/80 to-transparent p-4 sm:p-6">
+          <div className="min-w-0 pt-1">
+            <p className="truncate text-sm text-white/90">{image.filename}</p>
+            <p className="text-xs text-white/60">
+              {index + 1} / {images.length}
+              {aiStatusLabel ? ` · ${aiStatusLabel}` : ""}
+            </p>
+          </div>
 
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                zoomOut();
+              }}
+              className={btnIcon()}
+              aria-label="Perkecil"
+            >
+              <ZoomOut className="size-5" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                zoomIn();
+              }}
+              className={btnIcon()}
+              aria-label="Perbesar"
+            >
+              <ZoomIn className="size-5" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              className={cn(btnIcon(), "hover:border-red-400/70 hover:text-red-200")}
+              aria-label="Tutup"
+            >
+              <X className="size-8" />
+            </button>
+          </div>
+        </div>
+
+        {/* Prev / next */}
         {index > 0 && (
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               resetZoom();
               onChange(index - 1);
             }}
-            className="absolute left-6 top-1/2 -translate-y-1/2 text-white/70 hover:text-white"
+            className="absolute left-4 top-1/2 -translate-y-1/2 text-white/80 transition hover:text-white sm:left-6"
+            aria-label="Foto sebelumnya"
           >
-            <ChevronLeft size={48} />
+            <ChevronLeft className="size-10 sm:size-12" />
           </button>
         )}
 
         {index < images.length - 1 && (
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               resetZoom();
               onChange(index + 1);
             }}
-            className="absolute right-6 top-1/2 -translate-y-1/2 text-white/70 hover:text-white"
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-white/70 transition hover:text-white sm:right-6"
+            aria-label="Foto berikutnya"
           >
-            <ChevronRight size={48} />
+            <ChevronRight className="size-10 sm:size-12" />
           </button>
         )}
 
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 flex flex-wrap justify-center gap-2 max-w-[90vw]">
-          {GALLERY_PREVIEW_VARIANTS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              disabled={isVariantDisabled(option.id) || compareMode}
-              onClick={(e) => {
-                e.stopPropagation();
-                setCompareMode(false);
-                onPreviewVariantChange(option.id);
-              }}
-              className={cn(
-                "rounded-full px-3 py-1 text-xs backdrop-blur transition",
-                !compareMode && previewVariant === option.id
-                  ? "bg-violet-600 text-white"
-                  : "bg-black/60 text-white/80 hover:bg-black/80",
-                (isVariantDisabled(option.id) || compareMode) &&
-                  "opacity-40 cursor-not-allowed"
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
-          {canCompare && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setCompareMode((v) => !v);
-              }}
-              className={cn(
-                "rounded-full px-3 py-1 text-xs backdrop-blur transition",
-                compareMode
-                  ? "bg-emerald-600 text-white"
-                  : "bg-black/60 text-white/80 hover:bg-black/80"
-              )}
-            >
-              Before / After
-            </button>
-          )}
-        </div>
-
-        {(canRemoveBg || canApplyTheme || busy) && (
-          <div
-            className="absolute left-1/2 -translate-x-1/2 flex flex-wrap justify-center gap-2 px-4"
-            style={{ bottom: bottomOffset + 56 }}
-          >
-            {canApplyTheme && image.imageId && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onApplyTheme?.(image.imageId!);
-                }}
-                className="rounded-full bg-emerald-600/90 px-4 py-2 text-sm text-white backdrop-blur hover:bg-emerald-500"
-              >
-                Terapkan Tema AI
-              </button>
-            )}
-            {canRemoveBg && image.imageId && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemoveBackground?.(image.imageId!);
-                }}
-                className="rounded-full bg-violet-600/90 px-4 py-2 text-sm text-white backdrop-blur hover:bg-violet-500"
-              >
-                Hapus Background
-              </button>
-            )}
-            {busy && (
-              <span className="rounded-full bg-amber-500/80 px-4 py-2 text-sm text-white backdrop-blur">
-                {getProcessingStatusLabel("processing", {
-                  packageType,
-                  processingPhase: image.processingPhase,
-                  variants: image.variants,
-                }) ?? "Memproses…"}
+        {/* AI status pill */}
+        {aiMode && aiStatus ? (
+          <div className="pointer-events-none absolute left-1/2 top-[4.5rem] -translate-x-1/2 sm:top-20">
+            {isAiReady ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold text-white shadow-lg">
+                <CheckCircle2 className="size-3.5" />
+                AI selesai
               </span>
-            )}
+            ) : isAiFailed ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500 px-3 py-1 text-xs font-semibold text-white shadow-lg">
+                <AlertCircle className="size-3.5" />
+                Generate gagal
+              </span>
+            ) : isAiProcessing ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white shadow-lg">
+                <Loader2 className="size-3.5 animate-spin" />
+                Sedang diproses…
+              </span>
+            ) : null}
           </div>
-        )}
+        ) : null}
 
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            togglePrint(image.filename);
-          }}
+        {/* Bottom action panel */}
+        <div
           style={{ bottom: bottomOffset }}
-          className="absolute left-1/2 -translate-x-1/2 rounded-full bg-black/80 px-6 py-3 flex items-center gap-3 text-white text-lg transition-all duration-300 ease-out"
+          className="absolute left-1/2 flex w-[min(100%,42rem)] -translate-x-1/2 flex-col items-center gap-4 px-4"
         >
-          {isSelected ? (
-            <>
-              <CheckSquare className="text-green-400" />
-              {packageType === "ai-photo"
-                ? "Dipilih — siap cetak AI"
-                : "Dipilih untuk cetak"}
-            </>
-          ) : (
-            <>
-              <Square />
-              {packageType === "ai-photo" ? "Pilih untuk cetak AI" : "Pilih untuk cetak"}
-            </>
-          )}
-        </button>
-      </div>
+          {canSwitchVariant ? (
+            <div className="flex gap-1.5 rounded-xl border-2 border-white/25 bg-black/70 p-1.5 backdrop-blur-md">
+              {(["original", "ai"] as const).map((variant) => (
+                <button
+                  key={variant}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setViewVariant(variant);
+                    resetZoom();
+                  }}
+                  className={btnSegment(
+                    viewVariant === variant,
+                    variant === "ai" ? "ai" : "original"
+                  )}
+                >
+                  {variant === "ai" ? "AI" : "Asli"}
+                </button>
+              ))}
+            </div>
+          ) : null}
 
-      <div className="relative z-10" onClick={(e) => e.stopPropagation()}>
-        {compareMode && canCompare && themedUrl ? (
-          <div className="relative inline-block max-h-[90vh] max-w-[90vw] overflow-hidden rounded-lg shadow-2xl select-none">
-            <img
-              src={originalUrl}
-              alt="Sebelum AI"
-              draggable={false}
-              className="block max-h-[90vh] max-w-[90vw] object-contain"
-            />
-            <div
-              className="absolute inset-0"
-              style={{ clipPath: `inset(0 ${100 - comparePos}% 0 0)` }}
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            {onToggleGallerySelection ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleGallerySelection(selectionKey);
+                }}
+                className={cn(
+                  btnNeutral(isGallerySelected),
+                  "flex-1 sm:flex-none",
+                  isGallerySelected &&
+                    (aiMode
+                      ? "!border-violet-300 !text-violet-100"
+                      : "!border-[#E8C872] !text-[#E8C872]")
+                )}
+              >
+                {isGallerySelected ? (
+                  <CheckSquare className="size-4 text-current" />
+                ) : (
+                  <Square className="size-4" />
+                )}
+                {isGallerySelected ? "Terpilih" : "Pilih foto"}
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePrint(image.filename, printTargetVariant);
+              }}
+              className={cn(
+                isPrintActive ? btnPrint(true) : btnPrint(false),
+                "flex-1 px-6 py-3 text-base sm:flex-none"
+              )}
             >
-              <img
-                src={themedUrl}
-                alt="Sesudah AI"
-                draggable={false}
-                className="h-full w-full object-contain"
-              />
-            </div>
-            <div
-              className="pointer-events-none absolute inset-y-0 w-0.5 bg-white/90 shadow-[0_0_12px_rgba(0,0,0,0.55)]"
-              style={{ left: `${comparePos}%` }}
-            />
-            <div className="absolute left-3 top-3 rounded-full bg-black/70 px-2.5 py-1 text-[11px] tracking-wide text-white/90">
-              Original
-            </div>
-            <div className="absolute right-3 top-3 rounded-full bg-violet-700/90 px-2.5 py-1 text-[11px] tracking-wide text-white">
-              AI
-            </div>
-            <input
-              type="range"
-              min={2}
-              max={98}
-              value={comparePos}
-              onChange={(e) => setComparePos(Number(e.target.value))}
-              className="absolute bottom-4 left-1/2 z-10 w-[min(70vw,420px)] -translate-x-1/2 accent-violet-400"
-              aria-label="Geser bandingkan sebelum dan sesudah AI"
-            />
+              {isPrintActive ? (
+                <CheckSquare className="size-5" />
+              ) : (
+                <Square className="size-5" />
+              )}
+              {isPrintActive
+                ? `Batalkan cetak (${printTargetVariant === "ai" ? "AI" : "Asli"})`
+                : `Cetak ${printTargetVariant === "ai" ? "AI" : "asli"}`}
+            </button>
+
+            {aiMode && onGenerateAi && selectionKey ? (
+              isAiReady ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setViewVariant("ai");
+                    resetZoom();
+                  }}
+                  className={cn(btnSuccess(), "flex-1 sm:flex-none")}
+                >
+                  <CheckCircle2 className="size-4" />
+                  Lihat AI
+                </button>
+              ) : isAiProcessing ? (
+                <span
+                  className={cn(
+                    btnWarning(true),
+                    "flex-1 cursor-default sm:flex-none"
+                  )}
+                >
+                  <Loader2 className="size-4 animate-spin" />
+                  Proses…
+                </span>
+              ) : isAiFailed ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void onGenerateAi(selectionKey);
+                  }}
+                  disabled={generating}
+                  className={cn(btnWarning(), "flex-1 sm:flex-none")}
+                >
+                  {generating ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="size-4" />
+                  )}
+                  Coba lagi
+                </button>
+              ) : canGenerate ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void onGenerateAi(selectionKey);
+                  }}
+                  disabled={generating}
+                  className={cn(btnPrimary(), "flex-1 sm:flex-none")}
+                >
+                  {generating ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-4" />
+                  )}
+                  Generate AI
+                </button>
+              ) : null
+            ) : null}
           </div>
-        ) : (
-          <img
-            ref={imageRef}
-            src={displayUrl}
-            alt={image.filename}
-            draggable={false}
-            onClick={(e) => {
-              e.stopPropagation();
-              resetZoom();
-            }}
-            className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl transition-all duration-300 ease-out will-change-transform"
-          />
-        )}
+
+          {images.length > 1 ? (
+            <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {images.map((thumb, thumbIndex) => {
+                const thumbUrl = resolveGalleryPreviewUrl(thumb);
+                const isActive = thumbIndex === index;
+                const thumbKey = thumb.imageId ?? thumb.filename;
+                const thumbSelected = selectedImageIds.includes(thumbKey);
+                return (
+                  <button
+                    key={thumb.filename}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      resetZoom();
+                      onChange(thumbIndex);
+                    }}
+                    className={cn(
+                      "relative h-14 w-11 shrink-0 overflow-hidden rounded-lg ring-2 transition",
+                      isActive ? "ring-violet-400" : "ring-white/15 hover:ring-white/35"
+                    )}
+                  >
+                    <img
+                      src={thumbUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                    {thumbSelected ? (
+                      <span className="absolute inset-0 bg-violet-500/25 ring-1 ring-inset ring-violet-300/60" />
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );

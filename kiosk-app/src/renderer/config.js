@@ -11,8 +11,7 @@ export function getApiBase() {
 
 const DEFAULT_PACKAGE_DURATIONS = {
   "self-photo": 10,
-  "pas-photo": 5,
-  "ai-photo": 10,
+  "ai-self-photo": 12,
 };
 
 /** Shape consumed by App.jsx (defaults/warnings; live timer comes from Socket). */
@@ -61,10 +60,9 @@ function resolvePackageDurations(data) {
   return {
     "self-photo":
       Number(fromApi["self-photo"]) || DEFAULT_PACKAGE_DURATIONS["self-photo"],
-    "pas-photo":
-      Number(fromApi["pas-photo"]) || DEFAULT_PACKAGE_DURATIONS["pas-photo"],
-    "ai-photo":
-      Number(fromApi["ai-photo"]) || DEFAULT_PACKAGE_DURATIONS["ai-photo"],
+    "ai-self-photo":
+      Number(fromApi["ai-self-photo"]) ||
+      DEFAULT_PACKAGE_DURATIONS["ai-self-photo"],
   };
 }
 

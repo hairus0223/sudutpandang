@@ -1,6 +1,8 @@
 "use client";
 
-import { Printer, Trash2, Sparkles } from "lucide-react";
+import { Printer, Trash2 } from "lucide-react";
+import { btnNeutral, btnPrimary, btnSuccess, galleryBtnRowClass } from "@/lib/galleryUiStyles";
+import { cn } from "@/lib/utils";
 import { useGalleryStore } from "@/stores/useGalleryStore";
 
 type BottomPrintBarProps = {
@@ -11,56 +13,50 @@ export function BottomPrintBar({ onContinue }: BottomPrintBarProps) {
   const {
     selectedForPrint,
     allowedPrint,
+    printVariantByFilename,
     resetSelection,
     packageType,
   } = useGalleryStore();
 
   if (selectedForPrint.length === 0) return null;
 
-  const isAi = packageType === "ai-photo";
+  const isAi = packageType === "ai-self-photo";
+  const aiCount = selectedForPrint.filter(
+    (filename) => printVariantByFilename[filename] === "ai"
+  ).length;
 
   return (
     <div
       data-bottom-bar
-      className="fixed bottom-0 left-0 right-0 z-50
-                 bg-black/90 backdrop-blur
-                 border-t border-white/10"
+      className="fixed bottom-0 left-0 right-0 z-50 border-t-2 border-white/10 bg-black/92 backdrop-blur-md"
     >
-      <div
-        className="mx-auto max-w-[1960px]
-                   px-4 sm:px-6 py-3 sm:py-4
-                   flex flex-wrap items-center justify-between gap-3"
-      >
-        <div className="min-w-0 text-white text-base sm:text-lg">
-          <span className="font-semibold">{selectedForPrint.length}</span> /{" "}
-          {allowedPrint} foto dipilih
-          {isAi && (
-            <span className="mt-0.5 flex items-center gap-1.5 text-sm text-violet-200/90">
-              <Sparkles className="size-3.5 shrink-0" />
-              Hasil AI siap dicetak — pilih yang paling “wow”
+      <div className="mx-auto flex max-w-[1960px] flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6 sm:py-4">
+        <div className="min-w-0 text-base text-white sm:text-lg">
+          <span className="font-semibold text-[#E8C872]">{selectedForPrint.length}</span>
+          <span className="text-white/70"> / {allowedPrint} foto dipilih</span>
+          {isAi && aiCount > 0 ? (
+            <span className="ml-2 text-sm font-medium text-violet-300">
+              ({aiCount} AI)
             </span>
-          )}
+          ) : null}
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-4">
-          <button
-            onClick={resetSelection}
-            className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded text-sm sm:text-base bg-white/10 text-white hover:bg-white/20 transition"
-          >
-            <Trash2 size={18} />
+        <div className={galleryBtnRowClass}>
+          <button type="button" onClick={resetSelection} className={btnNeutral()}>
+            <Trash2 className="size-4" />
             Reset
           </button>
 
           <button
+            type="button"
             onClick={onContinue}
-            className={
-              isAi
-                ? "flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 rounded-lg bg-violet-600 text-white text-base sm:text-lg hover:bg-violet-500 transition"
-                : "flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-3 rounded-lg bg-green-600 text-white text-base sm:text-lg hover:bg-green-500 transition"
-            }
+            className={cn(
+              isAi ? btnPrimary() : btnSuccess(),
+              "px-6 py-3 text-base sm:text-lg"
+            )}
           >
-            <Printer size={20} />
-            {isAi ? "Cetak AI Photo" : "Lanjut Cetak"}
+            <Printer className="size-5" />
+            Lanjut Cetak
           </button>
         </div>
       </div>

@@ -63,6 +63,24 @@ function loadRuntimeConfig() {
   };
 }
 
+function applyDevDefaults(config) {
+  if (app.isPackaged) return config;
+
+  const devConfig = { ...config };
+
+  // MacBook / single-monitor dev: use primary display
+  if (process.env.KIOSK_MONITOR_INDEX == null) {
+    devConfig.monitorIndex = 0;
+  }
+
+  // Windowed mode for easier debugging on laptop
+  if (process.env.KIOSK_DEV_WINDOWED === "true") {
+    devConfig.fullscreen = false;
+  }
+
+  return devConfig;
+}
+
 function createWindow(config) {
   const displays = screen.getAllDisplays();
   const targetDisplay =
@@ -163,10 +181,10 @@ if (!singleInstanceLock) {
 
 app.whenReady().then(() => {
   try {
-    const config = loadRuntimeConfig();
+    const config = applyDevDefaults(loadRuntimeConfig());
     process.env.KIOSK_API_BASE = config.apiBase;
     writeLog(
-      `Kiosk dimulai (${app.isPackaged ? "production" : "development"}), API ${config.apiBase}`
+      `Kiosk dimulai (${app.isPackaged ? "production" : "development"}), API ${config.apiBase}, monitor ${config.monitorIndex}, fullscreen ${config.fullscreen}`
     );
     createWindow(config);
   } catch (error) {
@@ -181,7 +199,7 @@ app.whenReady().then(() => {
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow(loadRuntimeConfig());
+      createWindow(applyDevDefaults(loadRuntimeConfig()));
     }
   });
 });

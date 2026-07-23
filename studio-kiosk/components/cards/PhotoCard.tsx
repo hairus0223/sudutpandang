@@ -3,29 +3,21 @@
 import { CheckSquare, Square } from "lucide-react";
 import { useGalleryStore } from "@/stores/useGalleryStore";
 import { getProcessingStatusLabel } from "@/lib/processingLabels";
-import type { PackageType, ProcessingPhase, ProcessingStatus } from "@/lib/imageTypes";
+import { getPrintVariantLabel } from "@/lib/resolveImageUrl";
+import type { PrintVariant, ProcessingStatus } from "@/lib/imageTypes";
+import { cn } from "@/lib/utils";
 
 type PhotoCardProps = {
   src: string;
   filename: string;
   onClick: () => void;
   processingStatus?: ProcessingStatus;
-  processingPhase?: ProcessingPhase | null;
-  packageType?: PackageType;
   processingError?: string | null;
-  onRemoveBackground?: () => void;
-  removeBackgroundLoading?: boolean;
-  onApplyTheme?: () => void;
-  applyThemeLoading?: boolean;
-  showApplyTheme?: boolean;
   hideFilename?: boolean;
   hidePrintToggle?: boolean;
+  printVariant?: PrintVariant;
   style?: React.CSSProperties;
 };
-
-function canRemoveBackground(status?: ProcessingStatus) {
-  return status === "none" || status === "failed" || status === undefined;
-}
 
 function getStatusClass(status?: ProcessingStatus) {
   switch (status) {
@@ -46,61 +38,58 @@ export function PhotoCard({
   filename,
   onClick,
   processingStatus,
-  processingPhase,
-  packageType = "self-photo",
   processingError,
-  onRemoveBackground,
-  removeBackgroundLoading = false,
-  onApplyTheme,
-  applyThemeLoading = false,
-  showApplyTheme = false,
   hideFilename = false,
   hidePrintToggle = false,
+  printVariant = "original",
   style,
 }: PhotoCardProps) {
-  const { selectedForPrint, togglePrint } = useGalleryStore();
+  const { selectedForPrint, togglePrint, printVariantByFilename } =
+    useGalleryStore();
   const isSelected = selectedForPrint.includes(filename);
-  const statusLabel = getProcessingStatusLabel(processingStatus, {
-    packageType,
-    processingPhase,
-    short: true,
-  });
-  const isActionLoading = removeBackgroundLoading || applyThemeLoading;
-  const showRetry =
-    processingStatus === "failed" &&
-    Boolean(onRemoveBackground) &&
-    !isActionLoading;
-  const showRemoveBg =
-    Boolean(onRemoveBackground) &&
-    canRemoveBackground(processingStatus) &&
-    processingStatus !== "failed" &&
-    !isActionLoading;
-  const showThemeButton =
-    showApplyTheme &&
-    Boolean(onApplyTheme) &&
-    processingStatus !== "pending" &&
-    processingStatus !== "processing" &&
-    !isActionLoading;
+  const activeVariant = printVariantByFilename[filename] ?? printVariant;
+  const statusLabel = getProcessingStatusLabel(processingStatus);
 
   return (
     <div
       className="relative mb-5 break-inside-avoid cursor-pointer group"
       style={{ transform: "translateZ(0)", ...style }}
     >
-      {/* PRINT TOGGLE */}
       {!hidePrintToggle && (
-        <div
-          onClick={() => togglePrint(filename)}
-          className="absolute top-3 left-3 z-20 rounded bg-black/60 p-0.5 backdrop-blur
-                     hover:bg-black/80 transition"
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePrint(filename, printVariant);
+          }}
+          className={cn(
+            "absolute top-3 left-3 z-20 flex size-9 items-center justify-center rounded-xl border-2 backdrop-blur-sm transition active:scale-95",
+            isSelected
+              ? "border-emerald-400 bg-emerald-500/15 text-emerald-200"
+              : "border-white/35 bg-black/55 text-white hover:border-white/55 hover:bg-black/70"
+          )}
+          aria-label={isSelected ? "Batalkan cetak" : "Pilih cetak"}
         >
           {isSelected ? (
-            <CheckSquare className="w-6 h-6 text-green-400" />
+            <CheckSquare className="size-5 text-emerald-300" />
           ) : (
-            <Square className="w-6 h-6 text-white" />
+            <Square className="size-5" />
           )}
-        </div>
+        </button>
       )}
+
+      {isSelected && !hidePrintToggle ? (
+        <div
+          className={cn(
+            "absolute bottom-3 left-3 z-20 rounded-xl border-2 px-2.5 py-1 text-[10px] font-semibold backdrop-blur-sm",
+            activeVariant === "ai"
+              ? "border-violet-400/70 text-violet-100"
+              : "border-[#E8C872]/70 text-[#E8C872]"
+          )}
+        >
+          {getPrintVariantLabel(activeVariant)}
+        </div>
+      ) : null}
 
       {statusLabel && (
         <div
@@ -116,60 +105,6 @@ export function PhotoCard({
         </div>
       )}
 
-      {(showThemeButton || showRemoveBg || showRetry || isActionLoading) && (
-        <div className="absolute bottom-3 left-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-1">
-          {showThemeButton && (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onApplyTheme?.();
-              }}
-              className="rounded-full bg-emerald-600/90 px-3 py-1 text-xs text-white backdrop-blur hover:bg-emerald-500 transition"
-            >
-              Terapkan Tema
-            </button>
-          )}
-
-          {showRemoveBg && (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onRemoveBackground?.();
-              }}
-              className="rounded-full bg-violet-600/90 px-3 py-1 text-xs text-white backdrop-blur hover:bg-violet-500 transition"
-            >
-              Hapus BG
-            </button>
-          )}
-
-          {showRetry && (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onRemoveBackground?.();
-              }}
-              className="rounded-full bg-amber-600/90 px-3 py-1 text-xs text-white backdrop-blur hover:bg-amber-500 transition"
-            >
-              Coba lagi
-            </button>
-          )}
-
-          {isActionLoading && (
-            <div className="rounded-full bg-amber-500/80 px-3 py-1 text-xs text-white backdrop-blur">
-              {applyThemeLoading
-                ? "Menerapkan tema…"
-                : removeBackgroundLoading
-                  ? "Memproses…"
-                  : "Memproses…"}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* FILENAME */}
       {!hideFilename && (
         <div
           className="absolute bottom-3 right-3 z-20 rounded-full bg-black/60
@@ -179,7 +114,6 @@ export function PhotoCard({
         </div>
       )}
 
-      {/* IMAGE */}
       <img
         src={src}
         onClick={onClick}

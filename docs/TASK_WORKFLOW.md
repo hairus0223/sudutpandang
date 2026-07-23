@@ -108,7 +108,7 @@ Search in this order — prefer reuse over creation:
 | Photo grid / tile | `PhotoCard` |
 | Gallery lightbox | `PhotoModal` |
 | Print selection footer | `BottomPrintBar` |
-| Registration / access | `RegisterForm`, `AccessForm` |
+| Registration / access | `SessionKioskClient`, `AccessForm` |
 | Print editor | `PrintCanvas`, `PrintToolbar`, `TemplateSelector` |
 | Session operator UI | `SessionKioskClient` (extend, don't duplicate) |
 | Customer kiosk screens | `kiosk-app/App.jsx` + hooks |
@@ -434,7 +434,7 @@ For each affected feature row in PROJECT_GUIDE, create at least:
 | TC-KA-02 | Main session sync | Operator starts main session | Main screen, preview starts, timer runs |
 | TC-KA-03 | Session end | Operator ends session | End screen, preview stops |
 | TC-KA-04 | Capture countdown | During main session (if capture enabled) | Countdown → shutter sound → latest image |
-| TC-KA-05 | Pas-photo frame | `packageType: pas-photo` | Frame overlay on live preview |
+| TC-KA-05 | Self-photo preview | `packageType: self-photo` | Live preview + countdown during main session |
 
 ### 6.4 End-to-end scenarios (P0)
 

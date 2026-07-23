@@ -28,6 +28,8 @@ export function getThemeAssetSvg(themeId) {
       return natureForestSvg();
     case "golden-hour":
       return goldenHourSvg();
+    case "wild-west":
+      return wildWestSvg();
     default:
       return null;
   }
@@ -333,6 +335,44 @@ function goldenHourSvg() {
 </svg>`;
 }
 
+/** @returns {string} */
+function wildWestSvg() {
+  return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7c2d12"/>
+      <stop offset="35%" stop-color="#ea580c"/>
+      <stop offset="70%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#fef3c7"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="78%" cy="28%" r="35%">
+      <stop offset="0%" stop-color="#fef9c3" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#fef9c3" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#a16207" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#78350f" stop-opacity="0.85"/>
+    </linearGradient>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#sky)"/>
+  <rect width="${W}" height="${H}" fill="url(#sun)"/>
+  <circle cx="1520" cy="300" r="88" fill="#fde68a" opacity="0.85"/>
+  <rect x="0" y="720" width="${W}" height="560" fill="url(#ground)"/>
+  <rect x="80" y="420" width="420" height="320" fill="#78350f" opacity="0.85"/>
+  <polygon points="80,420 290,300 500,420" fill="#57534e"/>
+  <rect x="120" y="500" width="80" height="120" fill="#292524" opacity="0.7"/>
+  <rect x="280" y="520" width="90" height="100" fill="#292524" opacity="0.55"/>
+  <rect x="1180" y="480" width="360" height="260" fill="#92400e" opacity="0.8"/>
+  <polygon points="1180,480 1360,380 1540,480" fill="#44403c"/>
+  <rect x="1240" y="560" width="70" height="110" fill="#1c1917" opacity="0.65"/>
+  <rect x="1420" y="580" width="70" height="90" fill="#1c1917" opacity="0.5"/>
+  <ellipse cx="1680" cy="860" rx="110" ry="140" fill="#78350f" opacity="0.75"/>
+  <ellipse cx="1680" cy="820" rx="95" ry="70" fill="#57534e" opacity="0.55"/>
+  <circle cx="220" cy="860" r="95" fill="none" stroke="#57534e" stroke-width="14" opacity="0.45"/>
+  <rect x="0" y="980" width="${W}" height="300" fill="#713f12" opacity="0.35"/>
+</svg>`;
+}
+
 export const WC2026_THEME_IDS = [
   "wc2026-stadium-night",
   "wc2026-celebration",
@@ -347,5 +387,7 @@ export const CLASSIC_THEME_IDS = [
   "nature-forest",
   "golden-hour",
 ];
+
+export const AI_SELF_PHOTO_THEME_IDS = ["wild-west"];
 
 export const THEME_ASSET_SIZE = { width: W, height: H };

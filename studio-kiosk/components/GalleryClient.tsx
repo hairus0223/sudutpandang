@@ -3,53 +3,65 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNewPhotoSocket } from "@/hooks/useNewPhotoSocket";
 import { usePhotoProcessedSocket } from "@/hooks/usePhotoProcessedSocket";
-import { useImageProcessing } from "@/hooks/useImageProcessing";
-import { countProcessingImages } from "@/lib/processingLabels";
-import { useThemes } from "@/hooks/useThemes";
+import { useAiGenerationSocket } from "@/hooks/useAiGenerationSocket";
 import { useRouter, useSearchParams } from "next/navigation";
-import { fetchImages, uploadImage } from "@/services/image.service";
+import { fetchImages } from "@/services/image.service";
+import { requestAiGenerate } from "@/services/ai.service";
 import { useGalleryStore } from "@/stores/useGalleryStore";
-import { PhotoCard } from "@/components/cards/PhotoCard";
-import { InfoCard } from "@/components/cards/InfoCard";
+import { GallerySelfPhotoGrid } from "@/components/gallery/GallerySelfPhotoGrid";
 import { PhotoModal } from "@/components/modals/PhotoModal";
-import { GalleryAiToolbar } from "@/components/gallery/GalleryAiToolbar";
 import { BottomPrintBar } from "@/components/bottom/BottomPrintBar";
 import { ScrollToTop } from "@/components/ui/ScrollToTop";
+import { GallerySkeleton } from "@/components/gallery/GallerySkeleton";
+import { GalleryAiWizard } from "@/components/gallery/GalleryAiWizard";
+import { ConnectionBanner } from "@/components/kiosk/ConnectionBanner";
 import { API_BASE_URL } from "@/lib/env";
-import {
-  hasSubjectVariant,
-  resolveGalleryPreviewUrl,
-  type GalleryPreviewVariant,
-} from "@/lib/resolveImageUrl";
+import { resolveGalleryPreviewUrl } from "@/lib/resolveImageUrl";
 import { PRINT_TEMPLATES } from "@/lib/printTemplates";
-import { configurePasPhotoPrintDefaults } from "@/lib/passportPrint";
-import { normalizeLookId } from "@/lib/lookPresets";
-import { ArrowLeft } from "lucide-react";
+import { useSocketStatus } from "@/hooks/useSocketStatus";
+import { useToast } from "@/components/ui/ToastProvider";
+import { getPackageLabel } from "@/lib/packageTypes";
+import type { PackageType } from "@/lib/imageTypes";
+import { ArrowLeft, ImageOff, Sparkles } from "lucide-react";
 
 export default function GalleryClient() {
   const router = useRouter();
   const params = useSearchParams();
   const user = params.get("user") ?? "";
+  const { toast } = useToast();
+  const connected = useSocketStatus(Boolean(user));
 
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const [sessionThemeId, setSessionThemeId] = useState<string | undefined>();
-  const [previewVariant, setPreviewVariant] =
-    useState<GalleryPreviewVariant>("auto");
-  const [uploading, setUploading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [generatingAi, setGeneratingAi] = useState(false);
+  const [pendingRevealImageId, setPendingRevealImageId] = useState<string | null>(
+    null
+  );
+  const [aiActivePhase, setAiActivePhase] = useState<string | null>(null);
+  const [customerName, setCustomerName] = useState("");
   const {
     images,
     setImages,
     setAllowedPrint,
     setPrintTemplate,
     setPackageType,
-    setPrintMode,
-    setSheetRecipe,
+    setAiQuota,
+    setSessionTheme,
     loadPersistedSheetTransforms,
+    selectedForPrint,
+    printVariantByFilename,
+    selectedImageIds,
+    toggleGallerySelection,
+    allowedPrint,
     packageType,
-    setSessionLookId,
+    aiGenerateRemaining,
+    aiGenerateLimit,
+    aiThemeId,
+    aiThemeLabel,
+    aiThemeLocked,
+    aiThemePreviewUrl,
+    aiThemeType,
   } = useGalleryStore();
-
-  const { themeGroups, loading: themesLoading } = useThemes();
 
   const refreshGallery = useCallback(async () => {
     if (!user) return;
@@ -58,48 +70,11 @@ export default function GalleryClient() {
       setImages(res.images);
     } catch (err) {
       console.error(err);
+      toast("Gagal memuat galeri. Periksa koneksi API.", "error");
+    } finally {
+      setLoading(false);
     }
-  }, [user, setImages]);
-
-  const handleProcessingError = useCallback((message: string) => {
-    alert(message);
-  }, []);
-
-  const {
-    selectedThemeId,
-    setSelectedThemeId,
-    runRemoveBackground,
-    runApplyTheme,
-    isProcessing,
-    isBusy,
-  } = useImageProcessing({
-    user,
-    enabled: Boolean(user),
-    initialThemeId: sessionThemeId,
-    onRefresh: refreshGallery,
-    onError: handleProcessingError,
-  });
-
-  const handleUpload = useCallback(
-    async (file: File) => {
-      if (!user || uploading || isBusy) return;
-
-      setUploading(true);
-      try {
-        await uploadImage(user, file);
-        await refreshGallery();
-      } catch (err) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : "Upload foto gagal. Silakan coba lagi.";
-        alert(message);
-      } finally {
-        setUploading(false);
-      }
-    },
-    [user, uploading, isBusy, refreshGallery]
-  );
+  }, [user, setImages, toast]);
 
   useEffect(() => {
     void refreshGallery();
@@ -126,149 +101,238 @@ export default function GalleryClient() {
     },
   });
 
-  const processingCount = countProcessingImages(images);
-
-  useEffect(() => {
-    if (!user || processingCount === 0) return;
-
-    const timer = window.setInterval(() => {
+  useAiGenerationSocket({
+    user,
+    enabled: Boolean(user) && packageType === "ai-self-photo",
+    onProgress: (payload) => {
+      setAiActivePhase(payload.phase ?? "processing");
       void refreshGallery();
-    }, 4000);
-
-    return () => window.clearInterval(timer);
-  }, [user, processingCount, refreshGallery]);
+    },
+    onComplete: (payload) => {
+      setAiActivePhase(null);
+      if (payload.status === "ready") {
+        toast("Hasil AI siap!", "success");
+        setPendingRevealImageId(payload.imageId);
+      } else if (payload.error) {
+        toast(payload.error, "error");
+      }
+      void refreshGallery();
+    },
+  });
 
   useEffect(() => {
     if (!user) return;
 
     fetch(`${API_BASE_URL}/api/print-config/${user}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("print_config_failed");
+        return r.json();
+      })
       .then((d) => {
         setAllowedPrint(d.allowedPrint);
-        const resolvedPackageType = d.packageType || "self-photo";
-        setPackageType(resolvedPackageType);
-
-        if (d.themeId) {
-          setSessionThemeId(d.themeId);
-          setSelectedThemeId(d.themeId);
-        }
-
-        setSessionLookId(normalizeLookId(d.lookId, resolvedPackageType));
-
-        if (resolvedPackageType === "ai-photo") {
-          setPreviewVariant("themed");
-        }
-
-        configurePasPhotoPrintDefaults({
-          packageType: resolvedPackageType,
-          passportSizeId: d.passportSizeId,
-          setPrintMode,
-          setSheetRecipe,
+        setPackageType((d.packageType ?? "self-photo") as PackageType);
+        setAiQuota({
+          limit: d.aiGenerateLimit ?? 0,
+          used: d.aiGenerateUsed ?? 0,
+          remaining: d.aiGenerateRemaining ?? 0,
         });
+        setSessionTheme({
+          aiThemeId: d.aiThemeId ?? null,
+          aiThemeLabel: d.aiThemeLabel ?? null,
+          aiThemeLocked: Boolean(d.aiThemeLocked),
+          aiThemePreviewUrl: d.aiThemePreviewUrl ?? null,
+          aiThemeType: d.aiThemeType ?? null,
+        });
+        if (d.name) setCustomerName(String(d.name));
 
         const tpl = PRINT_TEMPLATES.find((t) => t.id === d.templateId);
         if (tpl) {
           setPrintTemplate(tpl);
         }
+      })
+      .catch(() => {
+        toast("Konfigurasi cetak tidak ditemukan.", "error");
       });
   }, [
     user,
     setAllowedPrint,
     setPackageType,
+    setAiQuota,
+    setSessionTheme,
     setPrintTemplate,
-    setPrintMode,
-    setSheetRecipe,
-    setSelectedThemeId,
-    setSessionLookId,
+    toast,
   ]);
 
+  const isAiPackage = packageType === "ai-self-photo";
+
   return (
-    <main className="p-3 sm:p-4 pb-28 sm:pb-32 max-w-[1960px] mx-auto min-h-screen">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <button
-          onClick={() => router.push("/")}
-          className="flex items-center gap-2 text-sm sm:text-base text-white/90 hover:text-white"
-        >
-          <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" /> Kembali
-        </button>
+    <>
+      <ConnectionBanner connected={connected} />
+      <main className="p-3 sm:p-4 pb-28 sm:pb-32 max-w-[1960px] mx-auto min-h-screen">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <button
+            onClick={() => router.push("/")}
+            className="flex items-center gap-2 text-sm sm:text-base text-white/90 hover:text-white"
+          >
+            <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" /> Kembali
+          </button>
 
-        <span className="text-white/50 text-sm sm:text-base">
-          Total Foto: <b>{images.length}</b>
-        </span>
-      </div>
+          <div className="flex flex-wrap items-center gap-3 text-sm sm:text-base text-white/50">
+            {user && (
+              <span>
+                Customer: <b className="text-white/80">{customerName || user}</b>
+              </span>
+            )}
+            <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-xs text-white/70">
+              {getPackageLabel(packageType)}
+            </span>
+            {isAiPackage && aiThemeLabel ? (
+              <span className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs text-violet-200">
+                {aiThemeLabel}
+                {aiThemeLocked ? " 🔒" : ""}
+              </span>
+            ) : null}
+            {isAiPackage && aiGenerateLimit > 0 ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/15 px-2.5 py-0.5 text-xs text-violet-200">
+                <Sparkles className="size-3" />
+                AI {aiGenerateRemaining}/{aiGenerateLimit} tersisa
+              </span>
+            ) : null}
+            <span>
+              Total: <b className="text-white/80">{images.length}</b>
+            </span>
+            {selectedImageIds.length > 0 ? (
+              <span className={isAiPackage ? "text-violet-300" : "text-[#E8C872]"}>
+                {selectedImageIds.length} foto terpilih
+              </span>
+            ) : null}
+            {selectedForPrint.length > 0 && (
+              <span className="text-[#E8C872]">
+                {selectedForPrint.length}/{allowedPrint} dipilih
+                {selectedForPrint.some(
+                  (f) => printVariantByFilename[f] === "ai"
+                ) ? (
+                  <span className="ml-1 text-violet-300">
+                    (
+                    {
+                      selectedForPrint.filter(
+                        (f) => printVariantByFilename[f] === "ai"
+                      ).length
+                    }{" "}
+                    AI)
+                  </span>
+                ) : null}
+              </span>
+            )}
+          </div>
+        </div>
 
-      {user && (
-        <GalleryAiToolbar
-          packageType={packageType}
-          sessionThemeId={sessionThemeId}
-          selectedThemeId={selectedThemeId}
-          onThemeChange={setSelectedThemeId}
-          onUpload={handleUpload}
-          uploading={uploading}
-          previewVariant={previewVariant}
-          onPreviewVariantChange={setPreviewVariant}
-          themeGroups={themeGroups}
-          themesLoading={themesLoading}
-          isBusy={isBusy || uploading}
-          processingCount={processingCount}
+        {!user && (
+          <div className="flex flex-col items-center gap-3 py-20 text-white/50">
+            <ImageOff className="size-10" />
+            <p>Masukkan nama customer dari beranda → Akses Foto</p>
+          </div>
+        )}
+
+        {user && loading && <GallerySkeleton />}
+
+        {user && !loading && images.length === 0 && (
+          <div className="flex flex-col items-center gap-3 py-20 text-center text-white/50">
+            <ImageOff className="size-10" />
+            <p>Belum ada foto untuk sesi ini.</p>
+            <p className="text-sm">Capture dari layar sesi operator akan muncul otomatis.</p>
+          </div>
+        )}
+
+        {user && !loading && images.length > 0 && isAiPackage ? (
+          <GalleryAiWizard
+            user={user}
+            userName={customerName || user}
+            images={images}
+            aiThemeId={aiThemeId}
+            aiThemeLabel={aiThemeLabel}
+            aiThemeLocked={aiThemeLocked}
+            aiThemePreviewUrl={aiThemePreviewUrl}
+            aiThemeType={aiThemeType}
+            aiGenerateRemaining={aiGenerateRemaining}
+            aiGenerateLimit={aiGenerateLimit}
+            activePhase={aiActivePhase}
+            onOpenPhoto={setActiveIndex}
+            onRefresh={() => void refreshGallery()}
+            onQuotaChange={(remaining, used) =>
+              setAiQuota({
+                limit: aiGenerateLimit,
+                used,
+                remaining,
+              })
+            }
+            pendingRevealImageId={pendingRevealImageId}
+            onRevealDismiss={() => setPendingRevealImageId(null)}
+          />
+        ) : null}
+
+        {user && !loading && images.length > 0 && !isAiPackage ? (
+          <GallerySelfPhotoGrid
+            userName={customerName || user}
+            images={images}
+            onOpenPhoto={setActiveIndex}
+          />
+        ) : null}
+
+        <PhotoModal
+          open={activeIndex !== null}
+          index={activeIndex}
+          images={images}
+          onClose={() => setActiveIndex(null)}
+          onChange={setActiveIndex}
+          aiMode={isAiPackage}
+          selectedImageIds={selectedImageIds}
+          onToggleGallerySelection={toggleGallerySelection}
+          generating={generatingAi}
+          onGenerateAi={
+            isAiPackage && user
+              ? async (imageId) => {
+                  setGeneratingAi(true);
+                  try {
+                    const result = await requestAiGenerate({ user, imageId });
+                    if (result.quota) {
+                      setAiQuota({
+                        limit: aiGenerateLimit,
+                        used: result.quota.used,
+                        remaining: result.quota.remaining,
+                      });
+                    }
+                    if (result.status === "ready") {
+                      toast("Hasil AI siap!", "success");
+                      setPendingRevealImageId(imageId);
+                    } else {
+                      toast("Generate AI dimulai…", "default");
+                    }
+                    await refreshGallery();
+                  } catch (err) {
+                    const code =
+                      err instanceof Error ? err.message : "ai_generate_failed";
+                    toast(
+                      code === "quota_exhausted"
+                        ? "Kuota AI habis."
+                        : "Gagal memulai generate AI.",
+                      "error"
+                    );
+                  } finally {
+                    setGeneratingAi(false);
+                  }
+                }
+              : undefined
+          }
         />
-      )}
 
-      <div className="columns-1 sm:columns-2 xl:columns-3 2xl:columns-4 gap-3 sm:gap-4">
-        <InfoCard userName={user} />
-
-        {images.map((img, index) => {
-          const imageId = img.imageId ?? "";
-          const processing = isProcessing(imageId);
-
-          return (
-            <PhotoCard
-              key={img.filename}
-              src={resolveGalleryPreviewUrl(img, packageType, previewVariant)}
-              filename={img.filename}
-              processingStatus={img.processingStatus}
-              processingPhase={img.processingPhase}
-              packageType={packageType}
-              processingError={img.processingError}
-              onRemoveBackground={
-                img.imageId
-                  ? () => void runRemoveBackground(img.imageId!)
-                  : undefined
-              }
-              removeBackgroundLoading={processing}
-              showApplyTheme={hasSubjectVariant(img)}
-              onApplyTheme={
-                img.imageId
-                  ? () => void runApplyTheme(img.imageId!)
-                  : undefined
-              }
-              applyThemeLoading={processing}
-              onClick={() => setActiveIndex(index)}
-            />
-          );
-        })}
-      </div>
-
-      <PhotoModal
-        open={activeIndex !== null}
-        index={activeIndex}
-        images={images}
-        packageType={packageType}
-        previewVariant={previewVariant}
-        onPreviewVariantChange={setPreviewVariant}
-        onClose={() => setActiveIndex(null)}
-        onChange={setActiveIndex}
-        onRemoveBackground={(imageId) => void runRemoveBackground(imageId)}
-        onApplyTheme={(imageId) => void runApplyTheme(imageId)}
-        isProcessing={isProcessing}
-      />
-
-      <BottomPrintBar
-        onContinue={() =>
-          router.push(`/print?user=${encodeURIComponent(user)}`)
-        }
-      />
-      <ScrollToTop />
-    </main>
+        <BottomPrintBar
+          onContinue={() =>
+            router.push(`/print?user=${encodeURIComponent(user)}`)
+          }
+        />
+        <ScrollToTop />
+      </main>
+    </>
   );
 }

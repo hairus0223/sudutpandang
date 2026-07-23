@@ -54,6 +54,22 @@ export function getSubjectPath(userDir, imageId) {
  * @param {string} userDir
  * @param {string} imageId
  */
+export function getSegmentMaskPath(userDir, imageId) {
+  return path.join(getProcessedDir(userDir, imageId), "segment-mask.png");
+}
+
+/**
+ * @param {string} userDir
+ * @param {string} imageId
+ */
+export function getEditMaskPath(userDir, imageId) {
+  return path.join(getProcessedDir(userDir, imageId), "edit-mask.png");
+}
+
+/**
+ * @param {string} userDir
+ * @param {string} imageId
+ */
 export function getPassportPath(userDir, imageId) {
   return path.join(getProcessedDir(userDir, imageId), "passport.png");
 }
@@ -64,6 +80,54 @@ export function getPassportPath(userDir, imageId) {
  */
 export function getThemedPath(userDir, imageId) {
   return path.join(getProcessedDir(userDir, imageId), "themed.png");
+}
+
+/**
+ * @param {string} userDir
+ * @param {string} imageId
+ * @param {string} themeId
+ */
+export function getAiThemedPath(userDir, imageId, themeId) {
+  return path.join(getProcessedDir(userDir, imageId), `ai-${themeId}.jpg`);
+}
+
+/**
+ * @param {string} imageId
+ * @param {string} themeId
+ */
+export function getAiThemedRelativePath(imageId, themeId) {
+  return path
+    .join("processed", imageId, `ai-${themeId}.jpg`)
+    .split(path.sep)
+    .join("/");
+}
+
+/**
+ * @param {string} userDir
+ * @param {string} imageId
+ * @param {string} themeId
+ * @param {string} relativePath
+ */
+export function updateAiVariantInMeta(userDir, imageId, themeId, relativePath) {
+  const existing = readMeta(userDir, imageId) || { imageId, variants: {} };
+  const baseVariants =
+    typeof existing.variants === "object" && existing.variants
+      ? existing.variants
+      : {};
+
+  const aiVariants =
+    typeof baseVariants.ai === "object" && baseVariants.ai ? baseVariants.ai : {};
+
+  writeMeta(userDir, imageId, {
+    ...existing,
+    variants: {
+      ...baseVariants,
+      ai: {
+        ...aiVariants,
+        [themeId]: relativePath,
+      },
+    },
+  });
 }
 
 /**

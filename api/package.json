@@ -1,6 +1,10 @@
 {
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "prestart": "node scripts/check-node-version.js",
     "start": "node server.js",
     "generate:wc2026-assets": "node scripts/generate-wc2026-assets.js",
     "generate:classic-assets": "node scripts/generate-classic-assets.js",
@@ -8,12 +12,17 @@
     "validate:theme-assets": "node scripts/validate-theme-assets.js",
     "event:preflight": "node scripts/validate-theme-assets.js --event",
     "smoke-test": "node scripts/smoke-test.js",
+    "validate:ai-theme-previews": "node scripts/validate-ai-theme-previews.js",
     "smoke-test:promo-products": "node scripts/promo-tools-products-smoke.js",
-    "smoke-test:promo-orders": "node scripts/promo-tools-orders-smoke.js"
+    "smoke-test:promo-orders": "node scripts/promo-tools-orders-smoke.js",
+    "smoke-test:ai-research": "node scripts/ai-theme-research-smoke.js",
+    "smoke-test:person-segmentation": "node scripts/person-segmentation-smoke.js",
+    "smoke-test:masked-edit": "node scripts/masked-edit-smoke.js",
+    "smoke-test:ai-hybrid": "node scripts/ai-hybrid-pipeline-smoke.js",
+    "smoke-test:face-refine": "node scripts/face-refine-smoke.js"
   },
   "dependencies": {
     "@imgly/background-removal-node": "^1.4.5",
-    "child_process": "^1.0.2",
     "chokidar": "^5.0.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",

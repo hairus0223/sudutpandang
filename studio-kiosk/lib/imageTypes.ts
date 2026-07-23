@@ -3,22 +3,50 @@ export type ProcessingStatus =
   | "pending"
   | "processing"
   | "ready"
-  | "failed";
+  | "failed"
+  | "queued";
 
-export type ProcessingPhase =
-  | "remove-bg"
-  | "apply-theme"
-  | "apply-passport-bg";
+export type ProcessingPhase = null | string;
 
-export type ThemeBackgroundSource = "asset" | "cache" | "api" | "gradient";
+export type PackageType = "self-photo" | "ai-self-photo";
 
-export type PackageType = "self-photo" | "pas-photo" | "ai-photo";
+export type PrintVariant = "original" | "ai";
+
+export type AiThemeType = "scene" | "transform";
+
+export type AiTheme = {
+  id: string;
+  label: string;
+  description: string;
+  previewColor: string;
+  type: AiThemeType;
+  previewUrl: string | null;
+  previewBeforeUrl?: string | null;
+  previewSource?: "studio" | "bundled";
+  seasonal?: boolean;
+};
+
+export type AiSelectionEntry = {
+  imageId?: string;
+  themeId?: string;
+  jobId?: string;
+  status?: ProcessingStatus;
+  phase?: ProcessingPhase;
+  error?: string | null;
+  outputPath?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type SessionThemeInfo = {
+  aiThemeId: string | null;
+  aiThemeLabel: string | null;
+  aiThemeLocked: boolean;
+};
 
 export type ImageVariants = {
   original?: string;
-  subject?: string;
-  passport?: string;
-  themed?: string;
+  ai?: Record<string, string>;
 };
 
 export type GalleryImageData = {
@@ -26,77 +54,39 @@ export type GalleryImageData = {
   url: string;
   imageId?: string;
   processingStatus?: ProcessingStatus;
-  processingPhase?: ProcessingPhase | null;
+  processingPhase?: ProcessingPhase;
   processingError?: string | null;
-  themeBackgroundSource?: ThemeBackgroundSource | null;
-  /** Look already baked into themed.png — skip CSS look filter on print/preview. */
-  bakedLookId?: string | null;
   variants?: ImageVariants;
+  aiSelection?: AiSelectionEntry | null;
 };
 
 export type FetchImagesResponse = {
   images: GalleryImageData[];
 };
 
-export type ImageStatusResponse = {
-  imageId: string;
+export type AiThemesResponse = {
+  themes: AiTheme[];
+};
+
+export type AiQuotaSnapshot = {
+  limit: number;
+  used: number;
+  remaining: number;
+  pending?: number;
+  available?: number;
+};
+
+export type AiGenerateResponse = {
+  jobId: string;
   status: ProcessingStatus;
-  processingPhase?: ProcessingPhase | null;
-  variants: ImageVariants;
-  error: string | null;
-  themeBackgroundSource?: ThemeBackgroundSource | null;
-  bakedLookId?: string | null;
-};
-
-export type ThemeCategory = string;
-
-export type ThemeCategoryKind = "event" | "permanent";
-
-export type ThemeCategoryMeta = {
-  id: string;
-  label: string;
-  kind: ThemeCategoryKind;
-  sortOrder: number;
-  pickerCompact: boolean;
-  themeCount: number;
-  assetsReady: boolean;
-  missingCount: number;
-};
-
-export type ThemeOption = {
-  id: string;
-  label: string;
-  category: ThemeCategory;
-  previewGradient: string;
-  hasAsset: boolean;
-  assetAvailable: boolean;
-};
-
-export type ThemeGroup = ThemeCategoryMeta & {
-  themes: ThemeOption[];
-};
-
-export type FetchThemesResponse = {
-  defaultThemeId: string;
-  themes: ThemeOption[];
-  categories?: ThemeCategoryMeta[];
-};
-
-export type ProcessImageResponse = {
-  success: boolean;
   imageId: string;
-  status: string;
-};
-
-export type UploadImageResponse = {
-  success: boolean;
-  imageId: string;
-  originalUrl: string;
-  status: string;
-};
-
-export type PollImageStatusOptions = {
-  intervalMs?: number;
-  maxMs?: number;
-  signal?: AbortSignal;
+  themeId: string;
+  phase?: ProcessingPhase;
+  aiUrl?: string | null;
+  outputPath?: string | null;
+  error?: string | null;
+  quota?: AiQuotaSnapshot;
+  aiThemeId?: string | null;
+  aiThemeLabel?: string | null;
+  aiThemeLocked?: boolean;
 };

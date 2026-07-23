@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "@/lib/env";
+import type { PackageType } from "@/lib/packageTypes";
 
-export type PackageType = "self-photo" | "pas-photo" | "ai-photo";
+export type { PackageType };
 
 export type Session = {
   user: string;
@@ -27,6 +28,22 @@ export type KioskConfig = {
   captureCountdownSeconds: number;
   trialDurationSeconds: number;
   packageDurations: Record<PackageType, number>;
+  packages?: PackageType[];
+  aiSelfPhoto?: {
+    enabled: boolean;
+    openaiConfigured?: boolean;
+    defaultDurationMinutes?: number;
+  };
+};
+
+export type AiQuotaResponse = {
+  user: string;
+  packageType: PackageType;
+  peopleCount: number;
+  aiGenerateLimit: number;
+  aiGenerateUsed: number;
+  aiGenerateRemaining: number;
+  aiEnabled: boolean;
 };
 
 async function postJson<T>(url: string, body?: unknown): Promise<T> {
@@ -51,7 +68,7 @@ export async function startSession(payload: {
   user: string;
   peopleCount: number;
   duration: number;
-  packageType: PackageType;
+  packageType?: PackageType;
 }): Promise<Session> {
   const data = await postJson<{ session: Session }>(
     `${API_BASE_URL}/api/session/start`,
@@ -96,7 +113,7 @@ export async function trialSkip(user: string): Promise<void> {
 export async function mainStart(
   user: string,
   durationSeconds: number,
-  packageType: PackageType
+  packageType: PackageType = "self-photo"
 ): Promise<KioskStartResponse> {
   return postJson<KioskStartResponse>(`${API_BASE_URL}/api/kiosk/main-start`, {
     user,
@@ -105,15 +122,52 @@ export async function mainStart(
   });
 }
 
+const DEFAULT_PACKAGE_DURATIONS: Record<PackageType, number> = {
+  "self-photo": 10,
+  "ai-self-photo": 12,
+};
+
 export async function getKioskConfig(): Promise<KioskConfig> {
   const res = await fetch(`${API_BASE_URL}/api/kiosk-config`, { cache: "no-store" });
   if (!res.ok) throw new Error("kiosk_config_failed");
-  return res.json();
+  const data = (await res.json()) as Partial<KioskConfig>;
+  return {
+    sessionDurationMinutes: data.sessionDurationMinutes ?? 10,
+    captureCountdownSeconds: data.captureCountdownSeconds ?? 3,
+    trialDurationSeconds: data.trialDurationSeconds ?? 60,
+    packageDurations: {
+      "self-photo":
+        data.packageDurations?.["self-photo"] ??
+        data.sessionDurationMinutes ??
+        DEFAULT_PACKAGE_DURATIONS["self-photo"],
+      "ai-self-photo":
+        data.packageDurations?.["ai-self-photo"] ??
+        DEFAULT_PACKAGE_DURATIONS["ai-self-photo"],
+    },
+    packages: data.packages,
+    aiSelfPhoto: data.aiSelfPhoto,
+  };
 }
 
 export function getPackageDurationMinutes(
   packageType: PackageType,
   packageDurations: Record<PackageType, number>
 ): number {
-  return packageDurations[packageType] ?? packageDurations["self-photo"] ?? 10;
+  return (
+    packageDurations[packageType] ??
+    DEFAULT_PACKAGE_DURATIONS[packageType] ??
+    DEFAULT_PACKAGE_DURATIONS["self-photo"]
+  );
+}
+
+export async function fetchAiQuota(user: string): Promise<AiQuotaResponse> {
+  const res = await fetch(`${API_BASE_URL}/api/ai-quota/${encodeURIComponent(user)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error("ai_quota_failed");
+  return res.json() as Promise<AiQuotaResponse>;
+}
+
+export async function triggerKioskCapture(user: string): Promise<void> {
+  await postJson(`${API_BASE_URL}/api/kiosk/trigger-capture`, { user });
 }

@@ -17,7 +17,7 @@ const FILTERS: { id: PhotoFilter; label: string }[] = [
 ];
 
 export function PrintFilterPanel({ images }: { images: ImageData[] }) {
-  const { photoTransforms, setPhotoTransform, packageType } = useGalleryStore();
+  const { photoTransforms, setPhotoTransform } = useGalleryStore();
 
   const activeFilter = useMemo(() => {
     if (!images.length) return "none" as PhotoFilter;
@@ -28,11 +28,6 @@ export function PrintFilterPanel({ images }: { images: ImageData[] }) {
     if (!images.length) return 1;
     return photoTransforms[images[0].filename]?.intensity ?? 1;
   }, [images, photoTransforms]);
-
-  const bakedCount = useMemo(
-    () => images.filter((img) => img.bakedLookId && img.variants?.themed).length,
-    [images]
-  );
 
   const applyFilter = (filter: PhotoFilter) => {
     images.forEach((img) =>
@@ -48,26 +43,9 @@ export function PrintFilterPanel({ images }: { images: ImageData[] }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {packageType === "ai-photo" && (
-        <div className="rounded-lg border border-violet-400/30 bg-violet-500/15 px-3 py-2.5 text-xs leading-relaxed text-violet-100">
-          <p className="font-semibold tracking-wide text-violet-50">
-            Hasil AI Photo
-          </p>
-          <p className="mt-1 text-violet-100/80">
-            Look sudah menyatu di file bertema
-            {bakedCount > 0 ? ` (${bakedCount} foto)` : ""}. Filter ekstra opsional —
-            jangan terlalu keras agar tetap natural.
-          </p>
-        </div>
-      )}
-
       <PanelSection
         title="Filter foto"
-        description={
-          packageType === "ai-photo"
-            ? "Sentuhan akhir sebelum cetak — keep it subtle"
-            : "Berlaku untuk semua foto di halaman cetak"
-        }
+        description="Berlaku untuk semua foto di halaman cetak"
       >
         <div className="grid grid-cols-2 gap-1.5">
           {FILTERS.map((f) => (

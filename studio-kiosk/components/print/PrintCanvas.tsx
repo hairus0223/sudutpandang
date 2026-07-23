@@ -2,13 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGalleryStore, PhotoTransform } from "@/stores/useGalleryStore";
-import { LOOK_PRINT_INTENSITY, lookIdToPhotoFilter } from "@/lib/lookPresets";
 import { chunkPhotos } from "@/utils/printChunk";
 import { draw4RLayout } from "./canvas/draw4Rlayout";
 import type { PrintTemplate } from "@/lib/printTemplates";
 import { loadBrandingLogo } from "@/utils/loadBrandingLogo";
 import { useCanvasPanZoomPro } from "@/stores/useCanvasPanZoom";
-import { getPhotoSizePreset } from "@/lib/photoSizes";
 import { autoCenterTransform } from "@/utils/autoCenterPreset";
 import { autoCenterFromFaces } from "@/utils/autoCenterFromFaces";
 import { detectFaces } from "@/utils/faceDetect";
@@ -23,11 +21,21 @@ import { buildSlotTransformKey } from "@/lib/slotTransformKey";
 import { buildSheetSlotDraws } from "@/utils/sheetRender";
 import { packSheetRecipe } from "@/utils/sheetLayoutEngine";
 import type { ImageData } from "@/stores/useGalleryStore";
+import { PrintPreviewChrome } from "./PrintPreviewChrome";
+import { PrintPageStrip } from "./editor/PrintPageStrip";
 
 const SHEET_DISPLAY_MAX_WIDTH = 920;
 
 export function PrintCanvas({ images, isPrintMode = false }: { images: ImageData[]; isPrintMode?: boolean }) {
-    const { printTemplate, printMode, sheetRecipe } = useGalleryStore();
+    const printTemplate = useGalleryStore((s) => s.printTemplate);
+    const printMode = useGalleryStore((s) => s.printMode);
+    const sheetRecipe = useGalleryStore((s) => s.sheetRecipe);
+
+    const chunkSize = printTemplate.id === "4R_FULL" ? 1 : 2;
+    const pages = useMemo(
+        () => chunkPhotos(images, chunkSize),
+        [images, chunkSize]
+    );
 
     if (printMode === "sheet") {
         if (!images.length) {
@@ -47,17 +55,24 @@ export function PrintCanvas({ images, isPrintMode = false }: { images: ImageData
         );
     }
 
-    const chunkSize =
-        printTemplate.id === "4R_FULL"
-            ? 1
-            : 2;
-
-    const pages = chunkPhotos(images, chunkSize);
-
     return (
-        <div className="flex flex-col gap-10">
+        <div className="flex w-full flex-col gap-5 sm:gap-6">
+            <PrintPageStrip pageCount={pages.length} />
             {pages.map((page, index) => (
-                <CanvasPage key={index} images={page} template={printTemplate} isPrintMode={isPrintMode} />
+                <div
+                    key={page.map((p) => p.filename).join("|")}
+                    id={`print-page-${index}`}
+                    className="scroll-mt-3 w-full"
+                >
+                    <CanvasPage
+                        images={page}
+                        template={printTemplate}
+                        isPrintMode={isPrintMode}
+                        pageIndex={index}
+                        pageCount={pages.length}
+                        compact={index > 0 && pages.length > 1}
+                    />
+                </div>
             ))}
         </div>
     );
@@ -69,11 +84,17 @@ export function PrintCanvas({ images, isPrintMode = false }: { images: ImageData
 function CanvasPage({
     images,
     template,
-    isPrintMode = false,  // <-- tambahkan prop
+    isPrintMode = false,
+    pageIndex = 0,
+    pageCount = 1,
+    compact = false,
 }: {
     images: ImageData[];
     template: PrintTemplate;
     isPrintMode?: boolean;
+    pageIndex?: number;
+    pageCount?: number;
+    compact?: boolean;
 }) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -95,16 +116,32 @@ function CanvasPage({
         offsetX: 0,
         offsetY: 0,
     });
-    const lookSeededRef = useRef(new Set<string>());
 
-    const { photoTransforms, setPhotoTransform, faceBoxes, setFaceBoxes, sessionLookId } =
-        useGalleryStore();
+    const autoCenteredRef = useRef(new Set<string>());
+
+    const photoTransforms = useGalleryStore((s) => s.photoTransforms);
+    const faceBoxes = useGalleryStore((s) => s.faceBoxes);
+    const setPhotoTransform = useGalleryStore((s) => s.setPhotoTransform);
+    const setFaceBoxes = useGalleryStore((s) => s.setFaceBoxes);
+    const resetTransform = useGalleryStore((s) => s.resetTransform);
+
+    const imageLoadKey = useMemo(
+        () => images.map((img) => img.filename).join("|"),
+        [images]
+    );
+
+    const [imagesReady, setImagesReady] = useState(false);
 
     const [activeFilename, setActiveFilename] = useState<string | null>(
         images[0]?.filename ?? null
     );
 
     const isFull = template.id === "4R_FULL";
+
+    useEffect(() => {
+        autoCenteredRef.current.clear();
+        setImagesReady(false);
+    }, [imageLoadKey, template.id]);
 
     /* ================= INIT CANVAS (ANTI BLINK) ================= */
     useEffect(() => {
@@ -205,12 +242,14 @@ function CanvasPage({
 
             setActiveFilename(slot.filename);
 
-            transformRef.current =
-                photoTransforms[slot.filename] ?? {
+            const stored =
+                useGalleryStore.getState().photoTransforms[slot.filename] ?? {
                     scale: 1,
                     offsetX: 0,
                     offsetY: 0,
                 };
+
+            transformRef.current = stored;
 
             activeSlotRectRef.current = {
                 x: slot.x,
@@ -226,30 +265,25 @@ function CanvasPage({
         };
 
         canvas.addEventListener("mousedown", onMouseDown, true);
-        return () => canvas.removeEventListener("mousedown", onMouseDown);
-    }, [images, template, photoTransforms]);
+        return () => canvas.removeEventListener("mousedown", onMouseDown, true);
+    }, [images, template.width, template.height, isFull]);
 
-    /* ================= AUTO CENTER (ONCE) ================= */
+    /* ================= AUTO CENTER (ONCE PER PHOTO) ================= */
     useEffect(() => {
-        if (!activeFilename) return;
-
-        const existing = photoTransforms[activeFilename];
-        const alreadyFramed =
-            existing &&
-            (Math.abs((existing.scale ?? 1) - 1) > 0.001 ||
-                Math.abs(existing.offsetX ?? 0) > 0.5 ||
-                Math.abs(existing.offsetY ?? 0) > 0.5);
-        if (alreadyFramed) return;
+        if (!activeFilename || !imagesReady) return;
+        if (autoCenteredRef.current.has(activeFilename)) return;
 
         const img = imageCacheRef.current.find(
             (i) => i.filename === activeFilename
         );
         if (!img) return;
 
-        const boxW = template.id === "4R_FULL" ? template.width : slotWidth;
+        autoCenteredRef.current.add(activeFilename);
 
+        const boxW = template.id === "4R_FULL" ? template.width : slotWidth;
         const boxH = template.id === "4R_FULL" ? template.height : slotHeight;
 
+        const existing = useGalleryStore.getState().photoTransforms[activeFilename];
         const auto = autoCenterTransform(
             img.img.width,
             img.img.height,
@@ -258,51 +292,18 @@ function CanvasPage({
             "auto"
         );
 
-        const lookFilter = lookIdToPhotoFilter(sessionLookId);
-        const galleryImage = images.find((i) => i.filename === activeFilename);
-        const lookAlreadyBaked = Boolean(
-            galleryImage?.bakedLookId && galleryImage?.variants?.themed
-        );
-        const resolvedLookFilter = lookAlreadyBaked ? "none" : lookFilter;
         const next: PhotoTransform = {
             ...auto,
             filter:
                 existing?.filter && existing.filter !== "none"
                     ? existing.filter
-                    : resolvedLookFilter,
-            intensity:
-                existing?.intensity ??
-                (resolvedLookFilter !== "none" ? LOOK_PRINT_INTENSITY : 1),
+                    : "none",
+            intensity: existing?.intensity ?? 1,
         };
 
         transformRef.current = next;
         setPhotoTransform(activeFilename, next);
-    }, [activeFilename, sessionLookId, images]);
-
-    /* Seed session look onto print slots (does not block auto-center). */
-    useEffect(() => {
-        lookSeededRef.current = new Set();
-    }, [sessionLookId]);
-
-    useEffect(() => {
-        if (!sessionLookId || images.length === 0) return;
-        const lookFilter = lookIdToPhotoFilter(sessionLookId);
-        for (const img of images) {
-            if (lookSeededRef.current.has(img.filename)) continue;
-            lookSeededRef.current.add(img.filename);
-            // Themed AI photos bake look into pixels — avoid double grade.
-            if (img.bakedLookId && img.variants?.themed) continue;
-            const existing = photoTransforms[img.filename];
-            if (existing?.filter && existing.filter !== "none") continue;
-            if (lookFilter === "none") continue;
-            setPhotoTransform(img.filename, {
-                filter: lookFilter,
-                intensity: LOOK_PRINT_INTENSITY,
-            });
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [images, sessionLookId, setPhotoTransform]);
-
+    }, [activeFilename, imagesReady, imageLoadKey, template.id, slotWidth, slotHeight, setPhotoTransform]);
 
     /* ================= DRAW ================= */
     useEffect(() => {
@@ -330,18 +331,14 @@ function CanvasPage({
             }[];
 
             imageCacheRef.current = loaded;
+            setImagesReady(true);
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.fillStyle = "#fff";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             if (template.id === "4R_FULL") {
-                drawFull4RLayout(
-                    ctx,
-                    loaded[0], // hanya 1 foto
-                    photoTransforms,
-                    faceBoxes
-                );
+                drawFull4RLayout(ctx, loaded[0], photoTransforms, faceBoxes);
             } else {
                 draw4RLayout(
                     ctx,
@@ -370,14 +367,24 @@ function CanvasPage({
             }
 
         });
-    }, [images, photoTransforms, activeFilename, isPrintMode]);
+    }, [
+        images,
+        photoTransforms,
+        faceBoxes,
+        activeFilename,
+        isPrintMode,
+        template,
+        isFull,
+        slotWidth,
+        slotHeight,
+        gap,
+        pad,
+    ]);
 
     /* ================= FACE DETECT (ONCE PER IMAGE) ================= */
     useEffect(() => {
-        if (!activeFilename) return;
-
-        // Sudah pernah detect → STOP
-        if (faceBoxes[activeFilename]) return;
+        if (!activeFilename || !imagesReady) return;
+        if (useGalleryStore.getState().faceBoxes[activeFilename]) return;
 
         const img = imageCacheRef.current.find(
             (i) => i.filename === activeFilename
@@ -388,19 +395,68 @@ function CanvasPage({
         detectFaces(img).then((faces) => {
             setFaceBoxes(activeFilename, faces);
         });
-    }, [activeFilename, imageCacheRef.current.length]);
+    }, [activeFilename, imagesReady, setFaceBoxes]);
 
+    const handleResetActive = () => {
+        if (!activeFilename) return;
+
+        autoCenteredRef.current.delete(activeFilename);
+        resetTransform(activeFilename);
+
+        const img = imageCacheRef.current.find(
+            (i) => i.filename === activeFilename
+        );
+        if (!img) {
+            transformRef.current = { scale: 1, offsetX: 0, offsetY: 0 };
+            return;
+        }
+
+        const boxW = template.id === "4R_FULL" ? template.width : slotWidth;
+        const boxH = template.id === "4R_FULL" ? template.height : slotHeight;
+        const auto = autoCenterTransform(
+            img.img.width,
+            img.img.height,
+            boxW,
+            boxH,
+            "auto"
+        );
+
+        transformRef.current = auto;
+        setPhotoTransform(activeFilename, auto);
+        autoCenteredRef.current.add(activeFilename);
+    };
+
+    const activeLabel = activeFilename
+        ? `Foto aktif · ${activeFilename.replace(/\.[^.]+$/, "")}`
+        : null;
 
     return (
-        <canvas
-            ref={canvasRef}
-            className="bg-white shadow-xl mx-auto"
-            style={{
-                width: template.width * 0.5,
-                height: template.height * 0.5,
-                cursor: "grab",
-            }}
-        />
+        <PrintPreviewChrome
+            pageLabel={
+                pageCount > 1 ? `Halaman ${pageIndex + 1} / ${pageCount}` : undefined
+            }
+            activeLabel={!isPrintMode ? activeLabel : null}
+            hint={
+                compact
+                    ? undefined
+                    : isFull
+                      ? "Sesuaikan crop foto full 4R sebelum cetak."
+                      : "Klik salah satu slot foto untuk memilih, lalu atur posisi dan zoom."
+            }
+            onReset={!isPrintMode && activeFilename ? handleResetActive : undefined}
+            showControls={!isPrintMode}
+            compact={compact}
+        >
+            <canvas
+                ref={canvasRef}
+                className="max-w-full bg-white shadow-lg ring-1 ring-black/10"
+                style={{
+                    width: template.width * 0.5,
+                    height: template.height * 0.5,
+                    cursor: "grab",
+                }}
+            />
+        </PrintPreviewChrome>
     );
 }
 
@@ -454,7 +510,13 @@ function SheetCanvasPage({
     } = useGalleryStore();
 
     const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(0);
+    const [sheetImagesReady, setSheetImagesReady] = useState(false);
     const resolvedPaper = useResolvedSheetPaper();
+
+    const sheetImageKey = useMemo(
+        () => images.map((img) => img.filename).join("|"),
+        [images]
+    );
 
     const bindingOptions = useMemo(
         () => ({
@@ -544,7 +606,8 @@ function SheetCanvasPage({
 
     useEffect(() => {
         autoCenteredRef.current.clear();
-    }, [recipe.id, recipe.paperId, sheetAlign]);
+        setSheetImagesReady(false);
+    }, [recipe.id, recipe.paperId, sheetAlign, sheetImageKey]);
 
     useEffect(() => {
         pruneAdjustSlotSelection(geometry.slots.length);
@@ -729,6 +792,10 @@ function SheetCanvasPage({
     ]);
 
     useEffect(() => {
+        if (!sheetImagesReady) return;
+
+        const persistedTransforms = useGalleryStore.getState().sheetSlotTransforms;
+
         geometry.slots.forEach((slot) => {
             const imgData = resolveImageForSlot(slot.index);
             const sizeKey = getSlotSizeKey(slot);
@@ -740,7 +807,7 @@ function SheetCanvasPage({
 
             if (
                 autoCenteredRef.current.has(transformKey) ||
-                sheetSlotTransforms[transformKey]
+                persistedTransforms[transformKey]
             ) {
                 autoCenteredRef.current.add(transformKey);
                 return;
@@ -772,6 +839,7 @@ function SheetCanvasPage({
             autoCenteredRef.current.add(transformKey);
         });
     }, [
+        sheetImagesReady,
         images,
         recipe.id,
         geometry.slots.length,
@@ -779,9 +847,8 @@ function SheetCanvasPage({
         sheetSizeAssignments,
         sheetSlotAssignments,
         faceBoxes,
-        packageType,
         activeSlotIndex,
-        sheetSlotTransforms,
+        setSheetSlotTransform,
     ]);
 
     useEffect(() => {
@@ -803,6 +870,7 @@ function SheetCanvasPage({
             )
         ).then((loaded) => {
             imageCacheRef.current = loaded;
+            setSheetImagesReady(true);
 
             const slotDraws = buildSheetSlotDraws({
                 geometry,
@@ -828,8 +896,7 @@ function SheetCanvasPage({
                       : activeSlotIndex !== null
                         ? [activeSlotIndex]
                         : [],
-                showPassportGuide:
-                    packageType === "pas-photo" && !isPrintMode,
+                showPassportGuide: false,
                 printableArea: geometry.printableArea,
                 showPrintableGuide: !isPrintMode,
             });
@@ -853,8 +920,10 @@ function SheetCanvasPage({
     ]);
 
     useEffect(() => {
+        if (!sheetImagesReady) return;
+
         images.forEach((imgData) => {
-            if (faceBoxes[imgData.filename]) return;
+            if (useGalleryStore.getState().faceBoxes[imgData.filename]) return;
 
             const cached = imageCacheRef.current.find(
                 (entry) => entry.filename === imgData.filename
@@ -865,7 +934,7 @@ function SheetCanvasPage({
                 setFaceBoxes(imgData.filename, faces);
             });
         });
-    }, [images, recipe.id, imageCacheRef.current.length]);
+    }, [sheetImagesReady, images, recipe.id, setFaceBoxes]);
 
     const bindingHint =
         sheetBindingMode === "manual"
@@ -876,22 +945,27 @@ function SheetCanvasPage({
                 ? `bergilir · foto diulang ${geometry.slots.length}×`
                 : `bergilir · ${images.length} foto ke ${geometry.slots.length} slot`;
 
+    const activeSlotLabel =
+        activeSlotIndex !== null
+            ? `Slot ${activeSlotIndex + 1} / ${geometry.slots.length}`
+            : null;
+
     return (
-        <div className="flex flex-col items-center gap-3">
-            <p className="text-xs text-white/60 text-center max-w-xl">
-                {recipe.label} · {countRecipeSlots(recipe)} slot · {bindingHint}
-                {" "}
-                · geser/pinch slot utama · Ctrl+klik multi-pilih
-            </p>
+        <PrintPreviewChrome
+            pageLabel={`${recipe.label} · ${countRecipeSlots(recipe)} slot`}
+            activeLabel={!isPrintMode ? activeSlotLabel : null}
+            hint={`${bindingHint} · Ctrl/⌘+klik untuk multi-pilih slot`}
+            showControls={!isPrintMode}
+        >
             <canvas
                 ref={canvasRef}
-                className="bg-white shadow-xl mx-auto"
+                className="max-w-full bg-white shadow-lg ring-1 ring-black/10"
                 style={{
                     width: geometry.paperWidthPx * displayScale,
                     height: geometry.paperHeightPx * displayScale,
                     cursor: "grab",
                 }}
             />
-        </div>
+        </PrintPreviewChrome>
     );
 }

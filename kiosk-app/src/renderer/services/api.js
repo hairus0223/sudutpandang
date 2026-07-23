@@ -32,37 +32,13 @@ export async function stopSession() {
   await fetch(`${API_BASE}/api/session/stop`, { method: "POST" });
 }
 
-export function getPreviewUrl(image, packageType = "self-photo") {
+export function getPreviewUrl(image) {
   if (!image) return null;
-
-  if (image.processingStatus === "ready") {
-    if (packageType === "pas-photo" && image.variants?.passport) {
-      return image.variants.passport;
-    }
-
-    if (packageType === "ai-photo" && image.variants?.themed) {
-      return image.variants.themed;
-    }
-
-    if (
-      (packageType === "ai-photo" || packageType === "pas-photo") &&
-      image.variants?.subject
-    ) {
-      return image.variants.subject;
-    }
-  }
-
   return image.url ?? null;
 }
 
-export function isAwaitingProcessedPreview(image, packageType = "self-photo") {
-  if (!image) return false;
-  if (packageType !== "ai-photo" && packageType !== "pas-photo") return false;
-
-  return (
-    image.processingStatus === "pending" ||
-    image.processingStatus === "processing"
-  );
+export function isAwaitingProcessedPreview(_image) {
+  return false;
 }
 
 export { getKioskProcessingMessage } from "../lib/processingLabels.js";
@@ -122,12 +98,12 @@ export async function pollImageUntilSettled({
   throw new Error("poll_timeout");
 }
 
-export async function refreshLatestPreview(userSlug, packageType) {
+export async function refreshLatestPreview(userSlug) {
   const latest = await fetchLatestImage(userSlug);
   return {
     image: latest,
-    previewUrl: getPreviewUrl(latest, packageType),
-    isProcessing: isAwaitingProcessedPreview(latest, packageType),
+    previewUrl: getPreviewUrl(latest),
+    isProcessing: isAwaitingProcessedPreview(latest),
   };
 }
 
@@ -141,19 +117,78 @@ export async function triggerBackendCapture(userSlug) {
   return res.json();
 }
 
-export function applyKioskSyncFields(setters, fields = {}) {
-  if (fields.packageType) setters.setPackageType(fields.packageType);
-  if (fields.passportSizeId) setters.setPassportSizeId(fields.passportSizeId);
-  if (fields.themeId) setters.setThemeId(fields.themeId);
-  if (fields.lookId && setters.setLookId) setters.setLookId(fields.lookId);
+/**
+ * Dev fallback: grab current video frame and POST to API capture/ watcher folder.
+ * drawImage uses the raw MediaStream frame (same orientation as live preview — not mirrored).
+ * @param {HTMLVideoElement | null | undefined} videoEl
+ */
+export async function triggerWebcamCapture(videoEl) {
+  if (!videoEl?.videoWidth || !videoEl.videoHeight) {
+    throw new Error("webcam_not_ready");
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = videoEl.videoWidth;
+  canvas.height = videoEl.videoHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas_unavailable");
+  // No horizontal flip — saved JPEG must match what the customer sees on screen.
+  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (result) => {
+        if (result) resolve(result);
+        else reject(new Error("webcam_encode_failed"));
+      },
+      "image/jpeg",
+      0.92
+    );
+  });
+
+  const form = new FormData();
+  form.append("file", blob, `webcam-${Date.now()}.jpg`);
+
+  const res = await fetch(`${API_BASE}/api/capture/webcam`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error("webcam_capture_failed");
+  return res.json();
 }
 
-export async function updateKioskLook(userSlug, lookId) {
-  const res = await fetch(`${API_BASE}/api/kiosk/look`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user: userSlug, lookId }),
-  });
-  if (!res.ok) throw new Error("look_update_failed");
-  return res.json();
+export function applyKioskSyncFields(setters, fields = {}) {
+  if (fields.packageType && typeof setters.setPackageType === "function") {
+    setters.setPackageType(fields.packageType);
+  }
+  if (
+    fields.aiThemeLabel !== undefined &&
+    typeof setters.setAiThemeLabel === "function"
+  ) {
+    setters.setAiThemeLabel(fields.aiThemeLabel || null);
+  }
+  if (
+    fields.aiThemePreviewUrl !== undefined &&
+    typeof setters.setAiThemePreviewUrl === "function"
+  ) {
+    setters.setAiThemePreviewUrl(fields.aiThemePreviewUrl || null);
+  }
+  if (
+    fields.aiThemePreviewColor !== undefined &&
+    typeof setters.setAiThemePreviewColor === "function"
+  ) {
+    setters.setAiThemePreviewColor(fields.aiThemePreviewColor || null);
+  }
+  if (
+    fields.aiThemeType !== undefined &&
+    typeof setters.setAiThemeType === "function"
+  ) {
+    setters.setAiThemeType(fields.aiThemeType || null);
+  }
+  if (
+    fields.aiGenerateLimit !== undefined &&
+    typeof setters.setAiGenerateLimit === "function"
+  ) {
+    setters.setAiGenerateLimit(Number(fields.aiGenerateLimit) || 0);
+  }
 }

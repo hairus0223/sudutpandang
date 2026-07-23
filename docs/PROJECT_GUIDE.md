@@ -91,7 +91,7 @@ The **API** owns the canonical session timer (`activeSession.endsAt`, `pausedAt`
 
 | Route | Purpose |
 |-------|---------|
-| `/` | Headline gallery, register, access photo, link to session mode |
+| `/` | Headline gallery, access photo, link to session mode |
 | `/session` | Operator session control (register, lookup, trial/main, capture) |
 | `/gallery?user=` | User photo gallery and print selection |
 | `/print` | Print editor and submit to printer |
@@ -102,15 +102,15 @@ The **API** owns the canonical session timer (`activeSession.endsAt`, `pausedAt`
 |--------|---------|
 | `idle` | Waiting for operator to start session |
 | `trial` | Trial session with live preview and timer |
-| `main` | Main session (package-aware UI) |
+| `main` | Main self-photo session |
 | `end` | Thank-you / session over |
 
 ### Features
 
 | Feature | Purpose | Routes | Components | Services | API Endpoints |
 |---------|---------|--------|------------|----------|---------------|
-| **Headline Gallery** | Marketing photo wall on home | `/` | `HeadlineGallery`, `PhotoCard`, `AccessForm`, `RegisterForm` | Inline fetch | `GET /api/headline`, `GET /headline/*` |
-| **Customer Registration** | Create daily user folder + metadata | `/`, `/session` | `RegisterForm`, `SessionKioskClient` | Inline fetch; `kiosk-app/services/api.js` | `POST /api/register` |
+| **Headline Gallery** | Marketing photo wall on home | `/` | `HeadlineGallery`, `PhotoCard`, `AccessForm` | Inline fetch | `GET /api/headline`, `GET /headline/*` |
+| **Customer Registration** | Create daily user folder + metadata | `/session` | `SessionKioskClient` | Inline fetch; `session.service.ts` | `POST /api/register` |
 | **Customer Lookup** | Resume session for registered name | `/session` | `SessionKioskClient` | Inline `apiCustomerByName` | `GET /api/customer-by-name` |
 | **Access Photo** | Open gallery by user slug | `/` → gallery | `AccessForm` | — | — |
 | **Operator Session Control** | Staff runs timers, trial/main, pause/resume, capture | `/session` | `SessionKioskClient` | `session.service.ts`, `useSessionTimer` | `POST /api/session/*`, `POST /api/kiosk/*`, `GET /api/session`, `GET /api/images/:user` |
@@ -118,14 +118,12 @@ The **API** owns the canonical session timer (`activeSession.endsAt`, `pausedAt`
 | **Kiosk Session Sync** | Push trial/main and timer updates to customer display | `/session` → Socket | `SessionKioskClient`, `App.jsx` | Socket.IO in api | `POST /api/kiosk/trial-start`, `trial-skip`, `main-start`; `session-timer-update` |
 | **Live Camera Preview** | HDMI/capture card live view | kiosk trial/main | `useCameraPreview` | getUserMedia + optional Electron IPC | — |
 | **Photo Capture** | Countdown, trigger shutter, show last shot | `/session`, kiosk | `SessionKioskClient`, `App.jsx` | `triggerBackendCapture`, `fetchLatestImage` | `POST /api/capture`, `GET /api/images/:user` |
-| **Capture File Pipeline** | Move captures to `captures/`, queue remove-bg | backend | — | chokidar + `imageProcessingQueue` | Socket: `new-photo`, `photo-processed` |
-| **Background Remover** | Remove background → transparent PNG | backend + gallery + kiosk | `GalleryClient`, `PhotoCard`, `App.jsx` | `image.service.ts`, `api/services/backgroundRemoval.js` | `GET /api/images/:user`, `POST /api/images/:user/upload`, `POST .../process`, `GET .../status` |
+| **Capture File Pipeline** | Move captures to `captures/`, emit new-photo | backend | — | chokidar | Socket: `new-photo` |
 | **Session Lifecycle** | Start/stop/pause/resume/add-time/expire | backend + operator + kiosk UI | `SessionKioskClient`, `App.jsx` | `session.service.ts`, in-memory in api | `GET/POST /api/session/*` |
 | **User Photo Gallery** | Browse and select photos | `/gallery?user=` | `GalleryClient`, `PhotoCard`, `PhotoModal`, `BottomPrintBar` | `image.service.ts` | `GET /api/images/:user` |
 | **Print Selection & Limits** | Enforce max printable photos | `/gallery` | `PhotoCard`, `useGalleryStore` | Zustand | `GET /api/print-config/:user` |
 | **Print Editor** | Templates, filters, pan/zoom | `/print` | `PrintCanvas`, `PrintToolbar`, canvas utils | `exportCanvas.ts`, `useGalleryStore` | — |
 | **Physical Print** | PNG → PDF → printer | `/print` | `PrintToolbar` | `exportCanvasPrint`, api Sharp/PDFKit | `POST /api/print` |
-| **Package Types** | self-photo / pas-photo / ai-photo UX | `/session`, kiosk | `SessionKioskClient`, `App.jsx` | Stored in `customer.json` | `packageType` on register/session APIs |
 | **Static Images** | Serve photos and headlines | — | Any `<img>` consumer | Express static | `GET /images/*`, `GET /headline/*` |
 
 ### Socket.IO Events
@@ -141,7 +139,6 @@ The **API** owns the canonical session timer (`activeSession.endsAt`, `pausedAt`
 | `session-paused` | API → clients | Pause notification; kiosk also uses `session-timer-update` |
 | `session-resumed` | API → clients | Resume with full `activeSession`; kiosk syncs timer |
 | `new-photo` | API → clients | New file saved to `captures/` |
-| `photo-processed` | API → clients | Remove-bg finished: `{ user, imageId, status, subjectUrl?, error? }` |
 | `session-started` | API → clients | Session registered *(operator-driven; kiosk uses timer events)* |
 
 ### `GET /api/kiosk-config` fields
@@ -151,17 +148,13 @@ The **API** owns the canonical session timer (`activeSession.endsAt`, `pausedAt`
 | `sessionDurationMinutes` | Default main duration (env: `SESSION_DURATION_MINUTES`) |
 | `captureCountdownSeconds` | Shutter countdown on kiosk |
 | `trialDurationSeconds` | Default trial length (env: `TRIAL_DURATION_SECONDS`) |
-| `packageDurations` | Per-package main duration in minutes: `{ self-photo, pas-photo, ai-photo }` |
+| `packageDurations` | Main duration in minutes: `{ "self-photo": N }` |
 
 Config drives **defaults and labels**; the live countdown on both displays comes from Socket timer events and `activeSession.endsAt`.
 
-### Package Types
+### Package type
 
-| Type | Main duration (default) | Kiosk behavior |
-|------|-------------------------|----------------|
-| `self-photo` | 10 min (`packageDurations`) | Standard self-photo |
-| `pas-photo` | 5 min | Pas-photo frame overlay on live preview |
-| `ai-photo` | 10 min | Remove-bg on capture; kiosk preview uses `subject` PNG when ready |
+Sudut Pandang runs **self-photo only**. All registrations and sessions use `packageType: "self-photo"`. Legacy pas-photo / ai-photo endpoints (`GET /api/themes`, `POST /api/images/.../process`) return `404 not_available`.
 
 ---
 
@@ -173,15 +166,14 @@ There is no shared package today. Reuse **within** each app, or extract to `pack
 
 | Service | Location | Use when |
 |---------|----------|----------|
-| `fetchImages`, `fetchImageStatus`, `processImage`, `uploadImage` | `services/image.service.ts` | Gallery + background removal API |
-| `GalleryImageData`, `ProcessingStatus` | `lib/imageTypes.ts` | Image list typing with variants |
-| `usePhotoProcessedSocket` | `hooks/usePhotoProcessedSocket.ts` | Realtime gallery refresh after processing |
+| `fetchImages`, `uploadImage` | `services/image.service.ts` | Gallery image list + upload |
+| `GalleryImageData`, `ProcessingStatus` | `lib/imageTypes.ts` | Image list typing |
 | Session/kiosk API | `services/session.service.ts` | `getSession`, `startSession`, `pauseSession`, `resumeSession`, `addTime`, `trialStart`, `mainStart`, `getKioskConfig` |
 | `msToMMSS` | `utils/time.ts` | Format countdown display |
 | `useSessionTimer` | `hooks/useSessionTimer.ts` | Operator timer display synced to server |
 | `API_BASE_URL` | `lib/env.ts` | Any API call from Next.js app |
 | `useGalleryStore` | `stores/useGalleryStore.ts` | Gallery + print selection, transforms, templates |
-| Inline fetch | `SessionKioskClient.tsx` (register, images), `RegisterForm`, `HeadlineGallery`, `GalleryClient`, `PrintToolbar` | Feature-specific calls *(consolidate over time)* |
+| Inline fetch | `SessionKioskClient.tsx` (register, images), `HeadlineGallery`, `GalleryClient`, `PrintToolbar` | Feature-specific calls *(consolidate over time)* |
 
 ### kiosk-app
 
@@ -233,7 +225,7 @@ There is no shared package today. Reuse **within** each app, or extract to `pack
 | `PhotoModal` | `components/modals/PhotoModal.tsx` | Full-screen photo viewer |
 | `BottomPrintBar` | `components/bottom/BottomPrintBar.tsx` | Print selection footer |
 | `AccessForm` | `components/kiosk/AccessForm.tsx` | Navigate to gallery by name |
-| `RegisterForm` | `components/kiosk/RegisterForm.tsx` | Simple home registration (no session) |
+| `SessionKioskClient` | `components/kiosk/SessionKioskClient.tsx` | Operator registration + session control |
 | `PrintCanvas` | `components/print/PrintCanvas.tsx` | Print layout editor |
 | `PrintToolbar` | `components/print/PrintToolbar.tsx` | Filters + print submit |
 | `TemplateSelector` | `components/print/TemplateSelector.tsx` | Switch 4R / 4R_FULL |

@@ -1,4 +1,5 @@
 import "./globals.css";
+import { ToastProvider } from "@/components/ui/ToastProvider";
 
 export const metadata = {
   title: "Studio Self Photo",
@@ -12,9 +13,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="id">
-      <body className="bg-black text-white antialiased">
-        {children}
+    <html lang="id" suppressHydrationWarning>
+      <body
+        className="bg-black text-white antialiased"
+        suppressHydrationWarning
+      >
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );

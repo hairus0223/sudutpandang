@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useGalleryStore } from "@/stores/useGalleryStore";
 import { PrintCanvas } from "@/components/print/PrintCanvas";
 import { PrintEditorLayout } from "@/components/print/editor/PrintEditorLayout";
-import { resolveImageUrl } from "@/lib/resolveImageUrl";
+import { resolvePrintUrl } from "@/lib/resolveImageUrl";
 
 export default function PrintPageClient() {
   const router = useRouter();
@@ -14,7 +14,8 @@ export default function PrintPageClient() {
   const {
     images,
     selectedForPrint,
-    packageType,
+    printVariantByFilename,
+    aiThemeId,
     loadPersistedSheetTransforms,
     clearAdjustSlotSelection,
   } = useGalleryStore();
@@ -23,11 +24,14 @@ export default function PrintPageClient() {
     () =>
       images
         .filter((img) => selectedForPrint.includes(img.filename))
-        .map((img) => ({
-          ...img,
-          url: resolveImageUrl(img, packageType, "print"),
-        })),
-    [images, selectedForPrint, packageType]
+        .map((img) => {
+          const variant = printVariantByFilename[img.filename] ?? "original";
+          return {
+            ...img,
+            url: resolvePrintUrl(img, variant, aiThemeId),
+          };
+        }),
+    [images, selectedForPrint, printVariantByFilename, aiThemeId]
   );
 
   useEffect(() => {

@@ -134,9 +134,8 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 
 | Module | Use for |
 |--------|---------|
-| `services/image.service.ts` → `fetchImages`, `fetchImageStatus`, `processImage`, `uploadImage` | User photo lists + background removal |
-| `lib/imageTypes.ts` → `GalleryImageData`, `ProcessingStatus` | Image variants typing |
-| `hooks/usePhotoProcessedSocket.ts` | Gallery refresh when `photo-processed` fires |
+| `services/image.service.ts` → `fetchImages`, `uploadImage` | User photo lists + upload |
+| `lib/imageTypes.ts` → `GalleryImageData`, `ProcessingStatus` | Image typing |
 | `stores/useGalleryStore.ts` | Images, print selection, transforms, filters, template |
 | `lib/env.ts` → `API_BASE_URL` | All Next.js API URLs |
 | `lib/printTemplates.ts` | `4R`, `4R_FULL` dimensions |
@@ -145,7 +144,7 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 | `utils/exportCanvas.ts` → `exportCanvasPrint()` | PNG export before print |
 | `stores/useCanvasPanZoom.ts` → `useCanvasPanZoomPro()` | Canvas pan/zoom |
 
-**Inline fetch (consolidate when touching):** `SessionKioskClient.tsx`, `RegisterForm.tsx`, `HeadlineGallery.tsx`, `GalleryClient.tsx`, `PrintToolbar.tsx`
+**Inline fetch (consolidate when touching):** `SessionKioskClient.tsx`, `HeadlineGallery.tsx`, `GalleryClient.tsx`, `PrintToolbar.tsx`
 
 ### kiosk-app
 
@@ -163,15 +162,32 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 |---------|----------|
 | All REST routes | Same file |
 | Socket emits | Same file |
-| Capture watcher | chokidar on `CAPTURE_DIR` → `captures/` + `processed/` |
-| Background removal | `api/services/backgroundRemoval.js` + `imageProcessingQueue.js` |
-| Theme generation | `api/services/themeGeneration.js`, `themePresets.js`, `themeBackgrounds.js` |
+| Capture watcher | chokidar on `CAPTURE_DIR` → `captures/` |
 | Studio config / health | `api/services/studioConfig.js` — `GET /api/health` |
 | Print pipeline | Sharp → PDFKit → SumatraPDF |
 
 ### Package types
 
-`self-photo` (10m) · `pas-photo` (5m + frame) · `ai-photo` (remove-bg + theme + kiosk preview)
+| Type | Session | AI generate |
+|------|---------|-------------|
+| `self-photo` | 10 min (default) | — |
+| `ai-self-photo` | 12 min (default) | Quota = `peopleCount`; **1 tema per sesi** (register, locked immediately) |
+
+Register sets `aiGenerateLimit`, `aiGenerateUsed`, `aiThemeId`, `aiThemeLockedAt`, `aiSelections[]` on `customer.json`.
+
+**AI API:** `GET /api/ai-themes` · `PATCH /api/ai-theme/:user` (blocked when locked) · `POST /api/ai-generate` · `GET .../ai-status` · `GET /api/ai-quota/:user` · `GET /api/print-config/:user`  
+**Sockets:** `ai-generation-progress`, `ai-generation-complete`  
+**Kiosk sync** (trial/main/timer): `packageType`, `aiThemeId`, `aiThemeLabel`, `aiThemePreviewUrl`, `aiThemePreviewColor`, `aiThemeType`, `aiGenerateLimit`, `peopleCount`
+
+**Pipeline:** semua tema AI Self Photo memakai **OpenAI Images Edits** (transform) dengan `transformPrompt` per tema.  
+**Previews:** `GET /api/ai-themes` → `previewUrl`, optional `previewBeforeUrl`. Override `{BASE_DIR}/themes/{id}/` (see `themes/README.md` on bootstrap).  
+**Katalog tema:** bundled `wild-west` + optional `{BASE_DIR}/config/ai-themes.json` (publish dari research lab).  
+**Research lab (admin):** `POST /api/admin/ai-theme-research/preview` · `POST .../publish` — butuh `ADMIN_API_TOKEN` + header `X-Admin-Token`.  
+**Gallery UX:** linear wizard — ① Pilih foto → ② Generate → ③ Hasil & cetak (`AiWizardStepper`). Theme picker **only at register** (`RegisterWizard` + `ThemePreviewCard`).  
+**Print:** `printVariantByFilename` (`original`|`ai`); separate from AI quota.
+
+**Analytics:** `{BASE_DIR}/data/ai-analytics.jsonl` · `GET /api/ai-analytics/summary?days=30`  
+**QA:** [AI_SELF_PHOTO_QA.md](./AI_SELF_PHOTO_QA.md) · `npm run validate:ai-theme-previews`
 
 ---
 
@@ -187,14 +203,16 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 | `BottomPrintBar` | `components/bottom/BottomPrintBar.tsx` | Print selection footer |
 | `InfoCard` | `components/cards/InfoCard.tsx` | Gallery header |
 | `AccessForm` | `components/kiosk/AccessForm.tsx` | Navigate to gallery |
-| `RegisterForm` | `components/kiosk/RegisterForm.tsx` | Home registration only |
-| `PrintCanvas` | `components/print/PrintCanvas.tsx` | Print preview/editor |
+| `HeadlineGallery` | `components/kiosk/HeadlineGallery.tsx` | Home page only |
 | `PrintEditorLayout` | `components/print/editor/PrintEditorLayout.tsx` | 3-column print editor shell |
 | `PrintLayoutPanel` | `components/print/editor/PrintLayoutPanel.tsx` | Sheet layout sidebar |
 | `PrintInspectorPanel` | `components/print/editor/PrintInspectorPanel.tsx` | Adjust + filter sidebar |
 | `TemplateSelector` | `components/print/TemplateSelector.tsx` | Template picker |
-| `HeadlineGallery` | `components/kiosk/HeadlineGallery.tsx` | Home page only |
-| `SessionKioskClient` | `components/kiosk/SessionKioskClient.tsx` | `/session` only — extend, don't duplicate |
+| `PrintCanvas` | `components/print/PrintCanvas.tsx` | Print preview/editor |
+| `SessionKioskClient` | `components/kiosk/SessionKioskClient.tsx` | `/session` — `RegisterWizard`, theme cards |
+| `GalleryAiWizard` | `components/gallery/GalleryAiWizard.tsx` | AI package gallery wizard |
+| `AiWizardStepper` | `components/gallery/AiWizardStepper.tsx` | 3-step gallery flow |
+| `ThemePreviewCard` | `components/kiosk/ThemePreviewCard.tsx` | Register theme picker |
 
 ### Print canvas utils (keep together)
 
@@ -225,9 +243,11 @@ studio-kiosk (Next.js :5173)  ──REST/Socket──►  api (Express :4000)  �
 | `BASE_DIR` | api | `D:\SudutPandangStudio` (hardcoded in `server.js`) |
 | `CAMERA_CAPTURE_COMMAND` | api | Optional shell shutter trigger |
 | `SESSION_DURATION_MINUTES` | api | Default `10` |
-| `BG_REMOVAL_ENABLED` | api | Default `true`; set `false` to disable auto remove-bg |
-| `THEME_GENERATION_ENABLED` | api | Default `true`; WC2026 + classic themes |
-| `DEFAULT_THEME_ID` | api | e.g. `wc2026-stadium-night` |
+| `AI_GENERATION_ENABLED` | api | Master switch for AI generate |
+| `OPENAI_API_KEY` | api | OpenAI Images Edits API |
+| `OPENAI_IMAGE_MODEL` | api | Default `gpt-image-1` |
+| `OPENAI_IMAGE_INPUT_FIDELITY` | api | Transform edits; default `high` |
+| `ADMIN_API_TOKEN` | api | Enables `/api/admin/ai-theme-research/*` (header `X-Admin-Token`) |
 | `IMAGE_PROCESS_MIN_INTERVAL_MS` | api | Manual process rate limit (default 2000) |
 | `IMAGE_PROCESS_MAX_JOBS_PER_USER` | api | Concurrent jobs per user (default 3) |
 | `API_PUBLIC_HOST` | api | Host for image URLs in Socket payloads — **set LAN IP in production** |
@@ -240,23 +260,27 @@ BASE_DIR/
   capture/           ← Imaging Edge drop; watcher moves on active session
   headline/          ← marketing images
   print/             ← temp PDFs
+  themes/            ← preview sample overrides (README on bootstrap)
+  data/              ← ai-analytics.jsonl
+  config/            ← ai-themes.json (published themes override)
   DD-MM-YYYY/
     <user_slug>/
       customer.json
-      captures/          ← originals
-      processed/<id>/    ← subject.png + meta.json
-      *.jpg                ← legacy flat captures
+      captures/
+      processed/{imageId}/ai-{themeId}.jpg
 ```
 
 ### API surface (key endpoints)
 
-`POST /api/register` · `GET /api/customer-by-name` · `POST /api/session/*` · `POST /api/kiosk/trial-start|trial-skip|main-start` · `GET /api/images/:user` · `GET /api/images/:user/:imageId/status` · `POST /api/images/:user/:imageId/process` · `POST /api/images/:user/upload` · `GET /api/themes` · `GET /api/print-config/:user` · `POST /api/print` · `POST /api/capture` · `GET /api/kiosk-config` · `GET /api/headline` · `GET /api/health` · `GET /api/health/image-processing`
+`POST /api/register` · `GET /api/customer-by-name` · `POST /api/session/*` · `POST /api/kiosk/trial-start|trial-skip|main-start` · `GET /api/images/:user` · `GET /api/images/:user/:imageId/status` · `POST /api/images/:user/upload` · `GET /api/print-config/:user` · `POST /api/print` · `POST /api/capture` · `GET /api/kiosk-config` · `GET /api/headline` · `GET /api/health`
+
+Legacy (disabled): `GET /api/themes`, `POST /api/images/:user/:imageId/process` → `404 not_available`
 
 ### Socket events (kiosk listens)
 
-`kiosk-trial-start` · `kiosk-trial-skip` · `kiosk-main-start` · `session-ended` · `session-state` · `photo-processed`
+`kiosk-trial-start` · `kiosk-trial-skip` · `kiosk-main-start` · `session-ended` · `session-state` · `session-timer-update` · `new-photo`
 
-Gallery also listens: `new-photo`, `photo-processed`
+Gallery also listens: `new-photo`
 
 Unused in UI today: `session-paused`, `session-resumed`
 
@@ -268,7 +292,7 @@ Unused in UI today: `session-paused`, `session-resumed`
 - Electron **loads localhost:5180** in dev — production packaging incomplete
 - `CameraService` in `main.js` is a **stub**
 - Kiosk config key mismatch risk: `sessionDurationMinutes` (API) vs `sessionDurationSeconds` (config.js)
-- `ai-photo` runs **remove-bg + theme** (WC2026 presets + classic); gallery sandbox can re-apply themes
+- `self-photo` + `ai-self-photo` packages; AI generation pipeline (OpenAI + bg removal + composite)
 - Print copies forced to `1` in api (people-based logic commented out)
 
 ---
@@ -299,14 +323,17 @@ New print template?
 ## Run locally
 
 ```bash
-cd api && node server.js                    # :4000
-cd api && npm run smoke-test                # health + themes (API must be running)
+cd api && node server.js                    # :4000 (Node 22+)
+cd api && npm run validate:ai-theme-previews
+cd api && npm run smoke-test                # API must be running
 cd studio-kiosk && npm run dev              # :5173
-cd studio-kiosk && npm run smoke-test:print # layout/margin/selection smoke
+cd studio-kiosk && npm run build
 cd kiosk-app && npm run dev                 # :5180 + Electron
 ```
 
-**Production:** copy `api/.env.production.example` → `api/.env`, set `API_PUBLIC_HOST` to studio LAN IP, run `npm run generate:wc2026-assets` if WC PNGs missing, set `studio-kiosk/.env.local` `NEXT_PUBLIC_API_URL` to same IP.
+Manual AI E2E: [AI_SELF_PHOTO_QA.md](./AI_SELF_PHOTO_QA.md)
+
+**Production:** copy `api/.env.production.example` → `api/.env`, set `API_PUBLIC_HOST` to studio LAN IP, set `studio-kiosk/.env.local` `NEXT_PUBLIC_API_URL` to same IP.
 
 ---
 

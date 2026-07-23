@@ -13,14 +13,27 @@ export function useCameraPreview() {
 
       if (navigator.mediaDevices?.enumerateDevices) {
         const devices = await navigator.mediaDevices.enumerateDevices();
-        const capture = devices.find(
-          (d) =>
-            d.kind === "videoinput" &&
-            /hdmi|capture|elgato|usb video/i.test(d.label || "")
+        const videoInputs = devices.filter((d) => d.kind === "videoinput");
+        const preferBuiltin =
+          import.meta.env.DEV ||
+          import.meta.env.VITE_PREFER_BUILTIN_CAMERA === "true";
+
+        const capture = preferBuiltin
+          ? null
+          : videoInputs.find((d) =>
+              /hdmi|capture|elgato|usb video/i.test(d.label || "")
+            );
+
+        const builtin = videoInputs.find((d) =>
+          /facetime|built[- ]?in|integrated|isight|webcam/i.test(d.label || "")
         );
 
-        if (capture) {
-          constraints = { video: { ...baseConstraints, deviceId: { exact: capture.deviceId } } };
+        const selected = capture || (preferBuiltin ? builtin : null) || videoInputs[0];
+
+        if (selected?.deviceId) {
+          constraints = {
+            video: { ...baseConstraints, deviceId: { exact: selected.deviceId } },
+          };
         }
       }
 

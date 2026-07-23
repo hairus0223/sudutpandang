@@ -19,7 +19,7 @@ Inventory of known technical debt, prioritized for a single-studio LAN deploymen
 | Medium | 8 | Incomplete features, legacy code, print/gallery gaps |
 | Low | 6 | Docs, deps hygiene, minor UX |
 
-**Recently resolved (timer sync work):** #8 config key mismatch · #11 timer utilities (partial) · #20 pause/resume/add-time UI
+**Recently resolved (self-photo simplification):** #21 ai-photo package · #23 RegisterForm on home
 
 ---
 
@@ -70,9 +70,9 @@ Inventory of known technical debt, prioritized for a single-studio LAN deploymen
 | 18 | **Dual session UIs** — `SessionKioskClient` (browser) vs `kiosk-app` (Electron) with different capture behavior | High | Single source of truth: operator controls only; kiosk passive; remove duplicate capture from `/session` or document as dev-only | M | Operator may think browser preview equals customer experience — support confusion |
 | 19 | **`new-photo` unused in gallery/session operator UI** — kiosk-app now celebrates on `new-photo` | Medium | Subscribe in `GalleryClient` and/or `SessionKioskClient`; fallback poll | S | Delayed gallery refresh; extra API load from polling |
 | 20 | ~~**Pause/resume/add-time APIs without UI**~~ — **Resolved** — Pause, Resume, +1 min, +5 min in `SessionKioskClient` via `session.service.ts` | — | — | — | — |
-| 21 | **`ai-photo` package is UI-only** — no AI pipeline | Medium | Remove package or implement real processing + honest copy | L | Customer expectation mismatch if marketed as AI |
+| 21 | ~~**`ai-photo` package is UI-only**~~ — **Resolved** — product is self-photo only; AI/theme/pas flows removed | — | — | — | — |
 | 22 | **Print limit inconsistency** — register sets `printLimit: peopleCount`; `/api/print-limit` uses 2/3/5; print copies forced to `1` | Medium | Single rule in `customer.json` + api; restore people-based copies if intended | S | Customers may get wrong number of prints vs package promise |
-| 23 | **`RegisterForm` on home vs `/session`** — home register does not start session | Low | Unify flows or label clearly (“register only”) | S | Staff register on home then wonder why session did not start |
+| 23 | ~~**`RegisterForm` on home vs `/session`**~~ — **Resolved** — home register removed; registration only via `/session` | — | — | — | — |
 | 24 | **`GET /api/print-limit` unused** — gallery uses `print-config` only | Low | Remove dead endpoint or use consistently | S | Confusion for maintainers |
 
 ---

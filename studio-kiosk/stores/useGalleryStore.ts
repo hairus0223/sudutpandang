@@ -3,8 +3,7 @@ import {
   createDefaultSheetRecipe,
   type SheetRecipe,
 } from "@/lib/sheetRecipe";
-import type { GalleryImageData, PackageType } from "@/lib/imageTypes";
-import type { LookId } from "@/lib/lookPresets";
+import type { GalleryImageData, PackageType, PrintVariant, AiThemeType } from "@/lib/imageTypes";
 import { FaceBox } from "@/utils/faceDetect";
 import type { SheetBindingMode } from "@/lib/sheetSlotBinding";
 import type { SheetGridAlign } from "@/utils/sheetLayoutEngine";
@@ -62,18 +61,46 @@ export type PhotoTransform = {
 
 type GalleryStore = {
     images: ImageData[];
+    /** Multi-select imageIds for gallery actions (generate / bulk print). */
+    selectedImageIds: string[];
     selectedForPrint: string[];
+    printVariantByFilename: Record<string, PrintVariant>;
     allowedPrint: number;
     packageType: PackageType;
-    sessionLookId: LookId | null;
+    aiGenerateLimit: number;
+    aiGenerateUsed: number;
+    aiGenerateRemaining: number;
+    aiThemeId: string | null;
+    aiThemeLabel: string | null;
+    aiThemeLocked: boolean;
+    aiThemePreviewUrl: string | null;
+    aiThemeType: AiThemeType | null;
     galleryUser: string | null;
 
     setImages: (images: ImageData[]) => void;
     setGalleryUser: (user: string | null) => void;
     setAllowedPrint: (n: number) => void;
     setPackageType: (packageType: PackageType) => void;
-    setSessionLookId: (lookId: LookId | null) => void;
-    togglePrint: (filename: string) => void;
+    setAiQuota: (quota: {
+        limit: number;
+        used: number;
+        remaining: number;
+    }) => void;
+    setSessionTheme: (theme: {
+        aiThemeId: string | null;
+        aiThemeLabel: string | null;
+        aiThemeLocked: boolean;
+        aiThemePreviewUrl?: string | null;
+        aiThemeType?: AiThemeType | null;
+    }) => void;
+    togglePrint: (filename: string, variant?: PrintVariant) => void;
+    removeFromPrint: (filename: string) => void;
+    bulkAddToPrint: (filenames: string[], variant?: PrintVariant) => void;
+    bulkRemoveFromPrint: (filenames: string[]) => void;
+    bulkTogglePrint: (filenames: string[], variant?: PrintVariant) => void;
+    getPrintVariant: (filename: string) => PrintVariant;
+    toggleGallerySelection: (imageId: string) => void;
+    clearGallerySelection: () => void;
     resetSelection: () => void;
     reset: () => void;
 
@@ -163,24 +190,70 @@ type GalleryStore = {
 
 export const useGalleryStore = create<GalleryStore>((set, get) => ({
     images: [],
+    selectedImageIds: [],
     selectedForPrint: [],
+    printVariantByFilename: {},
     allowedPrint: 0,
     packageType: "self-photo",
-    sessionLookId: null,
+    aiGenerateLimit: 0,
+    aiGenerateUsed: 0,
+    aiGenerateRemaining: 0,
+    aiThemeId: null,
+    aiThemeLabel: null,
+    aiThemeLocked: false,
+    aiThemePreviewUrl: null,
+    aiThemeType: null,
     galleryUser: null,
 
     setImages: (images) => set({ images }),
     setGalleryUser: (galleryUser) => set({ galleryUser }),
     setAllowedPrint: (n) => set({ allowedPrint: n }),
     setPackageType: (packageType) => set({ packageType }),
-    setSessionLookId: (sessionLookId) => set({ sessionLookId }),
+    setAiQuota: ({ limit, used, remaining }) =>
+        set({
+            aiGenerateLimit: limit,
+            aiGenerateUsed: used,
+            aiGenerateRemaining: remaining,
+        }),
+    setSessionTheme: ({
+        aiThemeId,
+        aiThemeLabel,
+        aiThemeLocked,
+        aiThemePreviewUrl,
+        aiThemeType,
+    }) =>
+        set({
+            aiThemeId,
+            aiThemeLabel,
+            aiThemeLocked,
+            ...(aiThemePreviewUrl !== undefined
+                ? { aiThemePreviewUrl: aiThemePreviewUrl ?? null }
+                : {}),
+            ...(aiThemeType !== undefined
+                ? { aiThemeType: aiThemeType ?? null }
+                : {}),
+        }),
 
-    togglePrint: (filename) => {
-        const { selectedForPrint, allowedPrint } = get();
+    togglePrint: (filename, variant = "original") => {
+        const { selectedForPrint, allowedPrint, printVariantByFilename } = get();
 
         if (selectedForPrint.includes(filename)) {
+            const current = printVariantByFilename[filename] ?? "original";
+            if (current === variant) {
+                const nextVariants = { ...printVariantByFilename };
+                delete nextVariants[filename];
+                set({
+                    selectedForPrint: selectedForPrint.filter((f) => f !== filename),
+                    printVariantByFilename: nextVariants,
+                });
+                return;
+            }
+
             set({
-                selectedForPrint: selectedForPrint.filter((f) => f !== filename),
+                printVariantByFilename: {
+                    ...printVariantByFilename,
+                    [filename]: variant,
+                },
             });
             return;
         }
@@ -190,12 +263,114 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
             return;
         }
 
-        set({ selectedForPrint: [...selectedForPrint, filename] });
+        set({
+            selectedForPrint: [...selectedForPrint, filename],
+            printVariantByFilename: {
+                ...printVariantByFilename,
+                [filename]: variant,
+            },
+        });
     },
+
+    bulkAddToPrint: (filenames, variant = "original") => {
+        const { selectedForPrint, allowedPrint, printVariantByFilename } = get();
+        const nextSelected = [...selectedForPrint];
+        const nextVariants = { ...printVariantByFilename };
+
+        for (const filename of filenames) {
+            if (nextSelected.includes(filename)) {
+                nextVariants[filename] = variant;
+                continue;
+            }
+            if (nextSelected.length >= allowedPrint) break;
+            nextSelected.push(filename);
+            nextVariants[filename] = variant;
+        }
+
+        set({
+            selectedForPrint: nextSelected,
+            printVariantByFilename: nextVariants,
+        });
+    },
+
+    removeFromPrint: (filename) => {
+        const { selectedForPrint, printVariantByFilename } = get();
+        if (!selectedForPrint.includes(filename)) return;
+        const nextVariants = { ...printVariantByFilename };
+        delete nextVariants[filename];
+        set({
+            selectedForPrint: selectedForPrint.filter((f) => f !== filename),
+            printVariantByFilename: nextVariants,
+        });
+    },
+
+    bulkRemoveFromPrint: (filenames) => {
+        const { selectedForPrint, printVariantByFilename } = get();
+        const removeSet = new Set(filenames);
+        const nextVariants = { ...printVariantByFilename };
+        for (const f of filenames) delete nextVariants[f];
+        set({
+            selectedForPrint: selectedForPrint.filter((f) => !removeSet.has(f)),
+            printVariantByFilename: nextVariants,
+        });
+    },
+
+    bulkTogglePrint: (filenames, variant = "original") => {
+        const { selectedForPrint, printVariantByFilename, allowedPrint } = get();
+        if (filenames.length === 0) return;
+
+        const allMatch = filenames.every(
+            (f) =>
+                selectedForPrint.includes(f) &&
+                (printVariantByFilename[f] ?? "original") === variant
+        );
+
+        if (allMatch) {
+            get().bulkRemoveFromPrint(filenames);
+            return;
+        }
+
+        const nextSelected = [...selectedForPrint];
+        const nextVariants = { ...printVariantByFilename };
+
+        for (const filename of filenames) {
+            if (nextSelected.includes(filename)) {
+                nextVariants[filename] = variant;
+                continue;
+            }
+            if (nextSelected.length >= allowedPrint) break;
+            nextSelected.push(filename);
+            nextVariants[filename] = variant;
+        }
+
+        set({
+            selectedForPrint: nextSelected,
+            printVariantByFilename: nextVariants,
+        });
+    },
+
+    getPrintVariant: (filename) => {
+        return get().printVariantByFilename[filename] ?? "original";
+    },
+
+    toggleGallerySelection: (imageId) => {
+        const { selectedImageIds } = get();
+        if (selectedImageIds.includes(imageId)) {
+            set({
+                selectedImageIds: selectedImageIds.filter((id) => id !== imageId),
+            });
+            return;
+        }
+        set({ selectedImageIds: [...selectedImageIds, imageId] });
+    },
+
+    clearGallerySelection: () => set({ selectedImageIds: [] }),
 
     resetSelection: () =>
         set({
+            selectedImageIds: [],
             selectedForPrint: [],
+            printVariantByFilename: {},
             selectedAdjustSlotIndices: [],
             activeAdjustSlotIndex: null,
             activeAdjustMeta: null,
@@ -203,10 +378,19 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
     reset: () =>
         set({
             images: [],
+            selectedImageIds: [],
             selectedForPrint: [],
+            printVariantByFilename: {},
             allowedPrint: 0,
             packageType: "self-photo",
-            sessionLookId: null,
+            aiGenerateLimit: 0,
+            aiGenerateUsed: 0,
+            aiGenerateRemaining: 0,
+            aiThemeId: null,
+            aiThemeLabel: null,
+            aiThemeLocked: false,
+            aiThemePreviewUrl: null,
+            aiThemeType: null,
             galleryUser: null,
             sheetSlotTransforms: {},
             activeAdjustSlotIndex: null,
@@ -465,13 +649,25 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
                 filter: "none",
             };
 
+            const next: PhotoTransform = {
+                ...prev,
+                ...patch,
+            };
+
+            if (
+                prev.scale === next.scale &&
+                prev.offsetX === next.offsetX &&
+                prev.offsetY === next.offsetY &&
+                prev.filter === next.filter &&
+                prev.intensity === next.intensity
+            ) {
+                return state;
+            }
+
             return {
                 photoTransforms: {
                     ...state.photoTransforms,
-                    [filename]: {
-                        ...prev,
-                        ...patch,
-                    },
+                    [filename]: next,
                 },
             };
         }),

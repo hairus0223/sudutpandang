@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useRef } from "react";
 import { AccessForm } from "./AccessForm";
-import { RegisterForm } from "./RegisterForm";
 import { API_BASE_URL } from "@/lib/env";
 import { PhotoCard } from "../cards/PhotoCard";
 import Link from "next/link";
@@ -24,9 +23,7 @@ export function HeadlineGallery() {
   const [flipState, setFlipState] = useState<boolean[]>(
     Array(SLOT_COUNT).fill(false)
   );
-  const [activeForm, setActiveForm] = useState<
-    "access" | "register" | null
-  >(null);
+  const [activeForm, setActiveForm] = useState<"access" | null>(null);
 
   const slotIndexRef = useRef(0); // ⬅️ SEQUENTIAL
   const isUpdatingRef = useRef(false);
@@ -165,33 +162,43 @@ export function HeadlineGallery() {
             </div>
           </div>
 
-          {/* Footer buttons — responsive */}
-          <div className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 flex flex-wrap gap-2 sm:gap-4 justify-end">
-            <Link href="/session">
-              <button className="rounded bg-blue-600 px-4 py-2 sm:px-6 sm:py-3 text-sm sm:text-base text-white shadow-lg hover:bg-blue-700">
-                Buka Mode Sesi
+          {/* Footer — operator actions */}
+          <div className="fixed bottom-4 left-4 right-4 z-50 flex flex-wrap items-end justify-between gap-3 sm:bottom-6 sm:left-6 sm:right-6">
+            <p className="max-w-xs text-xs text-white/45">
+              Self Photo Studio · operator controls
+            </p>
+            <div className="flex flex-wrap gap-2 sm:gap-3 justify-end">
+              <Link href="/admin/ai-theme-research">
+                <button
+                  type="button"
+                  className="min-h-11 rounded-lg border border-violet-400/40 bg-violet-500/10 px-5 py-2.5 text-sm text-violet-100 hover:bg-violet-500/20 sm:px-6 sm:text-base"
+                >
+                  AI Research
+                </button>
+              </Link>
+              <Link href="/session">
+                <button
+                  type="button"
+                  className="min-h-11 rounded-lg bg-[#B59240] px-5 py-2.5 text-sm font-semibold text-black shadow-lg hover:bg-[#C9A855] sm:px-6 sm:text-base"
+                >
+                  Mulai Sesi
+                </button>
+              </Link>
+              <button
+                type="button"
+                onClick={() => setActiveForm("access")}
+                className="min-h-11 rounded-lg border border-white/20 bg-white/10 px-5 py-2.5 text-sm text-white hover:bg-white/15 sm:px-6 sm:text-base"
+              >
+                Akses Foto
               </button>
-            </Link>
-            <button
-              onClick={() => setActiveForm("access")}
-              className="rounded bg-blue-600 px-4 py-2 sm:px-6 sm:py-3 text-sm sm:text-base text-white shadow-lg hover:bg-blue-700"
-            >
-              Access Photo
-            </button>
-            <button
-              onClick={() => setActiveForm("register")}
-              className="rounded bg-green-600 px-4 py-2 sm:px-6 sm:py-3 text-sm sm:text-base text-white shadow-lg hover:bg-green-700"
-            >
-              Register
-            </button>
+            </div>
           </div>
         </>
       )}
 
       {activeForm && (
-        <div className="flex h-full w-full items-center justify-center">
+        <div className="flex h-full w-full items-center justify-center p-4">
           {activeForm === "access" && <AccessForm />}
-          {activeForm === "register" && <RegisterForm />}
 
           <button
             onClick={() => setActiveForm(null)}

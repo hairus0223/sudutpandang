@@ -1,5 +1,4 @@
 import fs from "fs";
-import { BG_REMOVAL_ENABLED, getRemovalModel } from "./backgroundRemoval.js";
 import { THEME_GENERATION_ENABLED } from "./themeGeneration.js";
 import { getThemeApiStatus } from "./themeApiAdapter.js";
 import { getThemeCacheStatus } from "./themeBackgroundCache.js";
@@ -8,8 +7,10 @@ import {
   resolveDefaultThemeId,
   validateAllBundledThemeAssets,
   validateClassicThemeAssets,
+  validateAiSelfPhotoThemeAssets,
   validateWorldCupThemeAssets,
 } from "./themePresets.js";
+import { getPersonSegmentationAssetsStatus } from "./personSegmentation.js";
 
 /**
  * @param {object} params
@@ -67,6 +68,13 @@ export function validateStudioConfig({ baseDir, publicHost, port }) {
     );
   }
 
+  const aiSelfPhotoAssets = validateAiSelfPhotoThemeAssets();
+  if (aiSelfPhotoAssets.missing.length > 0) {
+    warnings.push(
+      `Asset AI Self Photo belum lengkap (${aiSelfPhotoAssets.missing.length}) — jalankan: npm run generate:theme-assets -- --category ai-self-photo`
+    );
+  }
+
   const allAssets = validateAllBundledThemeAssets();
   const incompleteEvents = (allAssets.categories ?? []).filter(
     (category) => category.kind === "event" && !category.assetsReady
@@ -77,12 +85,17 @@ export function validateStudioConfig({ baseDir, publicHost, port }) {
     );
   }
 
-  if (!BG_REMOVAL_ENABLED) {
-    warnings.push("BG_REMOVAL_ENABLED=false — hapus background otomatis dimatikan.");
-  }
-
   if (!THEME_GENERATION_ENABLED) {
     warnings.push("THEME_GENERATION_ENABLED=false — komposit tema AI dimatikan.");
+  }
+
+  if (process.env.AI_GENERATION_ENABLED !== "false") {
+    const segAssets = getPersonSegmentationAssetsStatus();
+    if (process.env.PERSON_SEGMENTATION_ENABLED !== "false" && !segAssets.assetsFound) {
+      warnings.push(
+        "Person segmentation assets belum ada — jalankan npm install di api/ (@imgly/background-removal-node)"
+      );
+    }
   }
 
   const portNum = Number(port);
@@ -121,8 +134,6 @@ export function getPublicStudioConfig({ baseDir, publicHost, port }) {
     port,
     publicHost,
     baseDir,
-    bgRemovalEnabled: BG_REMOVAL_ENABLED,
-    bgRemovalModel: getRemovalModel(),
     themeGenerationEnabled: THEME_GENERATION_ENABLED,
     defaultThemeId: resolveDefaultThemeId(),
     uploadMaxBytes: Number(process.env.UPLOAD_MAX_BYTES) || 20 * 1024 * 1024,
