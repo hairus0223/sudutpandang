@@ -10,6 +10,7 @@ import {
   validateAiSelfPhotoThemeAssets,
   validateWorldCupThemeAssets,
 } from "./themePresets.js";
+import { validateBundledThemeBackgrounds } from "./aiThemeBackgrounds.js";
 import { getPersonSegmentationAssetsStatus } from "./personSegmentation.js";
 
 /**
@@ -75,6 +76,22 @@ export function validateStudioConfig({ baseDir, publicHost, port }) {
     );
   }
 
+  const boothBackgrounds = validateBundledThemeBackgrounds();
+  if (process.env.AI_GENERATION_ENABLED !== "false" && !boothBackgrounds.ok) {
+    warnings.push(
+      `Portrait booth backgrounds belum lengkap (${boothBackgrounds.missing.join(", ")}) — jalankan: npm run generate:theme-backgrounds`
+    );
+  }
+
+  if (process.env.AI_GENERATION_ENABLED !== "false") {
+    const segAssets = getPersonSegmentationAssetsStatus();
+    if (process.env.PERSON_SEGMENTATION_ENABLED !== "false" && !segAssets.assetsFound) {
+      warnings.push(
+        "Person segmentation assets belum ada — jalankan npm install di api/ (@imgly/background-removal-node)"
+      );
+    }
+  }
+
   const allAssets = validateAllBundledThemeAssets();
   const incompleteEvents = (allAssets.categories ?? []).filter(
     (category) => category.kind === "event" && !category.assetsReady
@@ -87,15 +104,6 @@ export function validateStudioConfig({ baseDir, publicHost, port }) {
 
   if (!THEME_GENERATION_ENABLED) {
     warnings.push("THEME_GENERATION_ENABLED=false — komposit tema AI dimatikan.");
-  }
-
-  if (process.env.AI_GENERATION_ENABLED !== "false") {
-    const segAssets = getPersonSegmentationAssetsStatus();
-    if (process.env.PERSON_SEGMENTATION_ENABLED !== "false" && !segAssets.assetsFound) {
-      warnings.push(
-        "Person segmentation assets belum ada — jalankan npm install di api/ (@imgly/background-removal-node)"
-      );
-    }
   }
 
   const portNum = Number(port);

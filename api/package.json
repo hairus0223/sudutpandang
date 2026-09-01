@@ -9,7 +9,13 @@
     "generate:wc2026-assets": "node scripts/generate-wc2026-assets.js",
     "generate:classic-assets": "node scripts/generate-classic-assets.js",
     "generate:theme-assets": "node scripts/generate-theme-assets.js",
+    "generate:theme-backgrounds": "node scripts/generate-theme-backgrounds.js",
+    "generate:theme-backgrounds:openai": "node scripts/generate-theme-backgrounds.js --openai",
+    "generate:theme-overlays": "node scripts/generate-theme-overlays.js",
+    "generate:ai-theme-previews": "node scripts/generate-ai-theme-previews.js",
     "validate:theme-assets": "node scripts/validate-theme-assets.js",
+    "validate:theme-backgrounds": "node scripts/validate-theme-backgrounds.js",
+    "validate:ai-booth-production": "node scripts/validate-ai-booth-production.js",
     "event:preflight": "node scripts/validate-theme-assets.js --event",
     "smoke-test": "node scripts/smoke-test.js",
     "validate:ai-theme-previews": "node scripts/validate-ai-theme-previews.js",
@@ -17,9 +23,8 @@
     "smoke-test:promo-orders": "node scripts/promo-tools-orders-smoke.js",
     "smoke-test:ai-research": "node scripts/ai-theme-research-smoke.js",
     "smoke-test:person-segmentation": "node scripts/person-segmentation-smoke.js",
-    "smoke-test:masked-edit": "node scripts/masked-edit-smoke.js",
-    "smoke-test:ai-hybrid": "node scripts/ai-hybrid-pipeline-smoke.js",
-    "smoke-test:face-refine": "node scripts/face-refine-smoke.js"
+    "smoke-test:ai-booth": "node scripts/ai-booth-composite-smoke.js",
+    "smoke-test:ai-booth-costume": "node scripts/ai-booth-costume-smoke.js"
   },
   "dependencies": {
     "@imgly/background-removal-node": "^1.4.5",

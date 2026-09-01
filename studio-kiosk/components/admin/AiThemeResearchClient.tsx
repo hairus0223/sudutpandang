@@ -23,8 +23,6 @@ import {
   DollarSign,
   CheckCircle2,
   Circle,
-  Layers,
-  ScanFace,
 } from "lucide-react";
 import { BeforeAfterReveal } from "@/components/gallery/BeforeAfterReveal";
 import { Button } from "@/components/ui/button";
@@ -71,8 +69,10 @@ import {
   publishResearchDraft,
   runResearchPreview,
   updateResearchDraft,
+  uploadDraftBackground,
   uploadResearchSample,
 } from "@/services/aiThemeResearch.service";
+import { ThemeStudioDraftPanel } from "@/components/admin/ThemeStudioDraftPanel";
 import { cn } from "@/lib/utils";
 
 const PROMPT_TEMPLATE = `Transform the provided photo into a highly realistic [TEMA] portrait while preserving the person's exact identity.
@@ -119,8 +119,8 @@ const FALLBACK_QUALITY_PRESETS: ResearchQualityPreset[] = [
 
 const WORKFLOW_STEPS = [
   { id: 1, label: "Sample", hint: "Upload foto studio" },
-  { id: 2, label: "Prompt", hint: "Tulis & simpan draft" },
-  { id: 3, label: "Preview", hint: "Generate AI" },
+  { id: 2, label: "Paket tema", hint: "Bg + pipeline + kostum" },
+  { id: 3, label: "Preview booth", hint: "Pipeline production" },
   { id: 4, label: "Publish", hint: "Ke registrasi" },
 ] as const;
 
@@ -129,6 +129,14 @@ const emptyDraft = (): DraftInput => ({
   transformPrompt: PROMPT_TEMPLATE,
   negativePrompt: DEFAULT_NEGATIVE,
   notes: "",
+  themeId: "",
+  label: "",
+  description: "",
+  previewColor: "#A67B5B",
+  pipelineMode: "composite-costume",
+  costumePresetId: "wild-west",
+  customWardrobe: "",
+  promptMode: "studio",
 });
 
 const fieldClass =
@@ -159,6 +167,10 @@ export function AiThemeResearchClient() {
   const [usageCostUsd, setUsageCostUsd] = useState(0);
   const [usageCalls, setUsageCalls] = useState(0);
   const [qualityPresetId, setQualityPresetId] = useState("identity");
+  const [showAdvancedPrompts, setShowAdvancedPrompts] = useState(false);
+  const [backgroundUrl, setBackgroundUrl] = useState<string | null>(null);
+  const [backgroundReady, setBackgroundReady] = useState(false);
+  const [uploadingBackground, setUploadingBackground] = useState(false);
 
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishId, setPublishId] = useState("");
@@ -172,12 +184,23 @@ export function AiThemeResearchClient() {
     [samples, selectedSampleId]
   );
 
+  const costumePresets = meta?.costumePresets?.length
+    ? meta.costumePresets
+    : [{ id: "wild-west", label: "Wild West", description: "", previewColor: "#A67B5B" }];
+
   const workflowStep = useMemo(() => {
     if (!selectedSampleId) return 1;
-    if (!form.transformPrompt.trim() || !activeDraftId) return 2;
+    if (!activeDraftId || !form.workingTitle.trim()) return 2;
+    if (!backgroundReady) return 2;
     if (!latestRun || latestRun.status !== "ready") return 3;
     return 4;
-  }, [selectedSampleId, form.transformPrompt, activeDraftId, latestRun]);
+  }, [
+    selectedSampleId,
+    activeDraftId,
+    form.workingTitle,
+    backgroundReady,
+    latestRun,
+  ]);
 
   const qualityPresets = meta?.qualityPresets?.length
     ? meta.qualityPresets
@@ -302,15 +325,30 @@ export function AiThemeResearchClient() {
       transformPrompt: draft.transformPrompt,
       negativePrompt: draft.negativePrompt,
       notes: draft.notes,
+      themeId: draft.themeId ?? "",
+      label: draft.label ?? draft.workingTitle,
+      description: draft.description ?? draft.workingTitle,
+      previewColor: draft.previewColor ?? "#A67B5B",
+      pipelineMode: draft.pipelineMode ?? "composite-costume",
+      costumePresetId: draft.costumePresetId ?? "wild-west",
+      customWardrobe: draft.customWardrobe ?? "",
+      promptMode: draft.promptMode ?? "studio",
     });
-    setPublishLabel(draft.workingTitle);
-    setPublishDescription(draft.workingTitle);
-    setPublishId(slugifyThemeId(draft.workingTitle));
+    setBackgroundUrl(draft.backgroundUrl ?? null);
+    setBackgroundReady(Boolean(draft.backgroundReady));
+    setShowAdvancedPrompts(draft.promptMode === "advanced");
+    setPublishLabel(draft.label ?? draft.workingTitle);
+    setPublishDescription(draft.description ?? draft.workingTitle);
+    setPublishId(slugifyThemeId(draft.themeId || draft.workingTitle));
+    setPublishColor(draft.previewColor ?? "#A67B5B");
   };
 
   const handleNewDraft = () => {
     setActiveDraftId(null);
     setForm(emptyDraft());
+    setBackgroundUrl(null);
+    setBackgroundReady(false);
+    setShowAdvancedPrompts(false);
     setPublishLabel("");
     setPublishDescription("");
     setPublishId("");
@@ -318,9 +356,19 @@ export function AiThemeResearchClient() {
 
   const handleSaveDraft = async () => {
     if (!token) return;
-    if (!form.workingTitle.trim() || !form.transformPrompt.trim() || !form.negativePrompt.trim()) {
-      toast("Judul, prompt, dan negative prompt wajib diisi.", "error");
+    if (!form.workingTitle.trim()) {
+      toast("Nama tema wajib diisi.", "error");
       return;
+    }
+    if (form.costumePresetId === "custom" && !form.customWardrobe?.trim()) {
+      toast("Deskripsi kostum custom wajib diisi.", "error");
+      return;
+    }
+    if (form.promptMode === "advanced") {
+      if (!form.transformPrompt.trim() || !form.negativePrompt.trim()) {
+        toast("Prompt advanced wajib lengkap.", "error");
+        return;
+      }
     }
 
     setSavingDraft(true);
@@ -331,16 +379,47 @@ export function AiThemeResearchClient() {
       setActiveDraftId(draft.id);
       setDrafts((prev) => {
         const rest = prev.filter((entry) => entry.id !== draft.id);
-        return [draft, ...rest];
+        return [
+          {
+            ...draft,
+            ...(backgroundUrl ? { backgroundUrl } : {}),
+            backgroundReady,
+          },
+          ...rest,
+        ];
       });
-      setPublishLabel(draft.workingTitle);
-      setPublishDescription(draft.workingTitle);
-      setPublishId(slugifyThemeId(draft.workingTitle));
-      toast(activeDraftId ? "Draft diperbarui." : "Draft disimpan.", "success");
+      setPublishLabel(draft.label ?? draft.workingTitle);
+      setPublishDescription(draft.description ?? draft.workingTitle);
+      setPublishId(slugifyThemeId(draft.themeId || draft.workingTitle));
+      setPublishColor(draft.previewColor ?? "#A67B5B");
+      toast(activeDraftId ? "Paket tema diperbarui." : "Paket tema disimpan.", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Gagal menyimpan draft.", "error");
     } finally {
       setSavingDraft(false);
+    }
+  };
+
+  const handleUploadBackground = async (file: File) => {
+    if (!token) return;
+    if (!activeDraftId) {
+      toast("Simpan draft dulu sebelum upload background.", "error");
+      return;
+    }
+
+    setUploadingBackground(true);
+    try {
+      const draft = await uploadDraftBackground(token, activeDraftId, file);
+      setBackgroundUrl(draft.backgroundUrl ?? null);
+      setBackgroundReady(Boolean(draft.backgroundReady));
+      setDrafts((prev) =>
+        prev.map((entry) => (entry.id === draft.id ? { ...entry, ...draft } : entry))
+      );
+      toast("Background tema diunggah.", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Upload background gagal.", "error");
+    } finally {
+      setUploadingBackground(false);
     }
   };
 
@@ -384,8 +463,12 @@ export function AiThemeResearchClient() {
       toast("Pilih foto sample dulu.", "error");
       return;
     }
-    if (!form.transformPrompt.trim() || !form.negativePrompt.trim()) {
-      toast("Prompt wajib diisi sebelum generate.", "error");
+    if (!activeDraftId) {
+      toast("Simpan paket tema dulu.", "error");
+      return;
+    }
+    if (!backgroundReady) {
+      toast("Upload background foto dulu.", "error");
       return;
     }
 
@@ -393,10 +476,14 @@ export function AiThemeResearchClient() {
     try {
       const { run } = await runResearchPreview(token, {
         sampleId: selectedSampleId,
-        transformPrompt: form.transformPrompt,
-        negativePrompt: form.negativePrompt,
         draftId: activeDraftId,
         qualityPreset: qualityPresetId,
+        ...(form.promptMode === "advanced"
+          ? {
+              transformPrompt: form.transformPrompt,
+              negativePrompt: form.negativePrompt,
+            }
+          : {}),
       });
 
       setLatestRun(run);
@@ -428,12 +515,17 @@ export function AiThemeResearchClient() {
 
   const openPublish = () => {
     if (!activeDraftId) {
-      toast("Simpan draft dulu sebelum publish.", "error");
+      toast("Simpan paket tema dulu sebelum publish.", "error");
       return;
     }
-    setPublishLabel(form.workingTitle);
-    setPublishDescription(form.workingTitle);
-    setPublishId(slugifyThemeId(form.workingTitle));
+    if (!backgroundReady) {
+      toast("Upload background foto dulu.", "error");
+      return;
+    }
+    setPublishLabel(form.label ?? form.workingTitle);
+    setPublishDescription(form.description ?? form.workingTitle);
+    setPublishId(slugifyThemeId(form.themeId || form.workingTitle));
+    setPublishColor(form.previewColor ?? "#A67B5B");
     setPublishOpen(true);
   };
 
@@ -491,9 +583,9 @@ export function AiThemeResearchClient() {
           <div className="flex items-center gap-3">
             <FlaskConical className="size-8 text-violet-300" />
             <div>
-              <h1 className="text-xl font-semibold">AI Theme Research</h1>
+              <h1 className="text-xl font-semibold">Theme Studio</h1>
               <p className="text-sm text-white/55">
-                Uji prompt tema baru sebelum dipublish ke registrasi.
+                Buat paket tema AI Photo Booth sebelum dipublish ke registrasi.
               </p>
             </div>
           </div>
@@ -541,9 +633,9 @@ export function AiThemeResearchClient() {
           <div className="flex items-center gap-3">
             <FlaskConical className="size-7 text-violet-300" />
             <div>
-              <h1 className="text-lg font-semibold sm:text-xl">AI Theme Research Lab</h1>
+              <h1 className="text-lg font-semibold sm:text-xl">Theme Studio</h1>
               <p className="text-xs text-white/50 sm:text-sm">
-                Iterasi prompt murah → publish ke gallery production
+                Buat paket tema booth — bg foto, pipeline, kostum preset
               </p>
             </div>
           </div>
@@ -572,29 +664,7 @@ export function AiThemeResearchClient() {
               Pipeline
             </span>
             <span className="rounded-full border border-violet-400/30 bg-violet-500/10 px-2.5 py-0.5 text-[11px] text-violet-100">
-              {meta?.pipeline?.name ?? "hybrid-v2"}
-            </span>
-            <span
-              className={cn(
-                "rounded-full border px-2.5 py-0.5 text-[11px]",
-                meta?.maskedEditEnabled
-                  ? "border-sky-400/30 bg-sky-500/10 text-sky-100"
-                  : "border-white/15 text-white/40"
-              )}
-            >
-              <Layers className="mr-1 inline size-3" />
-              masked {meta?.maskedEditEnabled ? "on" : "off"}
-            </span>
-            <span
-              className={cn(
-                "rounded-full border px-2.5 py-0.5 text-[11px]",
-                meta?.pipeline?.faceRefine?.available
-                  ? "border-amber-400/30 bg-amber-500/10 text-amber-100"
-                  : "border-white/15 text-white/40"
-              )}
-            >
-              <ScanFace className="mr-1 inline size-3" />
-              face refine {meta?.pipeline?.faceRefine?.available ? "on" : "off"}
+              {meta?.pipeline?.name ?? "composite-only"}
             </span>
             <span className="ml-auto text-[11px] text-white/45">
               Preview ~{formatUsd(previewCostEstimate)} ({selectedQualityPreset.quality}/
@@ -735,7 +805,7 @@ export function AiThemeResearchClient() {
         <section className={cn(galleryPanelClass, "lg:col-span-5 space-y-4")}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-white/70">
-              Draft prompt
+              Paket tema
             </h2>
             <div className="flex flex-wrap gap-2">
               <button type="button" className={btnNeutral(false, "px-3 py-1.5 text-xs")} onClick={handleNewDraft}>
@@ -774,53 +844,22 @@ export function AiThemeResearchClient() {
             </div>
           ) : null}
 
-          <label className="block space-y-1.5 text-sm">
-            <span className="text-white/65">Judul kerja</span>
-            <input
-              className={fieldClass}
-              value={form.workingTitle}
-              onChange={(e) => {
-                const value = e.target.value;
-                setForm((prev) => ({ ...prev, workingTitle: value }));
-                setPublishLabel(value);
-                setPublishDescription(value);
-                setPublishId(slugifyThemeId(value));
-              }}
-              placeholder="Contoh: Viking Warrior"
-            />
-          </label>
-
-          <label className="block space-y-1.5 text-sm">
-            <span className="text-white/65">Transform prompt</span>
-            <textarea
-              className={cn(fieldClass, "min-h-[220px] resize-y font-mono text-[13px] leading-relaxed")}
-              value={form.transformPrompt}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, transformPrompt: e.target.value }))
-              }
-            />
-          </label>
-
-          <label className="block space-y-1.5 text-sm">
-            <span className="text-white/65">Negative prompt</span>
-            <textarea
-              className={cn(fieldClass, "min-h-[100px] resize-y font-mono text-[13px]")}
-              value={form.negativePrompt}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, negativePrompt: e.target.value }))
-              }
-            />
-          </label>
-
-          <label className="block space-y-1.5 text-sm">
-            <span className="text-white/65">Catatan (opsional)</span>
-            <textarea
-              className={cn(fieldClass, "min-h-[72px] resize-y")}
-              value={form.notes}
-              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-              placeholder="Iterasi prompt, feedback hasil, dll."
-            />
-          </label>
+          <ThemeStudioDraftPanel
+            form={form}
+            onChange={setForm}
+            costumePresets={costumePresets}
+            backgroundUrl={backgroundUrl}
+            backgroundReady={backgroundReady}
+            uploadingBackground={uploadingBackground}
+            onUploadBackground={handleUploadBackground}
+            showAdvanced={showAdvancedPrompts}
+            onToggleAdvanced={() => setShowAdvancedPrompts((prev) => !prev)}
+            onTitleChange={(title) => {
+              setPublishLabel(title);
+              setPublishDescription(title);
+              setPublishId(slugifyThemeId(title));
+            }}
+          />
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -879,7 +918,7 @@ export function AiThemeResearchClient() {
               ) : (
                 <Sparkles className="size-4" />
               )}
-              Generate preview
+              Generate preview booth
               <span className="text-xs font-normal opacity-75">
                 (~{formatUsd(previewCostEstimate)})
               </span>
@@ -912,7 +951,7 @@ export function AiThemeResearchClient() {
               beforeSrc={selectedSample.url}
               afterSrc={latestRun.resultUrl}
               beforeLabel="Sample"
-              afterLabel="AI"
+              afterLabel="Booth"
               autoReveal
               className="rounded-xl"
             />
@@ -955,11 +994,6 @@ export function AiThemeResearchClient() {
                         {latestRun.quality && latestRun.inputFidelity
                           ? ` ${latestRun.quality}/${latestRun.inputFidelity}`
                           : ""}
-                      </span>
-                    ) : null}
-                    {latestRun.faceRefined ? (
-                      <span className="rounded-full border border-amber-400/30 px-2 py-0.5 text-amber-100">
-                        face refined
                       </span>
                     ) : null}
                   </div>

@@ -4,6 +4,8 @@ import {
   BUNDLED_AI_THEMES,
   getActiveAiThemes,
   getActiveAiThemeMap,
+  getThemeCostumePrompt,
+  getThemeCostumeNegativePrompt,
 } from "./aiThemeCatalog.js";
 import { resolveBaseDir } from "./studioPaths.js";
 
@@ -49,6 +51,8 @@ export function listAiThemes(baseDir = resolveBaseDir()) {
 export function getThemeTransformPrompt(theme) {
   return theme.transformPrompt;
 }
+
+export { getThemeCostumePrompt, getThemeCostumeNegativePrompt };
 
 /**
  * @param {AiTheme} theme

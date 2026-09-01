@@ -115,6 +115,28 @@ export async function fetchResearchDrafts(token: string): Promise<ResearchDraft[
   return data.drafts;
 }
 
+export async function fetchCostumePresets(token: string) {
+  const data = await adminFetch<{ presets: import("@/lib/aiThemeResearchTypes").CostumePreset[] }>(
+    "/api/admin/ai-theme-research/costume-presets",
+    { token }
+  );
+  return data.presets;
+}
+
+export async function uploadDraftBackground(
+  token: string,
+  draftId: string,
+  file: File
+): Promise<ResearchDraft> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const data = await adminFetch<{ draft: ResearchDraft }>(
+    `/api/admin/ai-theme-research/drafts/${encodeURIComponent(draftId)}/background`,
+    { token, method: "POST", formData }
+  );
+  return data.draft;
+}
+
 export async function createResearchDraft(
   token: string,
   input: DraftInput
@@ -157,8 +179,8 @@ export async function runResearchPreview(
   token: string,
   params: {
     sampleId: string;
-    transformPrompt: string;
-    negativePrompt: string;
+    transformPrompt?: string;
+    negativePrompt?: string;
     draftId?: string | null;
     qualityPreset?: string;
   }

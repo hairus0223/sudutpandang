@@ -136,6 +136,56 @@ export const THEME_PRESETS = [
     previewGradient: "linear-gradient(160deg, #78350f, #fbbf24)",
     assetFilename: "wild-west.png",
   },
+  {
+    id: "cyberpunk-neon",
+    label: "Cyberpunk Neon",
+    category: "ai-self-photo",
+    prompt:
+      "Cyberpunk city street at night, neon signs magenta and cyan, wet reflective pavement, portrait photography backdrop, no people",
+    gradient: { from: "#0f172a", to: "#db2777", angle: 135 },
+    previewGradient: "linear-gradient(135deg, #0f172a, #db2777)",
+    assetFilename: "cyberpunk-neon.png",
+  },
+  {
+    id: "royal-fantasy",
+    label: "Royal Fantasy",
+    category: "ai-self-photo",
+    prompt:
+      "Medieval royal throne room, stone arches, red velvet drapes, golden candlelight, regal portrait backdrop, no people",
+    gradient: { from: "#292524", to: "#b45309", angle: 160 },
+    previewGradient: "linear-gradient(160deg, #292524, #b45309)",
+    assetFilename: "royal-fantasy.png",
+  },
+  {
+    id: "k-pop-idol",
+    label: "K-Pop Idol",
+    category: "ai-self-photo",
+    prompt:
+      "K-pop idol studio photoshoot backdrop, soft pastel pink and lavender gradient, beauty lighting, no people",
+    gradient: { from: "#fce7f3", to: "#ddd6fe", angle: 135 },
+    previewGradient: "linear-gradient(135deg, #fce7f3, #ddd6fe)",
+    assetFilename: "k-pop-idol.png",
+  },
+  {
+    id: "vintage-glam",
+    label: "Vintage Glam",
+    category: "ai-self-photo",
+    prompt:
+      "1920s Art Deco ballroom, gold geometric patterns, champagne lighting, Hollywood glamour portrait backdrop, no people",
+    gradient: { from: "#422006", to: "#fbbf24", angle: 120 },
+    previewGradient: "linear-gradient(120deg, #422006, #fbbf24)",
+    assetFilename: "vintage-glam.png",
+  },
+  {
+    id: "anime-hero",
+    label: "Anime Hero",
+    category: "ai-self-photo",
+    prompt:
+      "Anime-inspired hero sky, volumetric light rays, sakura petals, vibrant cinematic portrait backdrop, no people",
+    gradient: { from: "#312e81", to: "#fda4af", angle: 180 },
+    previewGradient: "linear-gradient(180deg, #312e81, #fda4af)",
+    assetFilename: "anime-hero.png",
+  },
 ];
 
 const ENV_DEFAULT_THEME_ID = (process.env.DEFAULT_THEME_ID || "").trim();

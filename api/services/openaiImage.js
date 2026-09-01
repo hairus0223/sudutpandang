@@ -1,5 +1,4 @@
 import fs from "fs";
-import path from "path";
 import sharp from "sharp";
 import { getAiGenerationConfig, getOpenAiImageTierOptions } from "./packageTypes.js";
 import { normalizeMaskForOpenAiEdit } from "./personMask.js";
@@ -308,20 +307,12 @@ export async function generateTransformedImage({
 
   let maskBytes = null;
   if (maskPath || maskBuffer) {
-    try {
-      maskBytes = await resolveOpenAiMaskBytes({
-        maskPath,
-        maskBuffer,
-        width: sourceWidth,
-        height: sourceHeight,
-      });
-    } catch (err) {
-      const code = err instanceof Error ? err.message : String(err);
-      if (code === "edit_mask_not_found" || code === "edit_mask_invalid") {
-        throw err;
-      }
-      throw new Error("edit_mask_invalid");
-    }
+    maskBytes = await resolveOpenAiMaskBytes({
+      maskPath,
+      maskBuffer,
+      width: sourceWidth,
+      height: sourceHeight,
+    });
   }
 
   const form = buildOpenAiEditForm({
@@ -338,11 +329,9 @@ export async function generateTransformedImage({
 
   try {
     const result = await postOpenAiImageForm(form, undefined, timeoutMs);
-    if (maskBytes) {
-      console.log(
-        `[openai] masked edit ${sourceWidth}x${sourceHeight} tier=${tier} quality=${quality}`
-      );
-    }
+    console.log(
+      `[openai] ${maskBytes ? "masked " : ""}edit ${sourceWidth}x${sourceHeight} tier=${tier} quality=${quality}`
+    );
 
     if (billing?.baseDir && billing.source) {
       logAiAnalyticsEvent(billing.baseDir, buildOpenAiUsageRecord({
@@ -384,15 +373,4 @@ export async function generateTransformedImage({
     }
     throw err;
   }
-}
-
-/**
- * Masked costume edit — convenience wrapper requiring a mask path or buffer.
- * @param {Omit<Parameters<typeof generateTransformedImage>[0], "maskPath" | "maskBuffer"> & ({ maskPath: string } | { maskBuffer: Buffer })} params
- */
-export async function generateMaskedTransformedImage(params) {
-  if (!params.maskPath && !params.maskBuffer) {
-    throw new Error("edit_mask_invalid");
-  }
-  return generateTransformedImage(params);
 }

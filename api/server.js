@@ -32,6 +32,7 @@ import {
 } from "./services/packageTypes.js";
 import { listAiThemesPublic, getAiTheme, buildAiJobId, toPublicAiTheme } from "./services/aiThemes.js";
 import { BUNDLED_THEME_PREVIEWS_DIR } from "./services/aiThemePreviews.js";
+import { BUNDLED_THEME_BACKGROUNDS_DIR } from "./services/aiThemeBackgrounds.js";
 import {
   findAiSelectionByJobId,
   findAiSelectionForImage,
@@ -306,6 +307,15 @@ app.use(
     next();
   },
   express.static(BUNDLED_THEME_PREVIEWS_DIR)
+);
+
+app.use(
+  "/theme-backgrounds",
+  (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    next();
+  },
+  express.static(BUNDLED_THEME_BACKGROUNDS_DIR)
 );
 
 app.use(
@@ -1530,7 +1540,7 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 Public host: ${PUBLIC_HOST}`);
   console.log(`📸 Packages: ${PACKAGE_TYPES.join(", ")}`);
   console.log(
-    `🤖 AI Self Photo: ${getAiPipelineStatus().enabled ? "enabled" : "disabled"} (pipeline=${getAiPipelineStatus().pipeline}, OpenAI: ${getAiPipelineStatus().openaiConfigured ? "yes" : "no"}, segmentation: ${getAiPipelineStatus().personSegmentation?.enabled ? getAiPipelineStatus().personSegmentation.assetsFound ? "ready" : "assets-missing" : "off"}, face-refine: ${getAiPipelineStatus().faceRefine?.available ? "on" : getAiPipelineStatus().faceRefine?.enabled ? "assets-missing" : "off"})`
+    `🤖 AI Self Photo: ${getAiPipelineStatus().enabled ? "enabled" : "disabled"} (pipeline=${getAiPipelineStatus().pipeline}, OpenAI: ${getAiPipelineStatus().openaiConfigured ? "yes" : "no"}, segmentation: ${getAiPipelineStatus().personSegmentation?.enabled ? getAiPipelineStatus().personSegmentation.assetsFound ? "ready" : "assets-missing" : "off"})`
   );
   console.log(`❤️  Health: GET /api/health · GET /api/health/image-processing`);
   console.log(`📦 Promo Tools: GET /api/promo-tools/products · GET /api/promo-tools/orders`);

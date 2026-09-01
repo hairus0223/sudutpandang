@@ -1,30 +1,11 @@
 import fs from "fs";
 import path from "path";
 import sharp from "sharp";
-import {
-  getThemeTransformPrompt,
-  getAiTheme,
-  normalizeAiThemeId,
-} from "./aiThemes.js";
+import { getThemeTransformPrompt, getAiTheme, normalizeAiThemeId } from "./aiThemes.js";
 import {
   mapOpenAiErrorToUserMessage,
   generateTransformedImage,
-  OPENAI_MASKED_EDIT_ENABLED,
 } from "./openaiImage.js";
-import { resolveAiThemeBackground } from "./aiThemeBackgrounds.js";
-import { compositeSubject } from "./imageComposite.js";
-import {
-  isFaceRefineAvailable,
-  refineEditedFaceFromOriginal,
-  getFaceRefineStatus,
-} from "./faceRefine.js";
-import { buildCompositeSubjectFromEdited } from "./personMask.js";
-import {
-  mapPersonSegmentationErrorToUserMessage,
-  getPersonSegmentationStatus,
-  segmentAndSaveArtifacts,
-  PERSON_SEGMENTATION_ENABLED,
-} from "./personSegmentation.js";
 import {
   findOriginalPath,
   getAiThemedPath,
@@ -34,14 +15,31 @@ import {
 } from "./imageStorage.js";
 import { getAiGenerationConfig, isAiGenerationEnabled } from "./packageTypes.js";
 import { resolveBaseDir } from "./studioPaths.js";
-
-export const AI_PIPELINE_V2_ENABLED = process.env.AI_PIPELINE_V2_ENABLED !== "false";
+import {
+  getInitialPhaseForTheme,
+  isCompositeBoothAvailable,
+  isCostumePassAvailable,
+  mapCompositeBoothErrorToUserMessage,
+  resolveEffectivePipeline,
+  runCompositeBoothGeneration,
+  runCompositeCostumeBoothGeneration,
+} from "./aiProBooth.js";
+import { getPersonSegmentationStatus } from "./personSegmentation.js";
+import { OPENAI_MASKED_EDIT_ENABLED } from "./openaiImage.js";
+import { getFaceRefineStatus } from "./faceRefine.js";
+import {
+  THEME_PROP_OVERLAYS_ENABLED,
+  validateBundledThemeOverlays,
+} from "./aiThemeOverlays.js";
 
 /**
  * @param {unknown} error
  * @returns {string}
  */
 export function mapAiGenerationErrorToUserMessage(error) {
+  const compositeMessage = mapCompositeBoothErrorToUserMessage(error);
+  if (compositeMessage) return compositeMessage;
+
   const message = error instanceof Error ? error.message : String(error ?? "");
 
   if (message === "original_not_found") {
@@ -52,18 +50,6 @@ export function mapAiGenerationErrorToUserMessage(error) {
   }
   if (message === "ai_disabled") {
     return "Generate AI belum aktif. Hubungi staf.";
-  }
-  if (message === "edit_mask_not_found" || message === "edit_mask_invalid") {
-    return mapOpenAiErrorToUserMessage(message);
-  }
-  if (
-    message === "person_segmentation_disabled" ||
-    message.startsWith("PERSON_SEGMENTATION_TIMEOUT") ||
-    message === "invalid_subject_dimensions"
-  ) {
-    return mapPersonSegmentationErrorToUserMessage(
-      error instanceof Error ? error : new Error(message)
-    );
   }
   if (message.startsWith("timeout:")) {
     return "Generate AI terlalu lama. Coba lagi.";
@@ -77,16 +63,6 @@ export function mapAiGenerationErrorToUserMessage(error) {
   }
 
   return "Generate AI gagal. Coba lagi atau hubungi staf.";
-}
-
-/**
- * @returns {boolean}
- */
-export function isHybridPipelineAvailable() {
-  if (!AI_PIPELINE_V2_ENABLED) return false;
-  if (!OPENAI_MASKED_EDIT_ENABLED) return false;
-  if (!PERSON_SEGMENTATION_ENABLED) return false;
-  return getPersonSegmentationStatus().assetsFound;
 }
 
 /**
@@ -107,23 +83,14 @@ async function resolveOriginalDimensions(userDir, imageId) {
   };
 }
 
-/**
- * @param {string} processedDir
- * @param {string} prefix
- */
-async function removeTempFiles(processedDir, prefix) {
-  if (!fs.existsSync(processedDir)) return;
-
-  const entries = await fs.promises.readdir(processedDir);
-  await Promise.all(
-    entries
-      .filter((name) => name.startsWith(prefix))
-      .map((name) => fs.promises.unlink(path.join(processedDir, name)).catch(() => {}))
-  );
+/** @returns {string} */
+export function getAiGenerationInitialPhase() {
+  if (!isCompositeBoothAvailable()) return "generating";
+  return "segmenting";
 }
 
 /**
- * Hybrid v2: segment → masked costume edit → composite Western background.
+ * Direct OpenAI transform: generating → finishing.
  * @param {{
  *   userDir: string,
  *   imageId: string,
@@ -133,121 +100,7 @@ async function removeTempFiles(processedDir, prefix) {
  *   user?: string,
  * }} params
  */
-async function runHybridGeneration({ userDir, imageId, theme, onProgress, jobId, user }) {
-  const { originalPath, width, height } = await resolveOriginalDimensions(
-    userDir,
-    imageId
-  );
-  const processedDir = getProcessedDir(userDir, imageId);
-  fs.mkdirSync(processedDir, { recursive: true });
-
-  onProgress?.("segmenting");
-  const { subjectBuffer, editMask } = await segmentAndSaveArtifacts({
-    userDir,
-    imageId,
-    sourcePath: originalPath,
-  });
-
-  onProgress?.("generating");
-  let editedBuffer = await generateTransformedImage({
-    imagePath: originalPath,
-    prompt: getThemeTransformPrompt(theme),
-    negativePrompt: theme.negativePrompt,
-    width,
-    height,
-    tier: "production",
-    maskBuffer: editMask,
-    billing: {
-      baseDir: resolveBaseDir(),
-      source: "gallery",
-      themeId: theme.id,
-      imageId,
-      jobId,
-      user,
-    },
-  });
-
-  if (isFaceRefineAvailable()) {
-    onProgress?.("refining");
-    editedBuffer = await refineEditedFaceFromOriginal({
-      originalPath,
-      editedBuffer,
-      subjectBuffer,
-    });
-  }
-
-  onProgress?.("compositing");
-  const compositeSubjectBuffer = await buildCompositeSubjectFromEdited(
-    editedBuffer,
-    subjectBuffer
-  );
-
-  const subjectMeta = await sharp(compositeSubjectBuffer).metadata();
-  const compositeWidth = subjectMeta.width ?? width;
-  const compositeHeight = subjectMeta.height ?? height;
-
-  const { buffer: backgroundBuffer, source: bgSource } = await resolveAiThemeBackground({
-    aiThemeId: theme.id,
-    width: compositeWidth,
-    height: compositeHeight,
-    baseDir: resolveBaseDir(),
-  });
-
-  const stamp = Date.now();
-  const tempSubjectPath = path.join(processedDir, `.ai-subject-${stamp}.png`);
-  const tempBgPath = path.join(processedDir, `.ai-bg-${theme.id}-${stamp}.png`);
-  const tempCompositePath = path.join(processedDir, `.ai-composite-${stamp}.png`);
-
-  await fs.promises.writeFile(tempSubjectPath, compositeSubjectBuffer);
-  await fs.promises.writeFile(tempBgPath, backgroundBuffer);
-
-  try {
-    await compositeSubject({
-      subjectPath: tempSubjectPath,
-      outputPath: tempCompositePath,
-      background: { type: "image", path: tempBgPath },
-      harmonizeOptions: { harmonize: true, lookId: null },
-    });
-  } finally {
-    await Promise.all([
-      fs.promises.unlink(tempSubjectPath).catch(() => {}),
-      fs.promises.unlink(tempBgPath).catch(() => {}),
-    ]);
-  }
-
-  onProgress?.("finishing");
-  const outputPath = getAiThemedPath(userDir, imageId, theme.id);
-  await sharp(tempCompositePath)
-    .jpeg({ quality: 92, mozjpeg: true })
-    .toFile(outputPath);
-
-  await fs.promises.unlink(tempCompositePath).catch(() => {});
-  await removeTempFiles(processedDir, `.ai-subject-`);
-  await removeTempFiles(processedDir, `.ai-bg-`);
-  await removeTempFiles(processedDir, `.ai-composite-`);
-
-  const relativePath = getAiThemedRelativePath(imageId, theme.id);
-  updateAiVariantInMeta(userDir, imageId, theme.id, relativePath);
-
-  console.log(
-    `[ai-gen] hybrid ${imageId} theme=${theme.id} bg=${bgSource} → ${path.basename(outputPath)}`
-  );
-
-  return { outputPath, relativePath, pipeline: "hybrid-v2" };
-}
-
-/**
- * Legacy v1: one-shot OpenAI edit (full frame).
- * @param {{
- *   userDir: string,
- *   imageId: string,
- *   theme: import("./aiThemes.js").AiTheme,
- *   onProgress?: (phase: string) => void,
- *   jobId?: string,
- *   user?: string,
- * }} params
- */
-async function runLegacyGeneration({ userDir, imageId, theme, onProgress, jobId, user }) {
+async function runDirectGeneration({ userDir, imageId, theme, onProgress, jobId, user }) {
   const { originalPath, width, height } = await resolveOriginalDimensions(
     userDir,
     imageId
@@ -282,15 +135,91 @@ async function runLegacyGeneration({ userDir, imageId, theme, onProgress, jobId,
   updateAiVariantInMeta(userDir, imageId, theme.id, relativePath);
 
   console.log(
-    `[ai-gen] legacy ${imageId} theme=${theme.id} → ${path.basename(outputPath)}`
+    `[ai-gen] direct ${imageId} theme=${theme.id} → ${path.basename(outputPath)}`
   );
 
-  return { outputPath, relativePath, pipeline: "legacy-v1" };
+  return { outputPath, relativePath, pipeline: "direct" };
 }
 
-/** @returns {string} */
-export function getAiGenerationInitialPhase() {
-  return isHybridPipelineAvailable() ? "segmenting" : "generating";
+/**
+ * Pro booth composite-only: segmenting → compositing → finishing.
+ * @param {{
+ *   userDir: string,
+ *   imageId: string,
+ *   theme: import("./aiThemes.js").AiTheme,
+ *   onProgress?: (phase: string) => void,
+ * }} params
+ */
+async function runCompositeGeneration({ userDir, imageId, theme, onProgress }) {
+  const { originalPath } = await resolveOriginalDimensions(userDir, imageId);
+  const outputPath = getAiThemedPath(userDir, imageId, theme.id);
+
+  const { bgSource } = await runCompositeBoothGeneration({
+    sourcePath: originalPath,
+    theme,
+    outputPath,
+    baseDir: resolveBaseDir(),
+    onProgress,
+    artifacts: { userDir, imageId },
+  });
+
+  const relativePath = getAiThemedRelativePath(imageId, theme.id);
+  updateAiVariantInMeta(userDir, imageId, theme.id, relativePath);
+
+  console.log(
+    `[ai-gen] composite ${imageId} theme=${theme.id} bg=${bgSource} → ${path.basename(outputPath)}`
+  );
+
+  return { outputPath, relativePath, pipeline: "composite-only" };
+}
+
+/**
+ * Pro booth composite-costume: segmenting → generating → refining → compositing → finishing.
+ * @param {{
+ *   userDir: string,
+ *   imageId: string,
+ *   theme: import("./aiThemes.js").AiTheme,
+ *   onProgress?: (phase: string) => void,
+ *   jobId?: string,
+ *   user?: string,
+ * }} params
+ */
+async function runCompositeCostumeGeneration({
+  userDir,
+  imageId,
+  theme,
+  onProgress,
+  jobId,
+  user,
+}) {
+  const { originalPath } = await resolveOriginalDimensions(userDir, imageId);
+  const outputPath = getAiThemedPath(userDir, imageId, theme.id);
+
+  const { bgSource, faceRefined } = await runCompositeCostumeBoothGeneration({
+    sourcePath: originalPath,
+    theme,
+    outputPath,
+    baseDir: resolveBaseDir(),
+    onProgress,
+    artifacts: { userDir, imageId },
+    billing: {
+      baseDir: resolveBaseDir(),
+      source: "gallery",
+      themeId: theme.id,
+      imageId,
+      jobId,
+      user,
+    },
+  });
+
+  const relativePath = getAiThemedRelativePath(imageId, theme.id);
+  updateAiVariantInMeta(userDir, imageId, theme.id, relativePath);
+
+  console.log(
+    `[ai-gen] composite-costume ${imageId} theme=${theme.id} bg=${bgSource} faceRefined=${faceRefined} → ${path.basename(outputPath)}`
+  );
+
+  return { outputPath, relativePath, pipeline: "composite-costume" };
 }
 
 /**
@@ -314,22 +243,60 @@ export async function runAiGeneration({ userDir, imageId, themeId, onProgress, j
     throw new Error("invalid_theme");
   }
 
-  if (isHybridPipelineAvailable()) {
-    return runHybridGeneration({ userDir, imageId, theme, onProgress, jobId, user });
+  const pipeline = resolveEffectivePipeline(theme);
+
+  if (pipeline === "composite-costume") {
+    return runCompositeCostumeGeneration({
+      userDir,
+      imageId,
+      theme,
+      onProgress,
+      jobId,
+      user,
+    });
   }
 
-  return runLegacyGeneration({ userDir, imageId, theme, onProgress, jobId, user });
+  if (pipeline === "composite-only") {
+    return runCompositeGeneration({ userDir, imageId, theme, onProgress });
+  }
+
+  return runDirectGeneration({ userDir, imageId, theme, onProgress, jobId, user });
 }
 
 export function getAiPipelineStatus() {
-  const hybridAvailable = isHybridPipelineAvailable();
+  const compositeAvailable = isCompositeBoothAvailable();
+  const costumeAvailable = isCostumePassAvailable();
+  const defaultMode =
+    process.env.AI_DEFAULT_PIPELINE_MODE || "composite-costume";
+
+  let pipeline = "direct";
+  if (costumeAvailable && defaultMode === "composite-costume") {
+    pipeline = "composite-costume";
+  } else if (compositeAvailable) {
+    pipeline = "composite-only";
+  }
+
+  const overlayReport = validateBundledThemeOverlays();
 
   return {
     ...getAiGenerationConfig(),
-    pipeline: hybridAvailable ? "hybrid-v2" : "legacy-v1",
-    pipelineV2Enabled: AI_PIPELINE_V2_ENABLED,
+    pipeline,
+    compositeBoothAvailable: compositeAvailable,
+    costumePassAvailable: costumeAvailable,
     maskedEditEnabled: OPENAI_MASKED_EDIT_ENABLED,
     faceRefine: getFaceRefineStatus(),
     personSegmentation: getPersonSegmentationStatus(),
+    defaultPipelineMode: defaultMode,
+    fallbackDirect: process.env.AI_PIPELINE_FALLBACK_DIRECT !== "false",
+    propOverlays: {
+      enabled: THEME_PROP_OVERLAYS_ENABLED,
+      bundledReady: overlayReport.ok,
+      missing: overlayReport.missing,
+    },
   };
+}
+
+/** @param {import("./aiThemeCatalog.js").AiTheme} theme */
+export function getAiGenerationInitialPhaseForTheme(theme) {
+  return getInitialPhaseForTheme(theme);
 }

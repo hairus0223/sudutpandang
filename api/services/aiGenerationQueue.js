@@ -6,6 +6,7 @@ import {
 import { logAiAnalyticsEvent } from "./aiAnalytics.js";
 import {
   getAiGenerationInitialPhase,
+  getAiGenerationInitialPhaseForTheme,
   mapAiGenerationErrorToUserMessage,
   runAiGeneration,
 } from "./aiGeneration.js";
@@ -66,7 +67,9 @@ class AiGenerationQueue {
     const startedAt = Date.now();
 
     const theme = getAiTheme(themeId);
-    const initialPhase = getAiGenerationInitialPhase();
+    const initialPhase = theme
+      ? getAiGenerationInitialPhaseForTheme(theme)
+      : getAiGenerationInitialPhase();
 
     logAiAnalyticsEvent(baseDir, {
       type: "generate_started",

@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { AccessForm } from "./AccessForm";
 import { API_BASE_URL } from "@/lib/env";
+import { DEV_DUMMY_HEADLINES, IS_DEV } from "@/lib/devHeadlines";
 import { PhotoCard } from "../cards/PhotoCard";
 import Link from "next/link";
 
@@ -10,6 +11,10 @@ type Headline = {
   filename: string;
   url: string;
 };
+
+function shuffleHeadlines(items: Headline[]) {
+  return [...items].sort(() => Math.random() - 0.5);
+}
 
 const SLOT_COUNT = 6;
 const INTERVAL = 4000;
@@ -33,18 +38,38 @@ export function HeadlineGallery() {
   /* Fetch headlines & init slots */
   /* ---------------------------------- */
   useEffect(() => {
+    const applyHeadlines = (items: Headline[]) => {
+      const shuffled = shuffleHeadlines(items);
+      setHeadlines(shuffled);
+
+      const initialSlots = shuffled.slice(0, SLOT_COUNT);
+      initialSlots.forEach((h) => seenUrlsRef.current.add(h.url));
+      setSlots(initialSlots);
+    };
+
+    const applyDevDummyHeadlines = () => {
+      applyHeadlines(DEV_DUMMY_HEADLINES);
+    };
+
     fetch(`${API_BASE_URL}/api/headline`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`headline fetch failed (${res.status})`);
+        return res.json();
+      })
       .then((data) => {
-        const shuffled = [...data.headlines].sort(
-          () => Math.random() - 0.5
-        );
+        const headlines = Array.isArray(data?.headlines) ? data.headlines : [];
 
-        setHeadlines(shuffled);
+        if (headlines.length === 0 && IS_DEV) {
+          applyDevDummyHeadlines();
+          return;
+        }
 
-        const initialSlots = shuffled.slice(0, SLOT_COUNT);
-        initialSlots.forEach((h) => seenUrlsRef.current.add(h.url));
-        setSlots(initialSlots);
+        applyHeadlines(headlines);
+      })
+      .catch(() => {
+        if (IS_DEV) {
+          applyDevDummyHeadlines();
+        }
       });
   }, []);
 

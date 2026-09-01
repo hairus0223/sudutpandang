@@ -5,7 +5,7 @@ import {
   PERSON_SEGMENTATION_ENABLED,
 } from "./personSegmentation.js";
 
-/** Opt-in: blends original face pixels onto AI-edited output (PR-F). */
+/** Opt-in: blends original face pixels onto AI-edited output (PR-3). */
 export const FACE_REFINE_ENABLED = process.env.FACE_REFINE_ENABLED === "true";
 
 const FACE_REFINE_BLEND_STRENGTH =
@@ -34,8 +34,6 @@ export function getFaceRefineStatus() {
 
 /**
  * Blend original face region onto an AI-edited frame using segmentation bounds.
- * Keeps costume/background from AI while restoring identity pixels in the face zone.
- *
  * @param {{
  *   originalPath: string,
  *   editedBuffer: Buffer,

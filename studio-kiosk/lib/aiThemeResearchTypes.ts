@@ -5,12 +5,34 @@ export type ResearchSample = {
   createdAt: string;
 };
 
-export type ResearchDraft = {
+export type CostumePreset = {
   id: string;
+  label: string;
+  description: string;
+  previewColor: string;
+};
+
+export type AiPipelineMode = "direct" | "composite-only" | "composite-costume";
+
+export type DraftInput = {
   workingTitle: string;
   transformPrompt: string;
   negativePrompt: string;
   notes: string;
+  themeId?: string;
+  label?: string;
+  description?: string;
+  previewColor?: string;
+  pipelineMode?: AiPipelineMode;
+  costumePresetId?: string;
+  customWardrobe?: string;
+  promptMode?: "studio" | "advanced";
+};
+
+export type ResearchDraft = DraftInput & {
+  id: string;
+  backgroundReady?: boolean;
+  backgroundUrl?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -35,7 +57,7 @@ export type ResearchRun = {
   status: "ready" | "failed";
   error: string | null;
   errorCode?: string;
-  editMode?: "full" | "masked";
+  editMode?: "full" | "masked" | "composite" | "composite-costume";
   faceRefined?: boolean;
   qualityPreset?: string;
   quality?: string;
@@ -53,7 +75,6 @@ export type ResearchMeta = {
   runCount: number;
   maxPromptLength: number;
   maxImageBytes: number;
-  maskedEditEnabled?: boolean;
   openaiTier?: {
     research: { quality: string; inputFidelity: string };
     production: { quality: string; inputFidelity: string };
@@ -68,12 +89,13 @@ export type ResearchMeta = {
   };
   pipeline?: {
     name: string;
-    maskedEditEnabled?: boolean;
-    faceRefine?: {
-      enabled: boolean;
-      available: boolean;
-      blendStrength: number;
-    };
+    compositeBoothAvailable?: boolean;
+    costumePassAvailable?: boolean;
+  };
+  costumePresets?: CostumePreset[];
+  studio?: {
+    version: number;
+    defaultPipelineMode: AiPipelineMode;
   };
   usageSummary?: {
     days: number;
@@ -93,13 +115,6 @@ export type ResearchUsageSummary = {
   bySource: Record<string, { calls: number; costUsd: number }>;
   byDay: Record<string, { calls: number; costUsd: number }>;
   byTier: Record<string, { calls: number; costUsd: number }>;
-};
-
-export type DraftInput = {
-  workingTitle: string;
-  transformPrompt: string;
-  negativePrompt: string;
-  notes: string;
 };
 
 export type PublishInput = {

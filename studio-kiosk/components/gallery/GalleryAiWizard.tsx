@@ -47,8 +47,8 @@ import { useGalleryStore } from "@/stores/useGalleryStore";
 
 const PHASE_LABELS: Record<string, string> = {
   segmenting: "Memisahkan subjek…",
-  generating: "Transformasi kostum AI…",
-  refining: "Menyelaraskan wajah…",
+  generating: "Mengganti kostum AI…",
+  refining: "Menjaga wajah asli…",
   compositing: "Menyusun background…",
   finishing: "Finishing…",
   transform: "Transformasi AI…",

@@ -5,24 +5,30 @@ import sharp from "sharp";
 import { mapAiGenerationErrorToUserMessage } from "./aiGeneration.js";
 import { getOpenAiImageTierOptions, RESEARCH_QUALITY_PRESETS, resolveResearchQualityPreset } from "./packageTypes.js";
 import { publishThemeToCatalog, isValidThemeId } from "./aiThemeCatalog.js";
-import { generateTransformedImage, OPENAI_MASKED_EDIT_ENABLED } from "./openaiImage.js";
+import { generateTransformedImage } from "./openaiImage.js";
+import { getAiTheme, normalizeAiThemeId } from "./aiThemes.js";
 import {
-  isFaceRefineAvailable,
-  refineEditedFaceFromOriginal,
-} from "./faceRefine.js";
-import {
-  buildSegmentationMasks,
-  PERSON_SEGMENTATION_ENABLED,
-  segmentPersonFromFile,
-} from "./personSegmentation.js";
+  resolveEffectivePipeline,
+  runCompositeBoothGeneration,
+  runCompositeCostumeBoothGeneration,
+} from "./aiProBooth.js";
 import { resolveBaseDir } from "./studioPaths.js";
 import {
   estimateOpenAiImageCostUsd,
   getOpenAiPricingHints,
 } from "./openAiPricing.js";
-import { getFaceRefineStatus } from "./faceRefine.js";
 import { getAiPipelineStatus } from "./aiGeneration.js";
 import { getAiCostSummary } from "./aiAnalytics.js";
+import {
+  buildThemeFromDraft,
+  cleanupDraftBackgroundStaging,
+  draftHasBackground,
+  listCostumePresets,
+  publishDraftBackground,
+  saveDraftBackground,
+  syncDraftBackgroundForPreview,
+  toPublicDraftBackground,
+} from "./aiThemeStudio.js";
 
 const RESEARCH_IMAGE_MAX_BYTES =
   Number(process.env.AI_RESEARCH_IMAGE_MAX_BYTES) || 20 * 1024 * 1024;
@@ -44,6 +50,15 @@ const MAX_RUNS = 200;
  *   transformPrompt: string,
  *   negativePrompt: string,
  *   notes: string,
+ *   themeId?: string,
+ *   label?: string,
+ *   description?: string,
+ *   previewColor?: string,
+ *   pipelineMode?: import("./aiThemeCatalog.js").AiPipelineMode,
+ *   costumePresetId?: string,
+ *   customWardrobe?: string,
+ *   promptMode?: "studio" | "advanced",
+ *   backgroundReady?: boolean,
  *   createdAt: string,
  *   updatedAt: string,
  * }} ResearchDraft */
@@ -59,7 +74,7 @@ const MAX_RUNS = 200;
  *   status: "ready" | "failed",
  *   error: string | null,
  *   errorCode?: string | null,
- *   editMode?: "full" | "masked" | null,
+ *   editMode?: "full" | "masked" | "composite" | "composite-costume" | null,
  *   faceRefined?: boolean,
  *   qualityPreset?: string | null,
  *   quality?: string | null,
@@ -196,7 +211,21 @@ export function listResearchSamples(baseDir, publicHost) {
  * @param {string} baseDir
  */
 export function listResearchDrafts(baseDir) {
-  return readStore(baseDir).drafts;
+  return readStore(baseDir).drafts.map((draft) => ({
+    ...draft,
+    backgroundReady: draftHasBackground(baseDir, draft.id),
+  }));
+}
+
+/**
+ * @param {string} baseDir
+ * @param {string} publicHost
+ */
+export function listResearchDraftsPublic(baseDir, publicHost) {
+  return listResearchDrafts(baseDir).map((draft) => ({
+    ...draft,
+    ...toPublicDraftBackground(baseDir, publicHost, draft),
+  }));
 }
 
 /**
@@ -283,21 +312,68 @@ export function getSampleFilePath(baseDir, sampleId) {
 
 /**
  * @param {unknown} body
- * @returns {{ workingTitle: string, transformPrompt: string, negativePrompt: string, notes: string }}
+ * @returns {Omit<ResearchDraft, "id" | "createdAt" | "updatedAt">}
  */
 function normalizeDraftInput(body) {
   const workingTitle = String(body?.workingTitle ?? "").trim();
+  const themeId = String(body?.themeId ?? "").trim();
+  const label = String(body?.label ?? workingTitle).trim();
+  const description = String(body?.description ?? label).trim();
+  const previewColor = String(body?.previewColor ?? "#888888").trim();
+  const pipelineMode = String(body?.pipelineMode ?? "composite-costume").trim();
+  const costumePresetId = String(body?.costumePresetId ?? "wild-west").trim();
+  const customWardrobe = String(body?.customWardrobe ?? "").trim();
+  const notes = String(body?.notes ?? "").trim();
   const transformPrompt = String(body?.transformPrompt ?? "").trim();
   const negativePrompt = String(body?.negativePrompt ?? "").trim();
-  const notes = String(body?.notes ?? "").trim();
+  const promptMode = body?.promptMode === "advanced" ? "advanced" : "studio";
 
   if (!workingTitle) throw new Error("working_title_required");
-  if (!transformPrompt) throw new Error("transform_prompt_required");
-  if (!negativePrompt) throw new Error("negative_prompt_required");
+
+  const studioConfigured =
+    (costumePresetId && costumePresetId !== "custom") ||
+    (costumePresetId === "custom" && customWardrobe);
+
+  if (promptMode === "advanced" || !studioConfigured) {
+    if (!transformPrompt) throw new Error("transform_prompt_required");
+    if (!negativePrompt) throw new Error("negative_prompt_required");
+  } else if (costumePresetId === "custom" && !customWardrobe) {
+    throw new Error("custom_wardrobe_required");
+  }
+
   if (transformPrompt.length > MAX_PROMPT_LENGTH) throw new Error("prompt_too_long");
   if (negativePrompt.length > MAX_PROMPT_LENGTH) throw new Error("negative_prompt_too_long");
 
-  return { workingTitle, transformPrompt, negativePrompt, notes };
+  /** @type {Omit<ResearchDraft, "id" | "createdAt" | "updatedAt">} */
+  const draft = {
+    workingTitle,
+    transformPrompt,
+    negativePrompt,
+    notes,
+    themeId,
+    label,
+    description,
+    previewColor,
+    pipelineMode: /** @type {import("./aiThemeCatalog.js").AiPipelineMode} */ (pipelineMode),
+    costumePresetId,
+    customWardrobe,
+    promptMode,
+    backgroundReady: Boolean(body?.backgroundReady),
+  };
+
+  if (studioConfigured && promptMode !== "advanced") {
+    try {
+      const built = buildThemeFromDraft(
+        /** @type {ResearchDraft} */ ({ id: "draft", ...draft })
+      );
+      draft.transformPrompt = built.transformPrompt;
+      draft.negativePrompt = built.negativePrompt;
+    } catch {
+      // keep user-provided prompts when preset build fails mid-save
+    }
+  }
+
+  return draft;
 }
 
 /**
@@ -360,19 +436,14 @@ export function deleteResearchDraft(baseDir, draftId) {
 /**
  * @param {string} baseDir
  * @param {string} publicHost
- * @param {{ sampleId: string, transformPrompt: string, negativePrompt: string, draftId?: string | null, qualityPreset?: string | null }} params
+ * @param {{ sampleId: string, transformPrompt: string, negativePrompt: string, draftId?: string | null, qualityPreset?: string | null, themeId?: string | null }} params
  */
 export async function runResearchPreview(baseDir, publicHost, params) {
   const sampleId = String(params.sampleId ?? "").trim();
-  const transformPrompt = String(params.transformPrompt ?? "").trim();
-  const negativePrompt = String(params.negativePrompt ?? "").trim();
   const draftId = params.draftId ? String(params.draftId).trim() : null;
   const qualityPreset = resolveResearchQualityPreset(params.qualityPreset);
 
   if (!sampleId) throw new Error("sample_id_required");
-  if (!transformPrompt) throw new Error("transform_prompt_required");
-  if (!negativePrompt) throw new Error("negative_prompt_required");
-  if (transformPrompt.length > MAX_PROMPT_LENGTH) throw new Error("prompt_too_long");
 
   const samplePath = getSampleFilePath(baseDir, sampleId);
   if (!samplePath) throw new Error("sample_not_found");
@@ -380,6 +451,31 @@ export async function runResearchPreview(baseDir, publicHost, params) {
   const meta = await sharp(samplePath).metadata();
   const width = meta.width || 1024;
   const height = meta.height || 1536;
+
+  let theme = getAiTheme(normalizeAiThemeId(params.themeId || "wild-west", baseDir), baseDir);
+  let transformPrompt = String(params.transformPrompt ?? "").trim();
+  let negativePrompt = String(params.negativePrompt ?? "").trim();
+  let useStudioDraft = false;
+
+  if (draftId) {
+    const store = readStore(baseDir);
+    const draft = store.drafts.find((entry) => entry.id === draftId);
+    if (!draft) throw new Error("draft_not_found");
+    if (!draftHasBackground(baseDir, draftId)) {
+      throw new Error("background_required");
+    }
+
+    await syncDraftBackgroundForPreview(baseDir, draftId);
+    theme = buildThemeFromDraft(draft, { forPreview: true });
+    transformPrompt = theme.transformPrompt;
+    negativePrompt = theme.negativePrompt;
+    useStudioDraft = true;
+  } else {
+    if (!transformPrompt) throw new Error("transform_prompt_required");
+    if (!negativePrompt) throw new Error("negative_prompt_required");
+    if (transformPrompt.length > MAX_PROMPT_LENGTH) throw new Error("prompt_too_long");
+    if (!theme) throw new Error("invalid_theme");
+  }
 
   const runId = crypto.randomUUID();
   const startedAt = Date.now();
@@ -395,70 +491,84 @@ export async function runResearchPreview(baseDir, publicHost, params) {
     status: "failed",
     error: null,
     errorCode: null,
-    editMode: null,
+    editMode: "full",
     qualityPreset: qualityPreset.id,
     quality: qualityPreset.quality,
     inputFidelity: qualityPreset.inputFidelity,
     createdAt: new Date().toISOString(),
   };
 
-  const useMaskedEdit = OPENAI_MASKED_EDIT_ENABLED && PERSON_SEGMENTATION_ENABLED;
-  /** @type {Buffer | undefined} */
-  let maskBuffer;
-  /** @type {Buffer | undefined} */
-  let subjectBuffer;
-
-  if (useMaskedEdit) {
-    try {
-      ({ subjectBuffer } = await segmentPersonFromFile(samplePath));
-      ({ editMask: maskBuffer } = await buildSegmentationMasks(subjectBuffer));
-      run.editMode = "masked";
-    } catch (segErr) {
-      const segCode = segErr instanceof Error ? segErr.message : String(segErr);
-      console.warn("[ai-theme-research] masked preview fallback to full edit:", segCode);
-      run.editMode = "full";
-    }
-  } else {
-    run.editMode = "full";
-  }
-
   try {
-    let buffer = await generateTransformedImage({
-      imagePath: samplePath,
-      prompt: transformPrompt,
-      negativePrompt,
-      width,
-      height,
-      tier: "research",
-      imageQuality: qualityPreset.quality,
-      imageInputFidelity: qualityPreset.inputFidelity,
-      ...(maskBuffer ? { maskBuffer } : {}),
-      billing: {
-        baseDir,
-        source: "research",
-        runId,
-        draftId,
-      },
-    });
-
-    run.costUsd = estimateOpenAiImageCostUsd({
-      tier: "research",
-      quality: qualityPreset.quality,
-      inputFidelity: qualityPreset.inputFidelity,
-    });
-
-    if (isFaceRefineAvailable() && subjectBuffer) {
-      buffer = await refineEditedFaceFromOriginal({
-        originalPath: samplePath,
-        editedBuffer: buffer,
-        subjectBuffer,
-      });
-      run.faceRefined = true;
+    if (!theme) {
+      throw new Error("invalid_theme");
     }
 
+    const pipeline = resolveEffectivePipeline(theme);
     const resultFilename = `${runId}.jpg`;
     const resultPath = path.join(getResearchResultsDir(baseDir), resultFilename);
-    await sharp(buffer).jpeg({ quality: 92, mozjpeg: true }).toFile(resultPath);
+
+    if (pipeline === "composite-costume") {
+      run.editMode = "composite-costume";
+      const { bgSource, faceRefined } = await runCompositeCostumeBoothGeneration({
+        sourcePath: samplePath,
+        theme,
+        outputPath: resultPath,
+        baseDir,
+        billing: {
+          baseDir,
+          source: "research",
+          runId,
+          draftId: draftId ?? undefined,
+        },
+        tier: "research",
+        imageQuality: qualityPreset.quality,
+        imageInputFidelity: qualityPreset.inputFidelity,
+      });
+      run.costUsd = estimateOpenAiImageCostUsd({
+        tier: "research",
+        quality: qualityPreset.quality,
+        inputFidelity: qualityPreset.inputFidelity,
+      });
+      run.faceRefined = faceRefined;
+      console.log(
+        `[ai-theme-research] composite-costume preview theme=${theme.id} bg=${bgSource} faceRefined=${faceRefined}`
+      );
+    } else if (pipeline === "composite-only") {
+      run.editMode = "composite";
+      const { bgSource } = await runCompositeBoothGeneration({
+        sourcePath: samplePath,
+        theme,
+        outputPath: resultPath,
+        baseDir,
+      });
+      run.costUsd = 0;
+      console.log(`[ai-theme-research] composite preview theme=${theme.id} bg=${bgSource}`);
+    } else {
+      const buffer = await generateTransformedImage({
+        imagePath: samplePath,
+        prompt: transformPrompt,
+        negativePrompt,
+        width,
+        height,
+        tier: "research",
+        imageQuality: qualityPreset.quality,
+        imageInputFidelity: qualityPreset.inputFidelity,
+        billing: {
+          baseDir,
+          source: "research",
+          runId,
+          draftId: draftId ?? undefined,
+        },
+      });
+
+      run.costUsd = estimateOpenAiImageCostUsd({
+        tier: "research",
+        quality: qualityPreset.quality,
+        inputFidelity: qualityPreset.inputFidelity,
+      });
+
+      await sharp(buffer).jpeg({ quality: 92, mozjpeg: true }).toFile(resultPath);
+    }
 
     run.resultFilename = resultFilename;
     run.status = "ready";
@@ -470,6 +580,10 @@ export async function runResearchPreview(baseDir, publicHost, params) {
     run.error = mapAiGenerationErrorToUserMessage(err);
     run.status = "failed";
     console.warn("[ai-theme-research] preview failed:", code);
+  } finally {
+    if (useStudioDraft && draftId) {
+      await cleanupDraftBackgroundStaging(baseDir, draftId).catch(() => {});
+    }
   }
 
   const store = readStore(baseDir);
@@ -500,18 +614,51 @@ export function publishDraftAsTheme(baseDir, params) {
   const store = readStore(baseDir);
   const draft = store.drafts.find((entry) => entry.id === draftId);
   if (!draft) throw new Error("draft_not_found");
+  if (!draftHasBackground(baseDir, draftId)) {
+    throw new Error("background_required");
+  }
 
-  const published = publishThemeToCatalog(baseDir, {
-    id,
-    label,
-    description,
-    transformPrompt: draft.transformPrompt,
-    negativePrompt: draft.negativePrompt,
-    previewColor,
-  });
+  const theme = buildThemeFromDraft(
+    {
+      ...draft,
+      themeId: id,
+      label,
+      description,
+      previewColor,
+    },
+    { publishId: id }
+  );
+
+  publishDraftBackground(baseDir, draftId, id);
+  const published = publishThemeToCatalog(baseDir, theme);
+  cleanupDraftBackgroundStaging(baseDir, draftId).catch(() => {});
 
   return published;
 }
+
+/**
+ * @param {string} baseDir
+ * @param {string} draftId
+ * @param {Buffer} buffer
+ */
+export async function uploadDraftBackground(baseDir, draftId, buffer) {
+  const store = readStore(baseDir);
+  const draft = store.drafts.find((entry) => entry.id === draftId);
+  if (!draft) throw new Error("draft_not_found");
+
+  await saveDraftBackground(baseDir, draftId, buffer);
+
+  const idx = store.drafts.findIndex((entry) => entry.id === draftId);
+  store.drafts[idx] = {
+    ...store.drafts[idx],
+    backgroundReady: true,
+    updatedAt: new Date().toISOString(),
+  };
+  writeStore(baseDir, store);
+  return store.drafts[idx];
+}
+
+export { listCostumePresets };
 
 /**
  * @param {string} baseDir
@@ -553,15 +700,19 @@ export function getResearchMeta(baseDir, publicHost) {
     qualityPresets,
     pipeline: {
       name: pipeline.pipeline,
-      maskedEditEnabled: pipeline.maskedEditEnabled,
-      faceRefine: pipeline.faceRefine,
+      compositeBoothAvailable: pipeline.compositeBoothAvailable,
+      costumePassAvailable: pipeline.costumePassAvailable,
+    },
+    costumePresets: listCostumePresets(),
+    studio: {
+      version: 2,
+      defaultPipelineMode: "composite-costume",
     },
     usageSummary: {
       days: usage.days,
       researchCalls: usage.totalCalls,
       researchCostUsd: usage.totalCostUsd,
     },
-    maskedEditEnabled: OPENAI_MASKED_EDIT_ENABLED && PERSON_SEGMENTATION_ENABLED,
   };
 }
 
@@ -588,6 +739,9 @@ export function mapResearchError(error) {
     sample_not_found: 404,
     draft_not_found: 404,
     invalid_theme_payload: 400,
+    background_required: 400,
+    custom_wardrobe_required: 400,
+    invalid_costume_preset: 400,
   };
 
   if (code in clientErrors) {

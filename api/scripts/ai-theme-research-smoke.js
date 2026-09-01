@@ -7,6 +7,8 @@
  *
  *   node scripts/ai-theme-research-smoke.js --base http://192.168.1.10:4000 --token dev-secret
  */
+import sharp from "sharp";
+
 const DEFAULT_BASE = process.env.SMOKE_TEST_BASE_URL || "http://localhost:4000";
 const DEFAULT_TOKEN = process.env.ADMIN_API_TOKEN || "";
 
@@ -46,6 +48,26 @@ async function fetchJson(base, path, options = {}) {
   return { ok: res.ok, status: res.status, body };
 }
 
+/**
+ * @param {string} base
+ * @param {string} path
+ * @param {{ token: string, field: string, buffer: Buffer, filename: string }} options
+ */
+async function uploadBinary(base, path, options) {
+  const form = new FormData();
+  form.append(options.field, new Blob([options.buffer], { type: "image/jpeg" }), options.filename);
+
+  const res = await fetch(`${base}${path}`, {
+    method: "POST",
+    headers: { "X-Admin-Token": options.token },
+    body: form,
+    cache: "no-store",
+  });
+
+  const body = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, body };
+}
+
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -78,14 +100,22 @@ async function run() {
   assert(meta.ok, `/meta failed (${meta.status})`);
   assert(meta.body.service === "ai-theme-research", "research service id missing");
   console.log(`✓ GET /meta (drafts=${meta.body.draftCount}, samples=${meta.body.sampleCount})`);
+  assert(Array.isArray(meta.body.costumePresets), "costumePresets missing from meta");
+  console.log(`✓ meta costumePresets=${meta.body.costumePresets.length}`);
+
+  const presets = await fetchJson(base, "/api/admin/ai-theme-research/costume-presets", { token });
+  assert(presets.ok, `/costume-presets failed (${presets.status})`);
+  assert(Array.isArray(presets.body.presets) && presets.body.presets.length >= 1, "presets empty");
+  console.log(`✓ GET /costume-presets (${presets.body.presets.length})`);
 
   const created = await fetchJson(base, "/api/admin/ai-theme-research/drafts", {
     method: "POST",
     token,
     body: {
       workingTitle: "Smoke Test Viking",
-      transformPrompt: "Transform into a realistic viking portrait while preserving identity.",
-      negativePrompt: "cartoon, anime, low quality, blurry",
+      costumePresetId: "wild-west",
+      pipelineMode: "composite-costume",
+      promptMode: "studio",
       notes: "automated smoke test",
     },
   });
@@ -107,13 +137,44 @@ async function run() {
     token,
     body: {
       workingTitle: "Smoke Test Viking v2",
-      transformPrompt: "Transform into a realistic viking warrior while preserving identity.",
-      negativePrompt: "cartoon, anime, low quality, blurry",
+      costumePresetId: "royal-fantasy",
+      pipelineMode: "composite-only",
+      promptMode: "studio",
       notes: "updated",
     },
   });
   assert(updated.ok, `update draft failed (${updated.status})`);
-  console.log("✓ PUT /drafts/:id");
+  console.log("✓ PUT /drafts/:id (studio package)");
+
+  const publishBlocked = await fetchJson(base, "/api/admin/ai-theme-research/publish", {
+    method: "POST",
+    token,
+    body: {
+      draftId,
+      id: "smoke-test-viking",
+      label: "Smoke Viking",
+      description: "Tema uji otomatis — boleh dihapus dari config/ai-themes.json",
+      previewColor: "#5C4033",
+    },
+  });
+  assert(publishBlocked.status === 400, "publish should require background");
+  assert(publishBlocked.body.error === "background_required", "expected background_required");
+  console.log("✓ POST /publish blocked without background");
+
+  const bgBuffer = await sharp({
+    create: { width: 768, height: 1024, channels: 3, background: { r: 80, g: 70, b: 60 } },
+  })
+    .jpeg({ quality: 85 })
+    .toBuffer();
+
+  const bgUpload = await uploadBinary(
+    base,
+    `/api/admin/ai-theme-research/drafts/${draftId}/background`,
+    { token, field: "file", buffer: bgBuffer, filename: "bg.jpg" }
+  );
+  assert(bgUpload.status === 201, `background upload failed (${bgUpload.status})`);
+  assert(bgUpload.body.draft?.backgroundReady, "draft backgroundReady false");
+  console.log("✓ POST /drafts/:id/background");
 
   const published = await fetchJson(base, "/api/admin/ai-theme-research/publish", {
     method: "POST",

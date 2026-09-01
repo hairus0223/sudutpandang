@@ -108,11 +108,14 @@ async function run() {
     assert(wildWest.backgroundUrl, "wild-west backgroundUrl missing");
     assert(wildWest.backgroundThemeId === "wild-west", "wild-west backgroundThemeId mismatch");
 
+    assert(wildWest.backgroundUrl.includes("/theme-backgrounds/"), "wild-west should use portrait photo background");
+    assert(wildWest.backgroundSource === "photo", "wild-west backgroundSource should be photo");
+
     const bgRes = await fetch(wildWest.backgroundUrl, { cache: "no-store" });
     assert(bgRes.ok, `wild-west background not loadable (${bgRes.status})`);
-    console.log("✓ GET wild-west background asset");
+    console.log("✓ GET wild-west theme-backgrounds asset");
 
-    assert(aiThemes.body.themes.length === 1, "expected exactly one bundled AI theme");
+    assert(aiThemes.body.themes.length >= 6, "expected at least 6 bundled AI themes");
 
     const samplePreview = withPreview[0].previewUrl;
     const previewHost = new URL(samplePreview).origin;

@@ -30,6 +30,16 @@ export function getThemeAssetSvg(themeId) {
       return goldenHourSvg();
     case "wild-west":
       return wildWestSvg();
+    case "cyberpunk-neon":
+      return cyberpunkNeonSvg();
+    case "royal-fantasy":
+      return royalFantasySvg();
+    case "k-pop-idol":
+      return kPopIdolSvg();
+    case "vintage-glam":
+      return vintageGlamSvg();
+    case "anime-hero":
+      return animeHeroSvg();
     default:
       return null;
   }
@@ -373,6 +383,126 @@ function wildWestSvg() {
 </svg>`;
 }
 
+/** @returns {string} */
+function cyberpunkNeonSvg() {
+  return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#db2777"/>
+      <stop offset="50%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#sky)"/>
+  <rect x="0" y="680" width="${W}" height="600" fill="#020617" opacity="0.85"/>
+  <rect x="120" y="200" width="180" height="520" fill="#1e293b" opacity="0.9"/>
+  <rect x="420" y="280" width="220" height="440" fill="#312e81" opacity="0.85"/>
+  <rect x="780" y="160" width="200" height="560" fill="#1e293b" opacity="0.9"/>
+  <rect x="1100" y="240" width="260" height="480" fill="#4c1d95" opacity="0.8"/>
+  <rect x="1480" y="300" width="180" height="420" fill="#1e293b" opacity="0.85"/>
+  <rect x="80" y="720" width="${W - 160}" height="8" fill="url(#neon)" opacity="0.75"/>
+  <rect x="200" y="420" width="120" height="40" fill="#ec4899" opacity="0.6"/>
+  <rect x="900" y="380" width="160" height="36" fill="#06b6d4" opacity="0.55"/>
+  <ellipse cx="960" cy="900" rx="520" ry="80" fill="#06b6d4" opacity="0.12"/>
+</svg>`;
+}
+
+/** @returns {string} */
+function royalFantasySvg() {
+  return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#292524"/>
+      <stop offset="100%" stop-color="#1c1917"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#fbbf24" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#wall)"/>
+  <rect width="${W}" height="${H}" fill="url(#glow)"/>
+  <rect x="0" y="0" width="280" height="${H}" fill="#7f1d1d" opacity="0.55"/>
+  <rect x="${W - 280}" y="0" width="280" height="${H}" fill="#7f1d1d" opacity="0.55"/>
+  <rect x="680" y="520" width="560" height="420" fill="#991b1b" opacity="0.7" rx="8"/>
+  <polygon points="680,520 960,380 1240,520" fill="#b45309" opacity="0.85"/>
+  <rect x="760" y="600" width="80" height="200" fill="#fcd34d" opacity="0.25"/>
+  <rect x="1080" y="600" width="80" height="200" fill="#fcd34d" opacity="0.25"/>
+  <circle cx="960" cy="720" r="48" fill="#fbbf24" opacity="0.4"/>
+</svg>`;
+}
+
+/** @returns {string} */
+function kPopIdolSvg() {
+  return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fce7f3"/>
+      <stop offset="55%" stop-color="#fbcfe8"/>
+      <stop offset="100%" stop-color="#ddd6fe"/>
+    </linearGradient>
+    <radialGradient id="spot" cx="50%" cy="35%" r="45%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#bg)"/>
+  <rect width="${W}" height="${H}" fill="url(#spot)"/>
+  <circle cx="320" cy="280" r="120" fill="#f472b6" opacity="0.2"/>
+  <circle cx="1520" cy="360" r="160" fill="#a78bfa" opacity="0.18"/>
+  <rect x="0" y="920" width="${W}" height="360" fill="#fdf2f8" opacity="0.5"/>
+</svg>`;
+}
+
+/** @returns {string} */
+function vintageGlamSvg() {
+  return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#422006"/>
+      <stop offset="45%" stop-color="#78350f"/>
+      <stop offset="100%" stop-color="#1c1917"/>
+    </linearGradient>
+    <pattern id="deco" width="80" height="80" patternUnits="userSpaceOnUse">
+      <path d="M0 40 H80 M40 0 V80" stroke="#fbbf24" stroke-width="2" opacity="0.15"/>
+    </pattern>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#gold)"/>
+  <rect width="${W}" height="${H}" fill="url(#deco)"/>
+  <circle cx="960" cy="220" r="140" fill="#fde68a" opacity="0.25"/>
+  <rect x="120" y="480" width="${W - 240}" height="520" fill="#292524" opacity="0.35" rx="4"/>
+  <ellipse cx="960" cy="900" rx="400" ry="60" fill="#fbbf24" opacity="0.15"/>
+</svg>`;
+}
+
+/** @returns {string} */
+function animeHeroSvg() {
+  return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#312e81"/>
+      <stop offset="50%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#fda4af"/>
+    </linearGradient>
+    <radialGradient id="beam" cx="50%" cy="20%" r="60%">
+      <stop offset="0%" stop-color="#fef08a" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#fef08a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#sky)"/>
+  <rect width="${W}" height="${H}" fill="url(#beam)"/>
+  <circle cx="280" cy="420" r="8" fill="#fbcfe8" opacity="0.8"/>
+  <circle cx="520" cy="320" r="6" fill="#fde68a" opacity="0.75"/>
+  <circle cx="1380" cy="380" r="10" fill="#fbcfe8" opacity="0.7"/>
+  <circle cx="1620" cy="520" r="7" fill="#c4b5fd" opacity="0.8"/>
+  <ellipse cx="960" cy="1100" rx="680" ry="120" fill="#4338ca" opacity="0.35"/>
+</svg>`;
+}
+
 export const WC2026_THEME_IDS = [
   "wc2026-stadium-night",
   "wc2026-celebration",
@@ -388,6 +518,13 @@ export const CLASSIC_THEME_IDS = [
   "golden-hour",
 ];
 
-export const AI_SELF_PHOTO_THEME_IDS = ["wild-west"];
+export const AI_SELF_PHOTO_THEME_IDS = [
+  "wild-west",
+  "cyberpunk-neon",
+  "royal-fantasy",
+  "k-pop-idol",
+  "vintage-glam",
+  "anime-hero",
+];
 
 export const THEME_ASSET_SIZE = { width: W, height: H };

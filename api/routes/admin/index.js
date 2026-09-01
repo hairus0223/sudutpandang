@@ -7,14 +7,17 @@ import {
   deleteResearchDraft,
   deleteResearchSample,
   getResearchMeta,
-  listResearchDrafts,
+  listResearchDraftsPublic,
   listResearchRuns,
   listResearchSamples,
   mapResearchError,
   publishDraftAsTheme,
   runResearchPreview,
   updateResearchDraft,
+  uploadDraftBackground,
+  listCostumePresets,
 } from "../../services/aiThemeResearch.js";
+import { toPublicDraftBackground } from "../../services/aiThemeStudio.js";
 import { getActiveAiThemes } from "../../services/aiThemeCatalog.js";
 import { getAiCostSummary } from "../../services/aiAnalytics.js";
 import { getOpenAiPricingHints } from "../../services/openAiPricing.js";
@@ -90,9 +93,13 @@ export function createAiThemeResearchRouter({ baseDir, publicHost }) {
     }
   });
 
+  router.get("/costume-presets", requireAdminToken, (_req, res) => {
+    res.json({ ok: true, presets: listCostumePresets() });
+  });
+
   router.get("/drafts", requireAdminToken, (_req, res) => {
     try {
-      res.json({ ok: true, drafts: listResearchDrafts(baseDir) });
+      res.json({ ok: true, drafts: listResearchDraftsPublic(baseDir, publicHost) });
     } catch (err) {
       sendError(res, err);
     }
@@ -124,6 +131,33 @@ export function createAiThemeResearchRouter({ baseDir, publicHost }) {
       sendError(res, err);
     }
   });
+
+  router.post(
+    "/drafts/:id/background",
+    requireAdminToken,
+    upload.single("file"),
+    async (req, res) => {
+      try {
+        if (!req.file) {
+          res.status(400).json({ ok: false, error: "file_required" });
+          return;
+        }
+
+        const draft = await uploadDraftBackground(baseDir, req.params.id, req.file.buffer);
+        const background = toPublicDraftBackground(baseDir, publicHost, draft);
+
+        res.status(201).json({
+          ok: true,
+          draft: {
+            ...draft,
+            ...background,
+          },
+        });
+      } catch (err) {
+        sendError(res, err);
+      }
+    }
+  );
 
   router.get("/runs", requireAdminToken, (req, res) => {
     try {
@@ -220,6 +254,8 @@ export function createAdminRouter({ baseDir, publicHost }) {
         "GET /api/admin/ai-theme-research/drafts",
         "POST /api/admin/ai-theme-research/preview",
         "POST /api/admin/ai-theme-research/publish",
+        "POST /api/admin/ai-theme-research/drafts/:id/background",
+        "GET /api/admin/ai-theme-research/costume-presets",
         "GET /api/admin/ai-theme-research/usage",
       ],
     });
