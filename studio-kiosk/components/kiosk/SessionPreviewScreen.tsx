@@ -6,16 +6,26 @@ import { cn } from "@/lib/utils";
 import { msToMMSS } from "@/utils/time";
 import type { Session } from "@/services/session.service";
 import { ConnectionBanner } from "@/components/kiosk/ConnectionBanner";
-import { SessionStepIndicator } from "@/components/kiosk/SessionStepIndicator";
-import { ArrowLeft, Camera, ChevronDown, Sparkles, Lock } from "lucide-react";
+import {
+  ArrowLeft,
+  Camera,
+  ChevronDown,
+  Lock,
+  Maximize2,
+  Pause,
+  Play,
+  Plus,
+  Sparkles,
+} from "lucide-react";
 import { getPackageLabel, resolveAiGenerateLimit } from "@/lib/packageTypes";
 import { getProcessingStatusLabel } from "@/lib/processingLabels";
-import type { PackageType, AiThemeType } from "@/lib/imageTypes";
+import { getOriginalPreviewUrl } from "@/lib/aiGalleryUtils";
+import type { GalleryImageData, PackageType, AiThemeType } from "@/lib/imageTypes";
+import { SessionPhotoViewer } from "@/components/kiosk/SessionPhotoViewer";
 
 const TRIAL_PRESETS = [30, 60, 90] as const;
 
 export type SessionAction =
-  | "capture"
   | "trial"
   | "main"
   | "pause"
@@ -43,14 +53,13 @@ type SessionPreviewScreenProps = {
   mainDurationMinutes: number;
   trialSeconds: number;
   onTrialSecondsChange: (seconds: number) => void;
-  captureCount: number;
+  images: GalleryImageData[];
+  selectedImageIndex: number;
+  onSelectImage: (index: number) => void;
   captureCountdown: number;
   isCapturing: boolean;
-  lastImageUrl: string | null;
-  lastImageProcessing: boolean;
   pendingAction: SessionAction | null;
   onBack: () => void;
-  onCapture: () => void;
   onTrialStart: () => Promise<void>;
   onTrialSkip: () => void;
   onMainStart: () => Promise<void>;
@@ -75,14 +84,13 @@ export function SessionPreviewScreen({
   mainDurationMinutes,
   trialSeconds,
   onTrialSecondsChange,
-  captureCount,
+  images,
+  selectedImageIndex,
+  onSelectImage,
   captureCountdown,
   isCapturing,
-  lastImageUrl,
-  lastImageProcessing,
   pendingAction,
   onBack,
-  onCapture,
   onTrialStart,
   onTrialSkip,
   onMainStart,
@@ -91,267 +99,329 @@ export function SessionPreviewScreen({
   onAddTime,
   onEndSession,
 }: SessionPreviewScreenProps) {
+  const [controlsOpen, setControlsOpen] = React.useState(false);
+  const [detailOpen, setDetailOpen] = React.useState(false);
   const timerWarn = sessionTimer.remainingMs <= 60_000 && !sessionTimer.isPaused;
   const phase = phaseLabel(session?.phase, sessionTimer.isPaused);
   const packageType = (session?.packageType ?? "self-photo") as PackageType;
   const isAiPackage = packageType === "ai-self-photo";
   const aiQuota =
     sessionMeta?.aiGenerateLimit ??
-    resolveAiGenerateLimit(packageType, sessionMeta?.peopleCount ?? session?.peopleCount ?? 1);
+    resolveAiGenerateLimit(
+      packageType,
+      sessionMeta?.peopleCount ?? session?.peopleCount ?? 1
+    );
+  const selectedImage = images[selectedImageIndex] ?? null;
+  const selectedUrl = selectedImage ? getOriginalPreviewUrl(selectedImage) : null;
+  const lastImageProcessing =
+    selectedImage?.processingStatus === "pending" ||
+    selectedImage?.processingStatus === "processing";
+  const filmstripRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const el = filmstripRef.current?.querySelector("[data-active-thumb]");
+    el?.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
+  }, [selectedImageIndex]);
 
   return (
-    <main className="flex h-[100dvh] w-full flex-col bg-black">
+    <main className="flex h-[100dvh] w-full flex-col overflow-hidden bg-black">
       <ConnectionBanner connected={connected} />
 
-      <header className="flex shrink-0 flex-col gap-3 border-b border-white/10 px-3 py-3 sm:px-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={onBack}
-            className="flex items-center gap-2 text-sm text-white/80 hover:text-white"
+      <header className="flex shrink-0 items-center gap-3 border-b border-white/10 px-3 py-2.5 sm:px-5">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-1 text-sm text-white/80 hover:text-white"
+        >
+          <ArrowLeft className="size-4" />
+          <span className="hidden sm:inline">Kembali</span>
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <p
+            className={cn(
+              "font-mono text-2xl tabular-nums leading-none tracking-tight sm:text-3xl",
+              timerWarn ? "text-amber-300" : "text-white"
+            )}
           >
-            <ArrowLeft className="size-4" />
-            Kembali
-          </button>
-          <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs tracking-wide text-white/70">
-            {session?.user ?? "-"}
-          </span>
+            {msToMMSS(sessionTimer.remainingMs)}
+          </p>
+          <p className="mt-1 truncate text-[11px] text-white/50">
+            {phase} · {session?.user ?? "-"} · {images.length} foto
+            {isAiPackage && sessionMeta?.aiThemeLabel
+              ? ` · ${sessionMeta.aiThemeLabel}`
+              : ""}
+          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+
+        <div className="hidden flex-wrap items-center justify-end gap-1.5 sm:flex">
           <span className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] text-white/75">
             {getPackageLabel(packageType)}
           </span>
-          {isAiPackage && sessionMeta?.aiThemeLabel ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/15 px-2.5 py-1 text-[11px] text-violet-200">
-              {sessionMeta.aiThemePreviewUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={sessionMeta.aiThemePreviewUrl}
-                  alt=""
-                  className="h-5 w-4 rounded object-cover ring-1 ring-white/15"
-                />
-              ) : (
-                <Sparkles className="size-3" />
-              )}
-              {sessionMeta.aiThemeLabel}
-            </span>
-          ) : null}
           {isAiPackage && aiQuota > 0 ? (
-            <span className="rounded-full bg-violet-500/10 px-2.5 py-1 text-[11px] text-violet-200/90">
-              Kuota AI: {aiQuota}×
+            <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/15 px-2.5 py-1 text-[11px] text-violet-200">
+              <Sparkles className="size-3" />
+              {aiQuota}×
             </span>
           ) : null}
         </div>
-        <SessionStepIndicator current="session" />
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <aside className="flex shrink-0 flex-col items-center gap-3 border-b border-white/10 px-4 py-4 lg:w-72 lg:border-b-0 lg:border-r">
-          <div className="text-center">
-            <p className="text-[10px] uppercase tracking-[0.22em] text-white/45">
-              Waktu tersisa
-            </p>
-            <p
-              className={cn(
-                "mt-1 font-mono text-4xl tabular-nums tracking-tight sm:text-5xl",
-                timerWarn ? "text-amber-300" : "text-white"
-              )}
-            >
-              {msToMMSS(sessionTimer.remainingMs)}
-            </p>
-            <p className="mt-1 text-xs text-white/50">
-              {phase} · {getPackageLabel(packageType)} · {captureCount} foto
-            </p>
-            {isAiPackage && sessionMeta?.aiThemeLabel ? (
-              <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-violet-300/80">
-                <Lock className="size-3" />
-                Tema sesi: {sessionMeta.aiThemeLabel}
-                {sessionMeta.aiThemeType === "transform" ? " · Transform" : " · Latar"}
-              </p>
-            ) : null}
-          </div>
-
-          {isAiPackage && sessionMeta?.aiThemePreviewUrl ? (
-            <div className="hidden w-full max-w-[200px] overflow-hidden rounded-lg border border-violet-400/25 bg-violet-500/10 lg:block">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={sessionMeta.aiThemePreviewUrl}
-                alt={sessionMeta.aiThemeLabel ?? "Preview tema"}
-                className="aspect-[3/4] w-full object-cover"
-              />
-              <p className="px-2 py-1.5 text-center text-[10px] text-violet-200/80">
-                Contoh hasil AI
-              </p>
-            </div>
-          ) : null}
-
-          {lastImageUrl && (
-            <div className="relative hidden w-full max-w-[200px] overflow-hidden rounded-lg border border-white/15 lg:block">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={lastImageUrl}
-                alt="Foto terakhir"
-                className="aspect-[3/4] w-full object-cover"
-              />
-              {lastImageProcessing && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-xs text-white">
-                  Memproses…
-                </div>
-              )}
-            </div>
-          )}
-        </aside>
-
-        <section className="relative flex min-h-0 flex-1 items-center justify-center p-3 sm:p-4">
-          {lastImageUrl ? (
-            <div className="relative h-full w-full max-h-full">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={lastImageUrl}
-                alt="Preview foto terakhir"
-                className="mx-auto h-full max-h-[min(70vh,900px)] w-full object-contain"
-              />
-              {lastImageProcessing && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/45">
-                  <span className="rounded-full bg-amber-500/90 px-4 py-2 text-sm text-white">
-                    {getProcessingStatusLabel("processing") ?? "Memproses foto…"}
-                  </span>
-                </div>
-              )}
-              {isCapturing && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-                  <div className="text-6xl font-extrabold tracking-[0.18em] text-white sm:text-8xl">
-                    {captureCountdown}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex max-w-md flex-col items-center gap-4 text-center text-white/50">
-              <Camera className="size-12 text-white/25" strokeWidth={1.25} />
-              <p className="text-sm sm:text-base">
-                Belum ada foto. Tekan <strong className="text-[#E8C872]">Ambil Foto</strong> untuk
-                memulai capture ke kiosk customer.
-              </p>
-              {isCapturing && (
-                <div className="text-6xl font-extrabold tracking-[0.18em] text-white sm:text-8xl">
-                  {captureCountdown}
-                </div>
-              )}
-            </div>
-          )}
-        </section>
-      </div>
-
-      <footer className="shrink-0 border-t border-white/10 bg-black/95 px-3 py-3 sm:px-4 sm:py-4">
-        <Button
-          type="button"
-          className="h-12 w-full bg-[#B59240] text-base font-semibold text-black hover:bg-[#C9A855]"
-          onClick={onCapture}
-          disabled={isCapturing || pendingAction === "capture"}
-        >
-          {pendingAction === "capture" || isCapturing
-            ? "Menghitung mundur…"
-            : "Ambil Foto"}
-        </Button>
-
-        <details className="group mt-3">
-          <summary className="flex cursor-pointer list-none items-center justify-center gap-2 py-2 text-xs uppercase tracking-[0.18em] text-white/50 hover:text-white/70">
-            Kontrol sesi
-            <ChevronDown className="size-4 transition group-open:rotate-180" />
-          </summary>
-
-          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            {session && (
-              <>
-                <select
-                  value={trialSeconds}
-                  onChange={(e) => onTrialSecondsChange(Number(e.target.value))}
-                  className="col-span-2 h-11 rounded-md border border-white/15 bg-white/5 px-2 text-sm text-white sm:col-span-1"
-                >
-                  {TRIAL_PRESETS.map((seconds) => (
-                    <option key={seconds} value={seconds} className="text-black">
-                      Trial {seconds}s
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 border-white/20 bg-white/5 text-white hover:bg-white/10"
-                  disabled={pendingAction === "trial"}
-                  onClick={() => void onTrialStart()}
-                >
-                  {pendingAction === "trial" ? "…" : "Start Trial"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 border-white/20 bg-white/5 text-white hover:bg-white/10"
-                  onClick={onTrialSkip}
-                >
-                  Skip Trial
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="col-span-2 h-11 border-white/20 bg-white/5 text-white hover:bg-white/10 sm:col-span-1"
-                  disabled={pendingAction === "main"}
-                  onClick={() => void onMainStart()}
-                >
-                  {pendingAction === "main"
-                    ? "…"
-                    : `Sesi utama (${mainDurationMinutes}m)`}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 border-white/20 bg-white/5 text-white hover:bg-white/10"
-                  disabled={sessionTimer.isPaused || pendingAction === "pause"}
-                  onClick={() => void onPause()}
-                >
-                  Pause
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 border-white/20 bg-white/5 text-white hover:bg-white/10"
-                  disabled={!sessionTimer.isPaused || pendingAction === "resume"}
-                  onClick={() => void onResume()}
-                >
-                  Resume
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 border-white/20 bg-white/5 text-white hover:bg-white/10"
-                  disabled={pendingAction === "add1"}
-                  onClick={() => void onAddTime(1)}
-                >
-                  +1 min
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 border-white/20 bg-white/5 text-white hover:bg-white/10"
-                  disabled={pendingAction === "add5"}
-                  onClick={() => void onAddTime(5)}
-                >
-                  +5 min
-                </Button>
-              </>
+      <section className="relative min-h-0 flex-1 bg-black">
+        {selectedUrl ? (
+          <button
+            type="button"
+            onClick={() => setDetailOpen(true)}
+            className="absolute inset-0"
+            aria-label="Lihat detail foto"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={selectedUrl}
+              alt={selectedImage?.filename ?? "Snapshot sesi"}
+              className="size-full object-contain"
+            />
+            {lastImageProcessing && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/45">
+                <span className="rounded-full bg-amber-500/90 px-4 py-2 text-sm text-white">
+                  {getProcessingStatusLabel(selectedImage?.processingStatus) ??
+                    "Memproses foto…"}
+                </span>
+              </div>
             )}
-            <Button
-              type="button"
-              variant="destructive"
-              className="col-span-2 h-11 sm:col-span-1"
-              disabled={pendingAction === "end"}
-              onClick={onEndSession}
-            >
-              Akhiri Sesi
-            </Button>
+            <span className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/55 px-2.5 py-1 text-[11px] text-white/80 backdrop-blur-sm">
+              <Maximize2 className="size-3.5" />
+              Detail
+            </span>
+          </button>
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-white/55">
+            <Camera className="size-12 text-white/25" strokeWidth={1.25} />
+            <p className="max-w-sm text-sm leading-relaxed sm:text-base">
+              Snapshot akan tampil di sini setelah customer mengambil foto di
+              kiosk. Riwayat foto sesi muncul di bawah.
+            </p>
           </div>
-        </details>
+        )}
+
+        {isCapturing && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60">
+            <div className="text-6xl font-extrabold tracking-[0.18em] text-white sm:text-8xl">
+              {captureCountdown}
+            </div>
+          </div>
+        )}
+
+        {isAiPackage && sessionMeta?.aiThemeLabel ? (
+          <div className="pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-full border border-violet-400/25 bg-black/60 px-2.5 py-1 text-[11px] text-violet-100 backdrop-blur-sm sm:left-4 sm:top-4">
+            <Lock className="size-3" />
+            {sessionMeta.aiThemeLabel}
+          </div>
+        ) : null}
+      </section>
+
+      {images.length > 0 ? (
+        <div className="shrink-0 border-t border-white/10 bg-[#0a0a0a] px-3 py-2 sm:px-4">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">
+              Riwayat foto · {images.length}
+            </p>
+            <button
+              type="button"
+              onClick={() => setDetailOpen(true)}
+              className="text-[11px] text-[#E8C872] hover:text-[#f0d48a]"
+            >
+              Buka detail
+            </button>
+          </div>
+          <div
+            ref={filmstripRef}
+            className="flex gap-2 overflow-x-auto pb-1"
+          >
+            {images.map((image, index) => {
+              const active = index === selectedImageIndex;
+              const thumb = getOriginalPreviewUrl(image);
+
+              return (
+                <button
+                  key={image.imageId ?? image.filename}
+                  type="button"
+                  data-active-thumb={active ? "" : undefined}
+                  onClick={() => onSelectImage(index)}
+                  onDoubleClick={() => {
+                    onSelectImage(index);
+                    setDetailOpen(true);
+                  }}
+                  className={cn(
+                    "relative h-16 w-12 shrink-0 overflow-hidden rounded-md ring-1 transition sm:h-[4.5rem] sm:w-14",
+                    active
+                      ? "ring-2 ring-[#E8C872]"
+                      : "ring-white/15 hover:ring-white/40"
+                  )}
+                  aria-label={`Foto ${index + 1}`}
+                  aria-current={active ? "true" : undefined}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={thumb}
+                    alt=""
+                    className="size-full object-cover"
+                  />
+                  <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[9px] text-white/80">
+                    {index + 1}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      <SessionPhotoViewer
+        open={detailOpen}
+        images={images}
+        index={selectedImageIndex}
+        onClose={() => setDetailOpen(false)}
+        onChange={onSelectImage}
+      />
+
+      <footer className="relative z-20 shrink-0 border-t border-white/10 bg-[#0a0a0a] pb-[max(0.25rem,env(safe-area-inset-bottom))]">
+        <button
+          type="button"
+          aria-expanded={controlsOpen}
+          onClick={() => setControlsOpen((open) => !open)}
+          className="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-2.5 text-left sm:px-5"
+        >
+          <span className="text-sm font-medium text-white">Kontrol sesi</span>
+          <span className="hidden text-xs text-white/40 sm:inline">
+            {controlsOpen
+              ? "Tutup untuk lihat foto lebih besar"
+              : "Buka untuk atur sesi"}
+          </span>
+          <ChevronDown
+            className={cn(
+              "size-5 shrink-0 text-white/55 transition-transform duration-200",
+              controlsOpen && "rotate-180"
+            )}
+          />
+        </button>
+
+        {controlsOpen ? (
+          <div className="max-h-[min(42vh,22rem)] overflow-y-auto border-t border-white/8 px-3 py-3 sm:px-5">
+            {session ? (
+              <div className="flex flex-col gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <select
+                    value={trialSeconds}
+                    onChange={(e) =>
+                      onTrialSecondsChange(Number(e.target.value))
+                    }
+                    className="h-11 rounded-md border border-white/15 bg-white/5 px-2 text-sm text-white"
+                  >
+                    {TRIAL_PRESETS.map((seconds) => (
+                      <option
+                        key={seconds}
+                        value={seconds}
+                        className="text-black"
+                      >
+                        Trial {seconds} detik
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11"
+                    disabled={pendingAction === "trial"}
+                    onClick={() => void onTrialStart()}
+                  >
+                    {pendingAction === "trial" ? "…" : "Mulai trial"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11"
+                    onClick={onTrialSkip}
+                  >
+                    Lewati trial
+                  </Button>
+                  <Button
+                    type="button"
+                    className="h-11 bg-[#B59240] font-semibold text-black hover:bg-[#C9A855]"
+                    disabled={pendingAction === "main"}
+                    onClick={() => void onMainStart()}
+                  >
+                    {pendingAction === "main"
+                      ? "…"
+                      : `Sesi utama (${mainDurationMinutes} mnt)`}
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11"
+                    disabled={sessionTimer.isPaused || pendingAction === "pause"}
+                    onClick={() => void onPause()}
+                  >
+                    <Pause className="size-4" />
+                    Jeda
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11"
+                    disabled={!sessionTimer.isPaused || pendingAction === "resume"}
+                    onClick={() => void onResume()}
+                  >
+                    <Play className="size-4" />
+                    Lanjut
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11"
+                    disabled={pendingAction === "add1"}
+                    onClick={() => void onAddTime(1)}
+                  >
+                    <Plus className="size-4" />
+                    1 menit
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11"
+                    disabled={pendingAction === "add5"}
+                    onClick={() => void onAddTime(5)}
+                  >
+                    <Plus className="size-4" />
+                    5 menit
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="col-span-2 h-11 sm:col-span-1"
+                    disabled={pendingAction === "end"}
+                    onClick={onEndSession}
+                  >
+                    Akhiri sesi
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="destructive"
+                className="h-11 w-full sm:w-auto"
+                disabled={pendingAction === "end"}
+                onClick={onEndSession}
+              >
+                Akhiri sesi
+              </Button>
+            )}
+          </div>
+        ) : null}
       </footer>
     </main>
   );

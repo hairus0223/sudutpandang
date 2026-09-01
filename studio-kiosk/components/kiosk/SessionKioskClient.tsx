@@ -28,7 +28,7 @@ import {
   resolveAiGenerateLimit,
 } from "@/lib/packageTypes";
 import { fetchImages } from "@/services/image.service";
-import { resolveImageUrl } from "@/lib/resolveImageUrl";
+import type { GalleryImageData } from "@/lib/imageTypes";
 import { RegisterWizard, getRegisterWizardContainerClass } from "@/components/kiosk/RegisterWizard";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/ToastProvider";
@@ -58,6 +58,14 @@ type Customer = {
 };
 
 const TRIAL_PRESETS = [30, 60, 90] as const;
+
+function uniqueSessionImages(images: GalleryImageData[]) {
+  const byKey = new Map<string, GalleryImageData>();
+  for (const image of images) {
+    byKey.set(image.imageId ?? image.filename, image);
+  }
+  return Array.from(byKey.values());
+}
 
 const DEFAULT_KIOSK_CONFIG = {
   sessionDurationMinutes: 10,
@@ -116,10 +124,11 @@ export function SessionKioskClient() {
   const [screen, setScreen] = React.useState<Screen>("register");
   const [isCapturing, setIsCapturing] = React.useState(false);
   const [captureCountdown, setCaptureCountdown] = React.useState(3);
-  const [captureCount, setCaptureCount] = React.useState(0);
   const [session, setSession] = React.useState<Session | null>(null);
-  const [lastImageUrl, setLastImageUrl] = React.useState<string | null>(null);
-  const [lastImageProcessing, setLastImageProcessing] = React.useState(false);
+  const [sessionImages, setSessionImages] = React.useState<GalleryImageData[]>(
+    []
+  );
+  const [selectedImageIndex, setSelectedImageIndex] = React.useState(0);
   const [kioskConfig, setKioskConfig] = React.useState(DEFAULT_KIOSK_CONFIG);
   const [trialSeconds, setTrialSeconds] = React.useState(60);
   const [pendingAction, setPendingAction] = React.useState<SessionAction | null>(
@@ -157,7 +166,8 @@ export function SessionKioskClient() {
     clearSessionTimerRef.current();
     setScreen("end");
     setSession(null);
-    setLastImageUrl(null);
+    setSessionImages([]);
+    setSelectedImageIndex(0);
   }, []);
 
   const sessionTimer = useSessionTimer({
@@ -205,37 +215,60 @@ export function SessionKioskClient() {
     };
   }, []);
 
-  const refreshLastImage = React.useCallback(async () => {
-    if (!session?.user) return;
+  const sessionImagesRef = React.useRef(sessionImages);
+  const selectedImageIndexRef = React.useRef(selectedImageIndex);
+  sessionImagesRef.current = sessionImages;
+  selectedImageIndexRef.current = selectedImageIndex;
 
-    try {
-      const res = await fetchImages(session.user);
-      const latest = res.images[res.images.length - 1];
-      if (!latest) return;
+  const refreshSessionImages = React.useCallback(
+    async (selectLatest = false) => {
+      if (!session?.user) return;
 
-      const url = resolveImageUrl(latest);
-      if (url) setLastImageUrl(url);
+      try {
+        const res = await fetchImages(session.user);
+        const next = uniqueSessionImages(res.images ?? []);
+        const previous = sessionImagesRef.current;
+        const previousKey =
+          previous[selectedImageIndexRef.current]?.imageId ??
+          previous[selectedImageIndexRef.current]?.filename;
 
-      const isProcessing =
-        latest.processingStatus === "pending" ||
-        latest.processingStatus === "processing";
+        setSessionImages(next);
 
-      setLastImageProcessing(isProcessing);
-    } catch {
-      // ignore transient fetch errors
-    }
-  }, [session?.user]);
+        if (next.length === 0) {
+          setSelectedImageIndex(0);
+          return;
+        }
+
+        if (selectLatest) {
+          setSelectedImageIndex(next.length - 1);
+          return;
+        }
+
+        const found = next.findIndex(
+          (image) => (image.imageId ?? image.filename) === previousKey
+        );
+        setSelectedImageIndex(found >= 0 ? found : next.length - 1);
+      } catch {
+        // ignore transient fetch errors
+      }
+    },
+    [session?.user]
+  );
 
   React.useEffect(() => {
     if (screen !== "preview" || !session?.user) return;
-    void refreshLastImage();
-  }, [refreshLastImage, screen, session?.user]);
+    void refreshSessionImages(true);
+    const poll = window.setInterval(() => {
+      void refreshSessionImages(false);
+    }, 4000);
+    return () => window.clearInterval(poll);
+  }, [refreshSessionImages, screen, session?.user]);
 
   useNewPhotoSocket({
     user: session?.user ?? "",
     enabled: screen === "preview" && Boolean(session?.user),
     onNewPhoto: () => {
-      void refreshLastImage();
+      void refreshSessionImages(true);
     },
   });
 
@@ -243,7 +276,7 @@ export function SessionKioskClient() {
     user: session?.user ?? "",
     enabled: screen === "preview" && Boolean(session?.user),
     onPhotoProcessed: () => {
-      void refreshLastImage();
+      void refreshSessionImages(false);
     },
   });
 
@@ -282,11 +315,10 @@ export function SessionKioskClient() {
   }, [screen]);
 
   const handleCaptureDone = React.useCallback(async () => {
-    setCaptureCount((c) => c + 1);
     window.setTimeout(() => {
-      refreshLastImage();
+      void refreshSessionImages(true);
     }, 1500);
-  }, [refreshLastImage]);
+  }, [refreshSessionImages]);
 
   const startCaptureCountdown = React.useCallback(() => {
     if (isCapturing || !session) return;
@@ -321,8 +353,8 @@ export function SessionKioskClient() {
   const beginPreview = React.useCallback(
     (s: Session) => {
       setSession(s);
-      setCaptureCount(0);
-      setLastImageUrl(null);
+      setSessionImages([]);
+      setSelectedImageIndex(0);
       sessionTimer.startWithEndsAt(s.endsAt);
       setScreen("preview");
     },
@@ -463,14 +495,13 @@ export function SessionKioskClient() {
         mainDurationMinutes={mainDurationMinutes}
         trialSeconds={trialSeconds}
         onTrialSecondsChange={setTrialSeconds}
-        captureCount={captureCount}
+        images={sessionImages}
+        selectedImageIndex={selectedImageIndex}
+        onSelectImage={setSelectedImageIndex}
         captureCountdown={captureCountdown}
         isCapturing={isCapturing}
-        lastImageUrl={lastImageUrl}
-        lastImageProcessing={lastImageProcessing}
         pendingAction={pendingAction}
         onBack={() => router.push("/")}
-        onCapture={startCaptureCountdown}
         onTrialStart={() =>
           runAction("trial", async () => {
             if (!session?.user) return;
@@ -574,8 +605,8 @@ export function SessionKioskClient() {
               sessionTimer.clear();
               setSession(null);
               setSessionMeta(null);
-              setCaptureCount(0);
-              setLastImageUrl(null);
+              setSessionImages([]);
+              setSelectedImageIndex(0);
               setScreen("register");
             }}
           >
