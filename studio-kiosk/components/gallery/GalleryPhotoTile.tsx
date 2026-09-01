@@ -85,9 +85,9 @@ export function GalleryPhotoTile({
             onTogglePrint();
           }}
           className={`${badgePrintOutline(printVariant === "ai" ? "ai" : "original")}`}
-          title="Tap untuk batalkan cetak"
+          title="Hapus dari antrian cetak"
         >
-          Cetak {printVariant === "ai" ? "AI" : "Asli"}
+          Cetak {printVariant === "ai" ? "AI" : "asli"}
           <X className="size-3" />
         </button>
       ) : null}

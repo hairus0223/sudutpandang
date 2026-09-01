@@ -94,6 +94,14 @@ type GalleryStore = {
         aiThemeType?: AiThemeType | null;
     }) => void;
     togglePrint: (filename: string, variant?: PrintVariant) => void;
+    enqueuePrint: (
+        filename: string,
+        variant?: PrintVariant
+    ) => "added" | "updated" | "exists" | "limit";
+    enqueuePrintMany: (
+        filenames: string[],
+        variant?: PrintVariant
+    ) => { added: number; updated: number; skippedLimit: number };
     removeFromPrint: (filename: string) => void;
     bulkAddToPrint: (filenames: string[], variant?: PrintVariant) => void;
     bulkRemoveFromPrint: (filenames: string[]) => void;
@@ -234,6 +242,67 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
                 : {}),
         }),
 
+    enqueuePrint: (filename, variant = "original") => {
+        const { selectedForPrint, allowedPrint, printVariantByFilename } = get();
+
+        if (selectedForPrint.includes(filename)) {
+            const current = printVariantByFilename[filename] ?? "original";
+            if (current === variant) return "exists";
+            set({
+                printVariantByFilename: {
+                    ...printVariantByFilename,
+                    [filename]: variant,
+                },
+            });
+            return "updated";
+        }
+
+        if (allowedPrint > 0 && selectedForPrint.length >= allowedPrint) {
+            return "limit";
+        }
+
+        set({
+            selectedForPrint: [...selectedForPrint, filename],
+            printVariantByFilename: {
+                ...printVariantByFilename,
+                [filename]: variant,
+            },
+        });
+        return "added";
+    },
+
+    enqueuePrintMany: (filenames, variant = "original") => {
+        const { selectedForPrint, allowedPrint, printVariantByFilename } = get();
+        const nextSelected = [...selectedForPrint];
+        const nextVariants = { ...printVariantByFilename };
+        let added = 0;
+        let updated = 0;
+        let skippedLimit = 0;
+
+        for (const filename of filenames) {
+            if (nextSelected.includes(filename)) {
+                if ((nextVariants[filename] ?? "original") !== variant) {
+                    nextVariants[filename] = variant;
+                    updated += 1;
+                }
+                continue;
+            }
+            if (allowedPrint > 0 && nextSelected.length >= allowedPrint) {
+                skippedLimit += 1;
+                continue;
+            }
+            nextSelected.push(filename);
+            nextVariants[filename] = variant;
+            added += 1;
+        }
+
+        set({
+            selectedForPrint: nextSelected,
+            printVariantByFilename: nextVariants,
+        });
+        return { added, updated, skippedLimit };
+    },
+
     togglePrint: (filename, variant = "original") => {
         const { selectedForPrint, allowedPrint, printVariantByFilename } = get();
 
@@ -258,10 +327,9 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
             return;
         }
 
-        if (selectedForPrint.length >= allowedPrint) {
-            alert(`Maksimal ${allowedPrint} foto`);
+          if (allowedPrint > 0 && selectedForPrint.length >= allowedPrint) {
             return;
-        }
+          }
 
         set({
             selectedForPrint: [...selectedForPrint, filename],

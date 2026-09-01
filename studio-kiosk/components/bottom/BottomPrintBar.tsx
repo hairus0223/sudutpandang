@@ -14,7 +14,7 @@ export function BottomPrintBar({ onContinue }: BottomPrintBarProps) {
     selectedForPrint,
     allowedPrint,
     printVariantByFilename,
-    resetSelection,
+    bulkRemoveFromPrint,
     packageType,
   } = useGalleryStore();
 
@@ -24,6 +24,7 @@ export function BottomPrintBar({ onContinue }: BottomPrintBarProps) {
   const aiCount = selectedForPrint.filter(
     (filename) => printVariantByFilename[filename] === "ai"
   ).length;
+  const originalCount = selectedForPrint.length - aiCount;
 
   return (
     <div
@@ -33,18 +34,23 @@ export function BottomPrintBar({ onContinue }: BottomPrintBarProps) {
       <div className="mx-auto flex max-w-[1960px] flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6 sm:py-4">
         <div className="min-w-0 text-base text-white sm:text-lg">
           <span className="font-semibold text-[#E8C872]">{selectedForPrint.length}</span>
-          <span className="text-white/70"> / {allowedPrint} foto dipilih</span>
-          {isAi && aiCount > 0 ? (
-            <span className="ml-2 text-sm font-medium text-violet-300">
-              ({aiCount} AI)
+          <span className="text-white/70"> / {allowedPrint} di antrian cetak</span>
+          {isAi ? (
+            <span className="ml-2 text-sm font-medium text-white/55">
+              ({originalCount} asli
+              {aiCount > 0 ? ` · ${aiCount} AI` : ""})
             </span>
           ) : null}
         </div>
 
         <div className={galleryBtnRowClass}>
-          <button type="button" onClick={resetSelection} className={btnNeutral()}>
+          <button
+            type="button"
+            onClick={() => bulkRemoveFromPrint(selectedForPrint)}
+            className={btnNeutral()}
+          >
             <Trash2 className="size-4" />
-            Reset
+            Kosongkan antrian
           </button>
 
           <button

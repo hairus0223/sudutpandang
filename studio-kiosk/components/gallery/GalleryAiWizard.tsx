@@ -127,9 +127,10 @@ export function GalleryAiWizard({
     toggleGallerySelection,
     clearGallerySelection,
     selectedForPrint,
-    togglePrint,
     printVariantByFilename,
-    bulkTogglePrint,
+    enqueuePrint,
+    enqueuePrintMany,
+    removeFromPrint,
     bulkRemoveFromPrint,
     allowedPrint,
   } = useGalleryStore();
@@ -292,7 +293,7 @@ export function GalleryAiWizard({
     toast,
   ]);
 
-  const handleBulkTogglePrint = useCallback(
+  const handleEnqueuePrint = useCallback(
     (variant: "original" | "ai") => {
       if (selectedImages.length === 0) {
         toast("Pilih foto dulu.", "error");
@@ -311,28 +312,33 @@ export function GalleryAiWizard({
         return;
       }
 
-      const allMatch = filenames.every(
-        (f) =>
-          selectedForPrint.includes(f) &&
-          (printVariantByFilename[f] ?? "original") === variant
-      );
-
-      bulkTogglePrint(filenames, variant);
-      toast(
-        allMatch
-          ? `${filenames.length} foto dihapus dari cetak.`
-          : `${filenames.length} foto ditambah ke cetak (${variant === "ai" ? "AI" : "Asli"}).`,
-        allMatch ? "default" : "success"
-      );
+      const result = enqueuePrintMany(filenames, variant);
+      if (result.skippedLimit > 0) {
+        toast(`Antrian penuh (maks. ${allowedPrint} foto).`, "error");
+      } else if (result.added === 0 && result.updated === 0) {
+        toast(
+          variant === "ai"
+            ? "Foto ini sudah di antrian sebagai AI."
+            : "Foto ini sudah di antrian sebagai asli.",
+          "default"
+        );
+      } else if (result.updated > 0 && result.added === 0) {
+        toast(
+          variant === "ai"
+            ? "Versi cetak diganti ke AI."
+            : "Versi cetak diganti ke asli.",
+          "success"
+        );
+      } else {
+        toast(
+          `${result.added + result.updated} foto masuk antrian cetak (${
+            variant === "ai" ? "AI" : "asli"
+          }).`,
+          "success"
+        );
+      }
     },
-    [
-      selectedImages,
-      aiThemeId,
-      selectedForPrint,
-      printVariantByFilename,
-      bulkTogglePrint,
-      toast,
-    ]
+    [selectedImages, aiThemeId, enqueuePrintMany, allowedPrint, toast]
   );
 
   const handleRemovePrintFromSelection = useCallback(() => {
@@ -376,25 +382,17 @@ export function GalleryAiWizard({
     selectedForPrint.includes(img.filename)
   ).length;
 
-  const allSelectedPrintOriginal =
-    selectedImages.length > 0 &&
-    selectedImages.every(
-      (img) =>
-        selectedForPrint.includes(img.filename) &&
-        (printVariantByFilename[img.filename] ?? "original") === "original"
-    );
+  const originalQueuedCount = selectedImages.filter(
+    (img) =>
+      selectedForPrint.includes(img.filename) &&
+      (printVariantByFilename[img.filename] ?? "original") === "original"
+  ).length;
 
-  const aiReadySelected = selectedImages.filter((img) =>
-    hasAiPrintVariant(img, aiThemeId)
-  );
-
-  const allSelectedPrintAi =
-    aiReadySelected.length > 0 &&
-    aiReadySelected.every(
-      (img) =>
-        selectedForPrint.includes(img.filename) &&
-        printVariantByFilename[img.filename] === "ai"
-    );
+  const aiQueuedCount = selectedImages.filter(
+    (img) =>
+      selectedForPrint.includes(img.filename) &&
+      printVariantByFilename[img.filename] === "ai"
+  ).length;
 
   return (
     <div className="mb-4 space-y-4">
@@ -415,8 +413,8 @@ export function GalleryAiWizard({
                 Pilih foto → Generate atau cetak
               </h2>
               <p className="mt-1 text-xs text-white/45">
-                Tap foto untuk pilih (bisa banyak) · tap ikon perbesar untuk zoom
-                · cetak asli atau hasil AI
+                Pilih foto, lalu generate AI atau masukkan ke antrian cetak.
+                Badge emas/ungu = sudah di antrian.
               </p>
             </div>
             {sessionBanner}
@@ -462,7 +460,7 @@ export function GalleryAiWizard({
                   isBusy={isBusy}
                   aiStatusBadge={<AiTileStatusBadge status={aiStatus} />}
                   onToggleSelect={() => toggleGallerySelection(img.imageId!)}
-                  onTogglePrint={() => togglePrint(img.filename, printVariant)}
+                  onTogglePrint={() => removeFromPrint(img.filename)}
                   onOpenPhoto={() => onOpenPhoto(index)}
                 />
               );
@@ -476,11 +474,12 @@ export function GalleryAiWizard({
               printSelectedCount={printSelectedCount}
               allowedPrint={allowedPrint}
               totalPrintSelected={selectedForPrint.length}
-              allSelectedPrintOriginal={allSelectedPrintOriginal}
-              allSelectedPrintAi={allSelectedPrintAi}
+              originalQueuedCount={originalQueuedCount}
+              aiQueuedCount={aiQueuedCount}
               aiPrintReadyCount={aiPrintReadyCount}
+              showAiPrint
               onClearSelection={clearGallerySelection}
-              onBulkTogglePrint={handleBulkTogglePrint}
+              onEnqueuePrint={handleEnqueuePrint}
               onRemovePrintFromSelection={handleRemovePrintFromSelection}
               extraActions={
                 <>
@@ -543,7 +542,8 @@ export function GalleryAiWizard({
                 Hasil & cetak
               </h2>
               <p className="mt-1 text-xs text-white/45">
-                Bandingkan before/after · pilih versi AI atau asli untuk cetak
+                Bandingkan before/after, lalu pilih versi yang dicetak. Satu
+                foto hanya bisa satu versi di antrian.
               </p>
             </div>
             {!quotaExhausted ? (
@@ -603,10 +603,18 @@ export function GalleryAiWizard({
                         setRevealAutoPlay(false);
                       }}
                     />
-                    <div className="flex flex-wrap items-center gap-3 px-1">
+                    <div className="flex flex-wrap items-center gap-2 px-1">
+                      <span className="mr-1 text-[11px] text-white/40">
+                        Antrian:
+                      </span>
                       <button
                         type="button"
-                        onClick={() => togglePrint(img.filename, "original")}
+                        onClick={() => {
+                          const result = enqueuePrint(img.filename, "original");
+                          if (result === "limit") {
+                            toast(`Antrian penuh (maks. ${allowedPrint} foto).`, "error");
+                          }
+                        }}
                         className={toggleChipClass(originalSelected, "original")}
                       >
                         {originalSelected ? (
@@ -614,11 +622,16 @@ export function GalleryAiWizard({
                         ) : (
                           <Square className="size-3.5" />
                         )}
-                        {originalSelected ? "Batalkan asli" : "Cetak asli"}
+                        Asli
                       </button>
                       <button
                         type="button"
-                        onClick={() => togglePrint(img.filename, "ai")}
+                        onClick={() => {
+                          const result = enqueuePrint(img.filename, "ai");
+                          if (result === "limit") {
+                            toast(`Antrian penuh (maks. ${allowedPrint} foto).`, "error");
+                          }
+                        }}
                         className={toggleChipClass(aiSelected, "ai")}
                       >
                         {aiSelected ? (
@@ -626,8 +639,17 @@ export function GalleryAiWizard({
                         ) : (
                           <Square className="size-3.5" />
                         )}
-                        {aiSelected ? "Batalkan AI" : "Cetak AI"}
+                        AI
                       </button>
+                      {originalSelected || aiSelected ? (
+                        <button
+                          type="button"
+                          onClick={() => removeFromPrint(img.filename)}
+                          className="text-[11px] text-white/45 underline-offset-2 hover:text-white/80 hover:underline"
+                        >
+                          Hapus
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 );

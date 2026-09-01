@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ImageIcon, Printer, Sparkles, X } from "lucide-react";
+import { Check, ImageIcon, Printer, Sparkles, X } from "lucide-react";
 import type { GalleryImageData, PrintVariant } from "@/lib/imageTypes";
 import { getOriginalPreviewUrl } from "@/lib/aiGalleryUtils";
 import {
@@ -9,7 +9,6 @@ import {
   btnGhost,
   btnNeutral,
   btnPrint,
-  btnPrimary,
   galleryBtnRowClass,
   galleryPanelClass,
 } from "@/lib/galleryUiStyles";
@@ -21,14 +20,15 @@ type GalleryPrintSelectionBarProps = {
   allowedPrint: number;
   totalPrintSelected: number;
   onClearSelection: () => void;
-  onBulkTogglePrint: (variant: PrintVariant) => void;
+  onEnqueuePrint: (variant: PrintVariant) => void;
   onRemovePrintFromSelection: () => void;
-  allSelectedPrintOriginal?: boolean;
-  allSelectedPrintAi?: boolean;
+  originalQueuedCount?: number;
+  aiQueuedCount?: number;
   aiPrintReadyCount?: number;
   accent?: "violet" | "gold";
   extraActions?: ReactNode;
   hint?: string;
+  showAiPrint?: boolean;
 };
 
 export function GalleryPrintSelectionBar({
@@ -37,17 +37,29 @@ export function GalleryPrintSelectionBar({
   allowedPrint,
   totalPrintSelected,
   onClearSelection,
-  onBulkTogglePrint,
+  onEnqueuePrint,
   onRemovePrintFromSelection,
-  allSelectedPrintOriginal = false,
-  allSelectedPrintAi = false,
+  originalQueuedCount = 0,
+  aiQueuedCount = 0,
   aiPrintReadyCount = 0,
   accent = "violet",
   extraActions,
   hint,
+  showAiPrint = false,
 }: GalleryPrintSelectionBarProps) {
   const borderClass =
     accent === "violet" ? "border-violet-400/30" : "border-[#E8C872]/30";
+  const allOriginalQueued =
+    selectedImages.length > 0 && originalQueuedCount === selectedImages.length;
+  const allAiQueued =
+    showAiPrint && aiPrintReadyCount > 0 && aiQueuedCount === aiPrintReadyCount;
+
+  const originalSuffix = showAiPrint ? " · asli" : "";
+  const originalLabel = allOriginalQueued
+    ? `Sudah di antrian${originalSuffix}`
+    : originalQueuedCount > 0 || aiQueuedCount > 0
+      ? "Ganti ke versi asli"
+      : `Masukkan antrian cetak${originalSuffix}`;
 
   if (selectedImages.length === 0) {
     return (
@@ -55,11 +67,11 @@ export function GalleryPrintSelectionBar({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs leading-relaxed text-white/50">
             {hint ??
-              "Tap checkbox atau foto untuk memilih · tap badge cetak (×) untuk batalkan"}
+              "Pilih foto dulu, lalu masukkan ke antrian cetak. Lanjut Cetak ada di bawah layar."}
           </p>
           {totalPrintSelected > 0 ? (
             <p className="text-xs font-medium text-[#E8C872]">
-              {totalPrintSelected}/{allowedPrint} di antrian cetak
+              Antrian cetak {totalPrintSelected}/{allowedPrint}
             </p>
           ) : null}
         </div>
@@ -77,13 +89,12 @@ export function GalleryPrintSelectionBar({
               accent === "violet" ? "text-violet-50" : "text-[#E8C872]"
             )}
           >
-            {selectedImages.length} foto terpilih
+            {selectedImages.length} foto dipilih
           </p>
           <p className="mt-0.5 text-xs text-white/50">
             {printSelectedCount > 0
-              ? `${printSelectedCount} antrian cetak · `
-              : ""}
-            Tap tombol cetak lagi untuk batalkan
+              ? `${printSelectedCount} sudah di antrian cetak`
+              : "Belum masuk antrian cetak — ketuk tombol di bawah"}
           </p>
         </div>
         <button
@@ -117,29 +128,35 @@ export function GalleryPrintSelectionBar({
 
         <button
           type="button"
-          onClick={() => onBulkTogglePrint("original")}
+          onClick={() => onEnqueuePrint("original")}
+          disabled={allOriginalQueued}
           className={cn(
-            allSelectedPrintOriginal ? btnPrint(true) : btnPrint(false),
+            allOriginalQueued ? btnPrint(true) : btnPrint(false),
             "flex-1 sm:flex-none"
           )}
         >
-          <ImageIcon className="size-4" />
-          {allSelectedPrintOriginal ? "Batalkan cetak asli" : "Cetak asli"}
+          {allOriginalQueued ? (
+            <Check className="size-4" />
+          ) : (
+            <ImageIcon className="size-4" />
+          )}
+          {originalLabel}
         </button>
 
-        {aiPrintReadyCount > 0 ? (
+        {showAiPrint && aiPrintReadyCount > 0 ? (
           <button
             type="button"
-            onClick={() => onBulkTogglePrint("ai")}
+            onClick={() => onEnqueuePrint("ai")}
+            disabled={allAiQueued}
             className={cn(
-              allSelectedPrintAi ? btnAi(true) : btnAi(false),
+              allAiQueued ? btnAi(true) : btnAi(false),
               "flex-1 sm:flex-none"
             )}
           >
-            <Sparkles className="size-4" />
-            {allSelectedPrintAi
-              ? "Batalkan cetak AI"
-              : `Cetak AI (${aiPrintReadyCount})`}
+            {allAiQueued ? <Check className="size-4" /> : <Sparkles className="size-4" />}
+            {allAiQueued
+              ? "Sudah di antrian · AI"
+              : `Masukkan antrian · AI (${aiPrintReadyCount})`}
           </button>
         ) : null}
 
@@ -150,14 +167,14 @@ export function GalleryPrintSelectionBar({
             className={cn(btnNeutral(), "flex-1 sm:flex-none")}
           >
             <X className="size-4" />
-            Hapus dari cetak
+            Hapus dari antrian
           </button>
         ) : null}
 
         {totalPrintSelected > 0 ? (
           <span className="inline-flex items-center gap-1.5 rounded-xl border-2 border-[#E8C872]/50 bg-[#E8C872]/8 px-3 py-2 text-xs font-semibold text-[#E8C872]">
             <Printer className="size-3.5" />
-            {totalPrintSelected}/{allowedPrint} antrian
+            Antrian {totalPrintSelected}/{allowedPrint}
           </span>
         ) : null}
       </div>

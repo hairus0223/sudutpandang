@@ -16,6 +16,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { useGalleryStore } from "@/stores/useGalleryStore";
+import { useToast } from "@/components/ui/ToastProvider";
 import {
   canGenerateAiSelection,
   getAiSelectionStatus,
@@ -71,10 +72,13 @@ export function PhotoModal({
   onGenerateAi,
   generating = false,
 }: PhotoModalProps) {
+  const { toast } = useToast();
   const {
     selectedForPrint,
-    togglePrint,
     printVariantByFilename,
+    enqueuePrint,
+    removeFromPrint,
+    allowedPrint,
     aiThemeId,
     packageType,
   } = useGalleryStore();
@@ -510,7 +514,14 @@ export function PhotoModal({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                togglePrint(image.filename, printTargetVariant);
+                if (isPrintActive) {
+                  removeFromPrint(image.filename);
+                  return;
+                }
+                const result = enqueuePrint(image.filename, printTargetVariant);
+                if (result === "limit") {
+                  toast(`Antrian cetak penuh (maks. ${allowedPrint} foto).`, "error");
+                }
               }}
               className={cn(
                 isPrintActive ? btnPrint(true) : btnPrint(false),
@@ -523,8 +534,10 @@ export function PhotoModal({
                 <Square className="size-5" />
               )}
               {isPrintActive
-                ? `Batalkan cetak (${printTargetVariant === "ai" ? "AI" : "Asli"})`
-                : `Cetak ${printTargetVariant === "ai" ? "AI" : "asli"}`}
+                ? "Hapus dari antrian"
+                : isPrintSelected
+                  ? `Ganti ke ${printTargetVariant === "ai" ? "AI" : "asli"}`
+                  : `Masukkan antrian · ${printTargetVariant === "ai" ? "AI" : "asli"}`}
             </button>
 
             {aiMode && onGenerateAi && selectionKey ? (

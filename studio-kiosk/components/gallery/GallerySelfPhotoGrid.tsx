@@ -6,6 +6,7 @@ import { InfoCard } from "@/components/cards/InfoCard";
 import { GalleryPhotoTile } from "@/components/gallery/GalleryPhotoTile";
 import { GalleryPrintSelectionBar } from "@/components/gallery/GalleryPrintSelectionBar";
 import { useGalleryStore } from "@/stores/useGalleryStore";
+import { useToast } from "@/components/ui/ToastProvider";
 
 type GallerySelfPhotoGridProps = {
   userName: string;
@@ -22,15 +23,16 @@ export function GallerySelfPhotoGrid({
   images,
   onOpenPhoto,
 }: GallerySelfPhotoGridProps) {
+  const { toast } = useToast();
   const {
     selectedImageIds,
     toggleGallerySelection,
     clearGallerySelection,
     selectedForPrint,
     printVariantByFilename,
-    togglePrint,
-    bulkTogglePrint,
+    removeFromPrint,
     bulkRemoveFromPrint,
+    enqueuePrintMany,
     allowedPrint,
   } = useGalleryStore();
 
@@ -44,19 +46,27 @@ export function GallerySelfPhotoGrid({
     selectedForPrint.includes(img.filename)
   ).length;
 
-  const allSelectedPrintOriginal =
-    selectedImages.length > 0 &&
-    selectedImages.every(
-      (img) =>
-        selectedForPrint.includes(img.filename) &&
-        (printVariantByFilename[img.filename] ?? "original") === "original"
-    );
+  const originalQueuedCount = selectedImages.filter(
+    (img) =>
+      selectedForPrint.includes(img.filename) &&
+      (printVariantByFilename[img.filename] ?? "original") === "original"
+  ).length;
 
-  const handleBulkToggle = (variant: "original" | "ai") => {
-    bulkTogglePrint(
+  const handleEnqueuePrint = (variant: "original" | "ai") => {
+    const result = enqueuePrintMany(
       selectedImages.map((img) => img.filename),
       variant
     );
+    if (result.skippedLimit > 0) {
+      toast(`Antrian cetak penuh (maks. ${allowedPrint} foto).`, "error");
+    } else if (result.added === 0 && result.updated === 0) {
+      toast("Foto terpilih sudah di antrian cetak.", "default");
+    } else {
+      toast(
+        `${result.added + result.updated} foto masuk antrian cetak.`,
+        "success"
+      );
+    }
   };
 
   const handleRemovePrintFromSelection = () => {
@@ -70,8 +80,8 @@ export function GallerySelfPhotoGrid({
           Pilih foto untuk cetak
         </h2>
         <p className="mt-1 text-xs text-white/45">
-          Tap foto untuk pilih (bisa banyak) · perbesar untuk preview · tap badge
-          cetak untuk batalkan
+          Tap checkbox untuk pilih · ikon perbesar untuk preview. Foto di antrian
+          cetak ditandai badge emas.
         </p>
       </div>
 
@@ -97,7 +107,7 @@ export function GallerySelfPhotoGrid({
               printVariant={printVariant}
               accent="gold"
               onToggleSelect={() => toggleGallerySelection(key)}
-              onTogglePrint={() => togglePrint(img.filename, printVariant)}
+              onTogglePrint={() => removeFromPrint(img.filename)}
               onOpenPhoto={() => onOpenPhoto(index)}
             />
           );
@@ -111,11 +121,11 @@ export function GallerySelfPhotoGrid({
           printSelectedCount={printSelectedCount}
           allowedPrint={allowedPrint}
           totalPrintSelected={selectedForPrint.length}
-          allSelectedPrintOriginal={allSelectedPrintOriginal}
+          originalQueuedCount={originalQueuedCount}
           onClearSelection={clearGallerySelection}
-          onBulkTogglePrint={handleBulkToggle}
+          onEnqueuePrint={handleEnqueuePrint}
           onRemovePrintFromSelection={handleRemovePrintFromSelection}
-          hint="Tap checkbox atau foto untuk memilih · gunakan zoom untuk preview"
+          hint="Pilih foto, lalu ketuk Masukkan antrian cetak. Badge emas = sudah di antrian. Lanjut Cetak di bawah layar."
         />
       </div>
     </section>
