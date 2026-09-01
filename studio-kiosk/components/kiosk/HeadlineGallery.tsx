@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { AccessForm } from "./AccessForm";
 import { API_BASE_URL } from "@/lib/env";
 import { DEV_DUMMY_HEADLINES, IS_DEV } from "@/lib/devHeadlines";
 import { PhotoCard } from "../cards/PhotoCard";
-import Link from "next/link";
+import { cn } from "@/lib/utils";
 
 type Headline = {
   filename: string;
@@ -22,33 +21,27 @@ const ANIMATION_MS = 400;
 
 export function HeadlineGallery() {
   const [headlines, setHeadlines] = useState<Headline[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [slots, setSlots] = useState<(Headline | null)[]>(
     Array(SLOT_COUNT).fill(null)
   );
   const [flipState, setFlipState] = useState<boolean[]>(
     Array(SLOT_COUNT).fill(false)
   );
-  const [activeForm, setActiveForm] = useState<"access" | null>(null);
 
-  const slotIndexRef = useRef(0); // ⬅️ SEQUENTIAL
+  const slotIndexRef = useRef(0);
   const isUpdatingRef = useRef(false);
   const seenUrlsRef = useRef<Set<string>>(new Set());
 
-  /* ---------------------------------- */
-  /* Fetch headlines & init slots */
-  /* ---------------------------------- */
   useEffect(() => {
     const applyHeadlines = (items: Headline[]) => {
       const shuffled = shuffleHeadlines(items);
       setHeadlines(shuffled);
 
       const initialSlots = shuffled.slice(0, SLOT_COUNT);
-      initialSlots.forEach((h) => seenUrlsRef.current.add(h.url));
+      seenUrlsRef.current = new Set(initialSlots.map((h) => h.url));
       setSlots(initialSlots);
-    };
-
-    const applyDevDummyHeadlines = () => {
-      applyHeadlines(DEV_DUMMY_HEADLINES);
+      setIsLoading(false);
     };
 
     fetch(`${API_BASE_URL}/api/headline`)
@@ -57,25 +50,24 @@ export function HeadlineGallery() {
         return res.json();
       })
       .then((data) => {
-        const headlines = Array.isArray(data?.headlines) ? data.headlines : [];
+        const items = Array.isArray(data?.headlines) ? data.headlines : [];
 
-        if (headlines.length === 0 && IS_DEV) {
-          applyDevDummyHeadlines();
+        if (items.length === 0 && IS_DEV) {
+          applyHeadlines(DEV_DUMMY_HEADLINES);
           return;
         }
 
-        applyHeadlines(headlines);
+        applyHeadlines(items);
       })
       .catch(() => {
         if (IS_DEV) {
-          applyDevDummyHeadlines();
+          applyHeadlines(DEV_DUMMY_HEADLINES);
+        } else {
+          setIsLoading(false);
         }
       });
   }, []);
 
-  /* ---------------------------------- */
-  /* Sequential rotation logic */
-  /* ---------------------------------- */
   useEffect(() => {
     if (!headlines.length) return;
 
@@ -84,25 +76,16 @@ export function HeadlineGallery() {
       isUpdatingRef.current = true;
 
       const slotIndex = slotIndexRef.current;
-      const usedUrls = slots
-        .filter(Boolean)
-        .map((s) => s!.url);
+      const usedUrls = slots.filter(Boolean).map((s) => s!.url);
 
-      /* PRIORITY 1: never shown before */
       let candidates = headlines.filter(
-        (h) =>
-          !seenUrlsRef.current.has(h.url) &&
-          !usedUrls.includes(h.url)
+        (h) => !seenUrlsRef.current.has(h.url) && !usedUrls.includes(h.url)
       );
 
-      /* PRIORITY 2: already shown, but not visible */
       if (candidates.length === 0) {
-        candidates = headlines.filter(
-          (h) => !usedUrls.includes(h.url)
-        );
+        candidates = headlines.filter((h) => !usedUrls.includes(h.url));
       }
 
-      /* FALLBACK: do nothing */
       if (candidates.length === 0) {
         isUpdatingRef.current = false;
         slotIndexRef.current = (slotIndex + 1) % SLOT_COUNT;
@@ -112,7 +95,6 @@ export function HeadlineGallery() {
       const nextHeadline =
         candidates[Math.floor(Math.random() * candidates.length)];
 
-      /* Flip + Fade out */
       setFlipState((prev) => {
         const next = [...prev];
         next[slotIndex] = true;
@@ -128,7 +110,6 @@ export function HeadlineGallery() {
 
         seenUrlsRef.current.add(nextHeadline.url);
 
-        /* Flip + Fade in */
         setFlipState((prev) => {
           const next = [...prev];
           next[slotIndex] = false;
@@ -136,103 +117,45 @@ export function HeadlineGallery() {
         });
 
         isUpdatingRef.current = false;
-
-        // ⬅️ PASTI URUT 1 → 6
-        slotIndexRef.current =
-          (slotIndex + 1) % SLOT_COUNT;
+        slotIndexRef.current = (slotIndex + 1) % SLOT_COUNT;
       }, ANIMATION_MS / 2);
     }, INTERVAL);
 
     return () => clearInterval(interval);
   }, [headlines, slots]);
 
-  /* ---------------------------------- */
-  /* UI */
-  /* ---------------------------------- */
   return (
-    <div className="relative flex min-h-0 flex-1 w-full flex-col bg-black">
-      {!activeForm && (
-        <>
-          <div className="flex flex-1 min-h-0 w-full items-center justify-center p-2">
-            <div className="grid h-full w-full max-w-[1920px] max-h-[1080px] grid-cols-2 sm:grid-cols-3 grid-rows-2 sm:grid-rows-2 gap-1 sm:gap-2">
-              {slots.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="relative h-full w-full overflow-hidden perspective"
-                >
-                  <div
-                    className={`absolute inset-0 transform-gpu transition-all duration-400 ease-in-out
-                      ${
-                        flipState[idx]
-                          ? "rotate-y-90 opacity-0"
-                          : "rotate-y-0 opacity-100"
-                      }`}
-                    style={{
-                      transformStyle: "preserve-3d",
-                      backfaceVisibility: "hidden",
-                    }}
-                  >
-                    {item && (
-                      <PhotoCard
-                        src={item.url}
-                        filename={item.filename}
-                        onClick={() => console.log("Clicked", item.filename)}
-                        hideFilename={true}
-                        hidePrintToggle={true}
-                      />
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+    <div className="absolute inset-0 grid grid-cols-2 grid-rows-3 gap-1 sm:grid-cols-3 sm:grid-rows-2 sm:gap-1.5">
+      {Array.from({ length: SLOT_COUNT }).map((_, idx) => {
+        const item = slots[idx];
 
-          {/* Footer — operator actions */}
-          <div className="fixed bottom-4 left-4 right-4 z-50 flex flex-wrap items-end justify-between gap-3 sm:bottom-6 sm:left-6 sm:right-6">
-            <p className="max-w-xs text-xs text-white/45">
-              Self Photo Studio · operator controls
-            </p>
-            <div className="flex flex-wrap gap-2 sm:gap-3 justify-end">
-              <Link href="/admin/ai-theme-research">
-                <button
-                  type="button"
-                  className="min-h-11 rounded-lg border border-violet-400/40 bg-violet-500/10 px-5 py-2.5 text-sm text-violet-100 hover:bg-violet-500/20 sm:px-6 sm:text-base"
-                >
-                  AI Research
-                </button>
-              </Link>
-              <Link href="/session">
-                <button
-                  type="button"
-                  className="min-h-11 rounded-lg bg-[#B59240] px-5 py-2.5 text-sm font-semibold text-black shadow-lg hover:bg-[#C9A855] sm:px-6 sm:text-base"
-                >
-                  Mulai Sesi
-                </button>
-              </Link>
-              <button
-                type="button"
-                onClick={() => setActiveForm("access")}
-                className="min-h-11 rounded-lg border border-white/20 bg-white/10 px-5 py-2.5 text-sm text-white hover:bg-white/15 sm:px-6 sm:text-base"
-              >
-                Akses Foto
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-
-      {activeForm && (
-        <div className="flex h-full w-full items-center justify-center p-4">
-          {activeForm === "access" && <AccessForm />}
-
-          <button
-            onClick={() => setActiveForm(null)}
-            className="z-[9999] fixed bottom-4 right-4 sm:bottom-6 sm:right-6 rounded bg-gray-800 px-4 py-2 text-sm sm:text-base text-white hover:bg-gray-900"
+        return (
+          <div
+            key={idx}
+            className="perspective relative min-h-0 overflow-hidden bg-[#111]"
           >
-            Back
-          </button>
-        </div>
-      )}
+            {isLoading || !item ? (
+              <div className="size-full animate-pulse bg-gradient-to-br from-white/[0.07] to-white/[0.02]" />
+            ) : (
+              <div
+                className={cn(
+                  "absolute inset-0 transform-gpu transition-all duration-300 ease-in-out",
+                  flipState[idx] ? "flip-hidden" : "flip-visible"
+                )}
+              >
+                <PhotoCard
+                  src={item.url}
+                  filename={item.filename}
+                  onClick={() => {}}
+                  hideFilename
+                  hidePrintToggle
+                  compact
+                />
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -15,6 +15,7 @@ type PhotoCardProps = {
   processingError?: string | null;
   hideFilename?: boolean;
   hidePrintToggle?: boolean;
+  compact?: boolean;
   printVariant?: PrintVariant;
   style?: React.CSSProperties;
 };
@@ -41,6 +42,7 @@ export function PhotoCard({
   processingError,
   hideFilename = false,
   hidePrintToggle = false,
+  compact = false,
   printVariant = "original",
   style,
 }: PhotoCardProps) {
@@ -52,7 +54,10 @@ export function PhotoCard({
 
   return (
     <div
-      className="relative mb-5 break-inside-avoid cursor-pointer group"
+      className={cn(
+        "relative cursor-pointer group",
+        compact ? "h-full w-full" : "mb-5 break-inside-avoid"
+      )}
       style={{ transform: "translateZ(0)", ...style }}
     >
       {!hidePrintToggle && (
@@ -119,9 +124,10 @@ export function PhotoCard({
         onClick={onClick}
         alt={filename}
         draggable={false}
-        className="w-full rounded-lg object-cover shadow-md
-                   transition-transform duration-300
-                   group-hover:scale-[1.02]"
+        className={cn(
+          "w-full object-cover shadow-md transition-transform duration-300 group-hover:scale-[1.02]",
+          compact ? "h-full rounded-none" : "rounded-lg"
+        )}
       />
     </div>
   );

@@ -4,7 +4,13 @@ import { ToastProvider } from "@/components/ui/ToastProvider";
 export const metadata = {
   title: "Studio Self Photo",
   description: "Local Kiosk Gallery",
-  viewport: "width=device-width, initial-scale=1",
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover" as const,
+  themeColor: "#000000",
 };
 
 export default function RootLayout({
