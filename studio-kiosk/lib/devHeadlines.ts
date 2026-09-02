@@ -5,12 +5,12 @@ export type DevHeadline = {
 
 /** Placeholder headlines for local dev when /api/headline is empty or unavailable. */
 export const DEV_DUMMY_HEADLINES: DevHeadline[] = Array.from(
-  { length: 12 },
+  { length: 24 },
   (_, index) => {
     const n = index + 1;
     return {
       filename: `dev-sample-${String(n).padStart(2, "0")}.jpg`,
-      url: `https://picsum.photos/seed/sudutpandang-headline-${n}/800/1200`,
+      url: `https://picsum.photos/seed/sudutpandang-headline-${n}/720/1200`,
     };
   }
 );
