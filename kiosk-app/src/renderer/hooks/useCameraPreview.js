@@ -8,7 +8,11 @@ export function useCameraPreview() {
   const start = useCallback(async () => {
     try {
       // 1. Cari device video (capture card) yang tepat, kalau gagal pakai default
-      const baseConstraints = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+      const portrait =
+        typeof window !== "undefined" && window.innerHeight >= window.innerWidth;
+      const baseConstraints = portrait
+        ? { width: { ideal: 1080 }, height: { ideal: 1920 } }
+        : { width: { ideal: 1920 }, height: { ideal: 1080 } };
       let constraints = { video: baseConstraints };
 
       if (navigator.mediaDevices?.enumerateDevices) {

@@ -24683,16 +24683,6 @@
     }
   }
 
-  // src/renderer/lib/packageTypes.js
-  var PACKAGE_LABELS = {
-    "self-photo": "Self Photo",
-    "ai-self-photo": "AI Self Photo"
-  };
-  function getPackageLabel(packageType) {
-    if (packageType === "ai-self-photo") return PACKAGE_LABELS["ai-self-photo"];
-    return PACKAGE_LABELS["self-photo"];
-  }
-
   // src/renderer/hooks/useKioskPreview.js
   var import_react = __toESM(require_react());
   function useKioskPreview({ userSlug, enabled, onPreviewUpdate }) {
@@ -25100,7 +25090,8 @@
     const [ready, setReady] = (0, import_react4.useState)(false);
     const start = (0, import_react4.useCallback)(async () => {
       try {
-        const baseConstraints = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+        const portrait = typeof window !== "undefined" && window.innerHeight >= window.innerWidth;
+        const baseConstraints = portrait ? { width: { ideal: 1080 }, height: { ideal: 1920 } } : { width: { ideal: 1920 }, height: { ideal: 1080 } };
         let constraints = { video: baseConstraints };
         if (navigator.mediaDevices?.enumerateDevices) {
           const devices = await navigator.mediaDevices.enumerateDevices();
@@ -25158,6 +25149,8 @@
         const h = window.innerHeight;
         const portrait = h >= w;
         const aspect = w / h;
+        const minSide = Math.min(w, h);
+        const maxSide = Math.max(w, h);
         const root2 = document.documentElement;
         root2.dataset.orientation = portrait ? "portrait" : "landscape";
         if (portrait) {
@@ -25171,10 +25164,16 @@
         } else {
           root2.dataset.viewport = "landscape-standard";
         }
+        const isTvPortrait = portrait && maxSide >= 1600 && minSide >= 900;
+        root2.dataset.display = isTvPortrait ? "tv-portrait" : "standard";
         root2.style.setProperty("--vh", `${h * 0.01}px`);
         root2.style.setProperty("--vw", `${w * 0.01}px`);
-        root2.style.setProperty("--kiosk-min", `${Math.min(w, h)}px`);
-        root2.style.setProperty("--kiosk-max", `${Math.max(w, h)}px`);
+        root2.style.setProperty("--kiosk-min", `${minSide}px`);
+        root2.style.setProperty("--kiosk-max", `${maxSide}px`);
+        root2.style.setProperty(
+          "--kiosk-ui-scale",
+          String(Math.min(1.45, Math.max(0.82, minSide / 1080)))
+        );
       }
       update();
       window.addEventListener("resize", update);
@@ -29075,9 +29074,8 @@
     if (screen === Screen.TRIAL || screen === Screen.MAIN) {
       const phaseLabel = screen === Screen.TRIAL ? "Trial Session:" : "Halo,";
       const isAiPackage = packageType === "ai-self-photo";
-      const themeName = aiThemeLabel ?? "tema pilihan";
-      const reviewCaption = isAiPackage ? aiThemeType === "transform" ? `Foto tersimpan \u2713 \u2014 siap di-transform ke ${themeName}` : `Foto tersimpan \u2713 \u2014 siap diubah ke latar ${themeName}` : processingMessage || "Lihat hasilnya \u2014 sesi lanjut sebentar lagi";
-      const footerHint = screen === Screen.TRIAL ? isAiPackage ? `Coba pose \u2014 nanti hasil AI tema ${themeName}` : "Trial \u2014 lihat ke kamera & senyum" : isAiPackage ? `Pose natural \u2014 transformasi AI di meja operator (${themeName})` : "Operator akan mengambil foto untuk Anda";
+      const reviewCaption = "Lihat hasilnya \u2014 sesi lanjut sebentar lagi";
+      const footerHint = screen === Screen.TRIAL ? "Trial \u2014 lihat ke kamera & senyum" : "Operator akan mengambil foto untuk Anda";
       const videoWrapperStyle = isAiPackage && aiThemePreviewColor ? { "--ai-theme-color": aiThemePreviewColor } : void 0;
       return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "screen screen--preview", children: [
         isAiPackage ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
@@ -29101,28 +29099,10 @@
               ] }),
               /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "pill pill--timer pill-big", "aria-live": "polite", children: remainingLabel })
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "preview-header__meta", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "pill pill--package", children: getPackageLabel(packageType) }),
-              packageType === "ai-self-photo" && aiThemeLabel ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "pill pill--ai-theme", children: [
-                aiThemePreviewUrl ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-                  "img",
-                  {
-                    src: aiThemePreviewUrl,
-                    alt: "",
-                    className: "pill-theme-thumb"
-                  }
-                ) : null,
-                aiThemeLabel
-              ] }) : null,
-              packageType === "ai-self-photo" && aiGenerateLimit > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "pill pill--ai-quota", children: [
-                "AI \xD7",
-                aiGenerateLimit
-              ] }) : null,
-              captureCount > 0 && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "pill pill--shots", children: [
-                captureCount,
-                " foto"
-              ] })
-            ] })
+            captureCount > 0 && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "preview-header__meta", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "pill pill--shots", children: [
+              captureCount,
+              " foto"
+            ] }) })
           ] }),
           isCapturing && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
             "div",
@@ -29147,26 +29127,20 @@
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "capture-wait-text", children: "Mengambil foto\u2026" }),
             /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "capture-wait-sub", children: "Mohon tunggu sebentar" })
           ] }),
-          !isReviewing && !isWaitingCapture && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+          !isReviewing && !isWaitingCapture && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
             "div",
             {
               className: `preview-video-wrapper${isAiPackage ? " preview-video-wrapper--ai-theme" : ""}${isCapturing ? " preview-video-wrapper--countdown" : ""}`,
               style: videoWrapperStyle,
-              children: [
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-                  "video",
-                  {
-                    className: "preview-video",
-                    ref: videoRef,
-                    playsInline: true,
-                    muted: true
-                  }
-                ),
-                isAiPackage && aiThemePreviewUrl && !showAiIntro ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "ai-theme-watermark", "aria-hidden": "true", children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("img", { src: aiThemePreviewUrl, alt: "" }),
-                  /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: aiThemeLabel ?? "AI" })
-                ] }) : null
-              ]
+              children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+                "video",
+                {
+                  className: "preview-video",
+                  ref: videoRef,
+                  playsInline: true,
+                  muted: true
+                }
+              )
             }
           ),
           isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(

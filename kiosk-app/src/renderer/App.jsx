@@ -6,7 +6,6 @@ import {
   triggerWebcamCapture,
 } from "./services/api";
 import { getKioskProcessingMessage } from "./lib/processingLabels";
-import { getPackageLabel } from "./lib/packageTypes";
 import { useKioskPreview } from "./hooks/useKioskPreview";
 import { useKioskAudio } from "./services/audio";
 import { useSessionTimer } from "./hooks/useSessionTimer";
@@ -530,20 +529,11 @@ export function App() {
   if (screen === Screen.TRIAL || screen === Screen.MAIN) {
     const phaseLabel = screen === Screen.TRIAL ? "Trial Session:" : "Halo,";
     const isAiPackage = packageType === "ai-self-photo";
-    const themeName = aiThemeLabel ?? "tema pilihan";
-    const reviewCaption = isAiPackage
-      ? aiThemeType === "transform"
-        ? `Foto tersimpan ✓ — siap di-transform ke ${themeName}`
-        : `Foto tersimpan ✓ — siap diubah ke latar ${themeName}`
-      : processingMessage || "Lihat hasilnya — sesi lanjut sebentar lagi";
+    const reviewCaption = "Lihat hasilnya — sesi lanjut sebentar lagi";
     const footerHint =
       screen === Screen.TRIAL
-        ? isAiPackage
-          ? `Coba pose — nanti hasil AI tema ${themeName}`
-          : "Trial — lihat ke kamera & senyum"
-        : isAiPackage
-          ? `Pose natural — transformasi AI di meja operator (${themeName})`
-          : "Operator akan mengambil foto untuk Anda";
+        ? "Trial — pose ke kamera, lalu tekan remote"
+        : "Pose ke kamera, lalu tekan remote untuk mengambil foto";
     const videoWrapperStyle =
       isAiPackage && aiThemePreviewColor
         ? { "--ai-theme-color": aiThemePreviewColor }
@@ -573,27 +563,11 @@ export function App() {
                   {remainingLabel}
                 </div>
               </div>
-              <div className="preview-header__meta">
-                <div className="pill pill--package">{getPackageLabel(packageType)}</div>
-                {packageType === "ai-self-photo" && aiThemeLabel ? (
-                  <div className="pill pill--ai-theme">
-                    {aiThemePreviewUrl ? (
-                      <img
-                        src={aiThemePreviewUrl}
-                        alt=""
-                        className="pill-theme-thumb"
-                      />
-                    ) : null}
-                    {aiThemeLabel}
-                  </div>
-                ) : null}
-                {packageType === "ai-self-photo" && aiGenerateLimit > 0 ? (
-                  <div className="pill pill--ai-quota">AI ×{aiGenerateLimit}</div>
-                ) : null}
-                {captureCount > 0 && (
+              {captureCount > 0 && (
+                <div className="preview-header__meta">
                   <div className="pill pill--shots">{captureCount} foto</div>
-                )}
-              </div>
+                </div>
+              )}
             </header>
           )}
 
@@ -644,12 +618,6 @@ export function App() {
                 playsInline
                 muted
               />
-              {isAiPackage && aiThemePreviewUrl && !showAiIntro ? (
-                <div className="ai-theme-watermark" aria-hidden="true">
-                  <img src={aiThemePreviewUrl} alt="" />
-                  <span>{aiThemeLabel ?? "AI"}</span>
-                </div>
-              ) : null}
             </div>
           )}
 

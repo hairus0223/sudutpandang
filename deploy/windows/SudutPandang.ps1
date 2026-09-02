@@ -108,9 +108,11 @@ function Start-Nginx {
 }
 
 function Find-KioskExecutable {
+  # Prefer the repo build so production shortcuts pick up `npm run pack` /
+  # build-production.cmd without reinstalling the NSIS copy.
   $candidates = @(
-    (Join-Path $env:LOCALAPPDATA "Programs\Sudut Pandang Kiosk\Sudut Pandang Kiosk.exe"),
-    (Join-Path $Root "kiosk-app\release\win-unpacked\Sudut Pandang Kiosk.exe")
+    (Join-Path $Root "kiosk-app\release\win-unpacked\Sudut Pandang Kiosk.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Sudut Pandang Kiosk\Sudut Pandang Kiosk.exe")
   )
 
   foreach ($candidate in $candidates) {

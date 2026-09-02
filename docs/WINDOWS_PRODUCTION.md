@@ -16,8 +16,16 @@ Jalankan `build-production.cmd` dari folder utama. Proses ini:
 4. membuat shortcut Start, Stop, dan Status di Desktop.
 
 File installer tersimpan di `kiosk-app\release`. Installer boleh dipasang agar
-Kiosk juga tersedia melalui Start Menu. Launcher akan memakai versi terinstal
-lebih dahulu dan otomatis memakai versi portable bila installer belum dipasang.
+Kiosk juga tersedia melalui Start Menu.
+
+Shortcut **Mulai Sudut Pandang** memakai
+`kiosk-app\release\win-unpacked` dari repo ini (hasil `npm run pack` atau
+`build-production.cmd`). Salinan NSIS di AppData hanya dipakai jika folder
+`win-unpacked` belum ada.
+
+**Penting:** ubah kode kiosk-app tidak langsung tampil di TV. Tutup aplikasi
+Kiosk, jalankan `cd kiosk-app` lalu `npm run pack`, kemudian Mulai lagi.
+`npm run build` saja tidak memperbarui exe yang dijalankan shortcut.
 
 ## Penggunaan admin
 

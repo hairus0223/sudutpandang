@@ -2,7 +2,7 @@ import { useEffect } from "react";
 
 /**
  * Sets document data attributes + CSS vars for responsive kiosk layout.
- * Supports portrait TV (32"), laptop landscape dev, and in-between sizes.
+ * Tuned for 32" portrait TV (~1080×1920), with fallbacks for laptop/dev.
  */
 export function useViewportLayout() {
   useEffect(() => {
@@ -11,6 +11,8 @@ export function useViewportLayout() {
       const h = window.innerHeight;
       const portrait = h >= w;
       const aspect = w / h;
+      const minSide = Math.min(w, h);
+      const maxSide = Math.max(w, h);
       const root = document.documentElement;
 
       root.dataset.orientation = portrait ? "portrait" : "landscape";
@@ -27,10 +29,17 @@ export function useViewportLayout() {
         root.dataset.viewport = "landscape-standard";
       }
 
+      const isTvPortrait = portrait && maxSide >= 1600 && minSide >= 900;
+      root.dataset.display = isTvPortrait ? "tv-portrait" : "standard";
+
       root.style.setProperty("--vh", `${h * 0.01}px`);
       root.style.setProperty("--vw", `${w * 0.01}px`);
-      root.style.setProperty("--kiosk-min", `${Math.min(w, h)}px`);
-      root.style.setProperty("--kiosk-max", `${Math.max(w, h)}px`);
+      root.style.setProperty("--kiosk-min", `${minSide}px`);
+      root.style.setProperty("--kiosk-max", `${maxSide}px`);
+      root.style.setProperty(
+        "--kiosk-ui-scale",
+        String(Math.min(1.45, Math.max(0.82, minSide / 1080)))
+      );
     }
 
     update();
