@@ -353,7 +353,7 @@ export async function addProductImage(publicHost, productId, file) {
   const dir = productImageDir(productId);
   fs.mkdirSync(dir, { recursive: true });
 
-  const ext = mimeToExt(file.mimetype);
+  const ext = mimeToExt(file.mimetype, file.originalname);
   const fileName = `${imageId}${ext}`;
   const thumbName = `${imageId}_thumb.webp`;
   const relativePath = path.join("products", productId, fileName);
@@ -452,15 +452,24 @@ export function deleteProductImage(publicHost, productId, imageId) {
 /**
  * @param {string | undefined} mime
  */
-function mimeToExt(mime) {
-  switch ((mime || "").toLowerCase()) {
+function mimeToExt(mime, originalName = "") {
+  const normalized = (mime || "").toLowerCase();
+  switch (normalized) {
     case "image/png":
       return ".png";
     case "image/webp":
       return ".webp";
     case "image/gif":
       return ".gif";
-    default:
+    case "image/heic":
+    case "image/heif":
       return ".jpg";
+    default: {
+      const ext = path.extname(originalName || "").toLowerCase();
+      if (ext === ".png") return ".png";
+      if (ext === ".webp") return ".webp";
+      if (ext === ".gif") return ".gif";
+      return ".jpg";
+    }
   }
 }

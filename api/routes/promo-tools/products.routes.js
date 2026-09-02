@@ -1,5 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
+import path from "path";
 import {
   addProductImage,
   createProduct,
@@ -12,11 +13,30 @@ import {
 
 const IMAGE_MAX_BYTES = Number(process.env.PROMO_TOOLS_IMAGE_MAX_BYTES) || 8 * 1024 * 1024;
 
+const ALLOWED_IMAGE_EXT = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".gif",
+  ".heic",
+  ".heif",
+]);
+
+function isAllowedImageFile(file) {
+  const mime = (file.mimetype || "").toLowerCase();
+  if (/^image\/(jpeg|jpg|png|webp|gif|heic|heif|pjpeg)$/i.test(mime)) {
+    return true;
+  }
+  const ext = path.extname(file.originalname || "").toLowerCase();
+  return ALLOWED_IMAGE_EXT.has(ext);
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: IMAGE_MAX_BYTES },
   fileFilter: (_req, file, cb) => {
-    if (/^image\/(jpeg|jpg|png|webp|gif)$/i.test(file.mimetype)) {
+    if (isAllowedImageFile(file)) {
       cb(null, true);
       return;
     }
@@ -90,7 +110,15 @@ export function createProductsRouter({ publicHost }) {
     }
   });
 
-  router.post("/:id/images", upload.single("file"), async (req, res) => {
+  router.post("/:id/images", (req, res, next) => {
+    upload.single("file")(req, res, (err) => {
+      if (err) {
+        sendError(res, err);
+        return;
+      }
+      next();
+    });
+  }, async (req, res) => {
     try {
       if (!req.file) {
         res.status(400).json({ ok: false, error: "file_required" });
@@ -146,6 +174,8 @@ export function createProductsRouter({ publicHost }) {
  */
 function sendError(res, err) {
   const message = err instanceof Error ? err.message : String(err);
+  const code =
+    err && typeof err === "object" && "code" in err ? String(err.code) : undefined;
 
   if (message === "invalid_name") {
     res.status(400).json({ ok: false, error: "invalid_name", message: "Nama produk wajib diisi." });
@@ -160,7 +190,19 @@ function sendError(res, err) {
     return;
   }
   if (message === "invalid_file_type") {
-    res.status(400).json({ ok: false, error: "invalid_file_type" });
+    res.status(400).json({
+      ok: false,
+      error: "invalid_file_type",
+      message: "Format foto tidak didukung. Gunakan JPG, PNG, atau WebP.",
+    });
+    return;
+  }
+  if (message === "File too large" || code === "LIMIT_FILE_SIZE") {
+    res.status(413).json({
+      ok: false,
+      error: "file_too_large",
+      message: "Ukuran foto terlalu besar (maks. 8 MB).",
+    });
     return;
   }
   if (message === "promo_tools_db_unavailable") {
