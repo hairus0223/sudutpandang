@@ -21,10 +21,14 @@ export function BottomPrintBar({ onContinue }: BottomPrintBarProps) {
   if (selectedForPrint.length === 0) return null;
 
   const isAi = packageType === "ai-self-photo";
+  const isPasPhoto = packageType === "pas-photo";
   const aiCount = selectedForPrint.filter(
     (filename) => printVariantByFilename[filename] === "ai"
   ).length;
-  const originalCount = selectedForPrint.length - aiCount;
+  const passportCount = selectedForPrint.filter(
+    (filename) => printVariantByFilename[filename] === "passport"
+  ).length;
+  const originalCount = selectedForPrint.length - aiCount - passportCount;
 
   return (
     <div
@@ -35,6 +39,11 @@ export function BottomPrintBar({ onContinue }: BottomPrintBarProps) {
         <div className="min-w-0 text-base text-white sm:text-lg">
           <span className="font-semibold text-[#E8C872]">{selectedForPrint.length}</span>
           <span className="text-white/70"> / {allowedPrint} di antrian cetak</span>
+          {isPasPhoto ? (
+            <span className="ml-2 text-sm font-medium text-white/55">
+              ({passportCount} pas foto)
+            </span>
+          ) : null}
           {isAi ? (
             <span className="ml-2 text-sm font-medium text-white/55">
               ({originalCount} asli

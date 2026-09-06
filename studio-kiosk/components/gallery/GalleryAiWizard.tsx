@@ -11,7 +11,7 @@ import {
   AlertCircle,
   Printer,
 } from "lucide-react";
-import type { AiThemeType, GalleryImageData } from "@/lib/imageTypes";
+import type { AiThemeType, GalleryImageData, PrintVariant } from "@/lib/imageTypes";
 import { requestAiGenerate } from "@/services/ai.service";
 import {
   canGenerateAiSelection,
@@ -294,7 +294,7 @@ export function GalleryAiWizard({
   ]);
 
   const handleEnqueuePrint = useCallback(
-    (variant: "original" | "ai") => {
+    (variant: PrintVariant) => {
       if (selectedImages.length === 0) {
         toast("Pilih foto dulu.", "error");
         return;

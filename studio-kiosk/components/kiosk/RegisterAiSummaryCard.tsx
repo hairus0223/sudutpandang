@@ -8,6 +8,7 @@ type RegisterAiSummaryCardProps = {
   peopleCount: number;
   sessionMinutes: number;
   theme: AiTheme | null;
+  passportColor?: string | null;
 };
 
 export function RegisterAiSummaryCard({
@@ -15,6 +16,7 @@ export function RegisterAiSummaryCard({
   peopleCount,
   sessionMinutes,
   theme,
+  passportColor,
 }: RegisterAiSummaryCardProps) {
   const aiQuota = resolveAiGenerateLimit(packageType, peopleCount);
 
@@ -36,6 +38,11 @@ export function RegisterAiSummaryCard({
             className="h-24 w-20 shrink-0 rounded-lg ring-1 ring-white/15"
             style={{ backgroundColor: theme.previewColor }}
           />
+        ) : passportColor ? (
+          <div
+            className="h-24 w-20 shrink-0 rounded-lg ring-1 ring-white/15"
+            style={{ backgroundColor: passportColor }}
+          />
         ) : null}
 
         <dl className="min-w-0 flex-1 space-y-1 text-sm text-white/85">
@@ -47,6 +54,18 @@ export function RegisterAiSummaryCard({
             <dt className="text-white/50">Orang</dt>
             <dd className="font-medium">{peopleCount}</dd>
           </div>
+          {packageType === "pas-photo" ? (
+            <>
+              <div className="flex justify-between gap-2">
+                <dt className="text-white/50">Background</dt>
+                <dd className="font-medium">{passportColor}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-white/50">Soft file</dt>
+                <dd className="font-medium">2×3 · 3×4 · 4×6</dd>
+              </div>
+            </>
+          ) : null}
           {packageType === "ai-self-photo" && theme ? (
             <>
               <div className="flex justify-between gap-2">
@@ -68,6 +87,12 @@ export function RegisterAiSummaryCard({
         </dl>
       </div>
 
+      {packageType === "pas-photo" ? (
+        <p className="mt-3 text-[11px] leading-relaxed text-white/45">
+          Soft file hanya warna terpilih. Cetak operator bisa campur 2×3 / 3×4 / 4×6
+          atau ukuran mm custom.
+        </p>
+      ) : null}
       {packageType === "ai-self-photo" && theme ? (
         <p className="mt-3 text-[11px] leading-relaxed text-white/45">
           Tema <b className="text-white/70">{theme.label}</b> berlaku untuk seluruh

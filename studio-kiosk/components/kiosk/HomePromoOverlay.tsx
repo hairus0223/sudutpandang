@@ -18,7 +18,7 @@ export function HomePromoOverlay({ onAccessClick }: HomePromoOverlayProps) {
         aria-hidden
       />
 
-      <div className="absolute inset-x-0 bottom-0 flex flex-col justify-end px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-24 sm:px-10 sm:pb-10 lg:inset-y-0 lg:left-auto lg:right-0 lg:w-[42%] lg:justify-center lg:px-12 lg:py-12 xl:w-[38%] xl:px-14">
+      <div className="absolute inset-x-0 bottom-0 flex flex-col justify-end px-6 pb-safe-home pt-24 sm:px-10 sm:pb-10 lg:inset-y-0 lg:left-auto lg:right-0 lg:w-[42%] lg:justify-center lg:px-12 lg:py-12 xl:w-[38%] xl:px-14">
         <div className="pointer-events-auto max-w-md">
           <Image
             src={logo}

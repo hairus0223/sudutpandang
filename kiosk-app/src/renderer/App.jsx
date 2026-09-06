@@ -12,6 +12,8 @@ import { useSessionTimer } from "./hooks/useSessionTimer";
 import { useCameraPreview } from "./hooks/useCameraPreview";
 import { useViewportLayout } from "./hooks/useViewportLayout";
 import { AiSessionIntro } from "./components/AiSessionIntro";
+import { PassportGuideOverlay } from "./components/PassportGuideOverlay";
+import { PassportSessionIntro } from "./components/PassportSessionIntro";
 import { io } from "socket.io-client";
 
 const Screen = {
@@ -57,6 +59,8 @@ export function App() {
   const [aiThemeType, setAiThemeType] = useState(null);
   const [aiGenerateLimit, setAiGenerateLimit] = useState(0);
   const [showAiIntro, setShowAiIntro] = useState(false);
+  const [showPassportIntro, setShowPassportIntro] = useState(false);
+  const [passportBackgroundColor, setPassportBackgroundColor] = useState(null);
   const [endedPackageType, setEndedPackageType] = useState("self-photo");
   const [endedAiThemeLabel, setEndedAiThemeLabel] = useState(null);
   const [endedAiGenerateLimit, setEndedAiGenerateLimit] = useState(0);
@@ -79,6 +83,7 @@ export function App() {
       setAiThemePreviewColor,
       setAiThemeType,
       setAiGenerateLimit,
+      setPassportBackgroundColor,
     }),
     []
   );
@@ -87,12 +92,19 @@ export function App() {
     setShowAiIntro(false);
   }, []);
 
-  const maybeShowAiIntro = useCallback((fields) => {
+  const dismissPassportIntro = useCallback(() => {
+    setShowPassportIntro(false);
+  }, []);
+
+  const maybeShowSessionIntro = useCallback((fields) => {
     if (
       fields?.packageType === "ai-self-photo" &&
       (fields?.aiThemeLabel || fields?.aiThemePreviewUrl)
     ) {
       setShowAiIntro(true);
+    }
+    if (fields?.packageType === "pas-photo") {
+      setShowPassportIntro(true);
     }
   }, []);
 
@@ -108,7 +120,7 @@ export function App() {
     }
   }, []);
 
-  const { refreshPreview, handlePhotoProcessed, cancelPoll } =
+  const { refreshPreview, handlePhotoProcessed, cancelPoll, waitForImageProcessing } =
     useKioskPreview({
       userSlug: sessionUser,
       enabled: screen === Screen.TRIAL || screen === Screen.MAIN,
@@ -187,17 +199,22 @@ export function App() {
       setIsFlashing(false);
       setIsWaitingCapture(true);
 
-      await previewPromise;
-      setLastImageProcessing(false);
+      const result = await previewPromise;
       setIsWaitingCapture(false);
       setIsReviewing(true);
       play("captureSuccess");
+      const processing = Boolean(result?.isProcessing);
+      setLastImageProcessing(processing);
+      if (processing && payload?.imageId) {
+        void waitForImageProcessing(payload.imageId);
+      }
       scheduleReviewEnd(REVIEW_DISPLAY_MS);
     },
     [
       clearCaptureTimers,
       play,
       refreshPreview,
+      waitForImageProcessing,
       scheduleReviewEnd,
       unlockAudio,
     ]
@@ -287,7 +304,7 @@ export function App() {
       setIsWaitingCapture(false);
       setIsReviewing(false);
       syncKioskFields(fields, kioskSetters);
-      maybeShowAiIntro(fields);
+      maybeShowSessionIntro(fields);
       sessionTimer.startWithEndsAt(endsAt);
       startCameraPreview();
     });
@@ -316,7 +333,7 @@ export function App() {
       setIsWaitingCapture(false);
       setIsReviewing(false);
       syncKioskFields(fields, kioskSetters);
-      maybeShowAiIntro(fields);
+      maybeShowSessionIntro(fields);
       sessionTimer.startWithEndsAt(endsAt);
       startCameraPreview();
     });
@@ -529,9 +546,15 @@ export function App() {
   if (screen === Screen.TRIAL || screen === Screen.MAIN) {
     const phaseLabel = screen === Screen.TRIAL ? "Trial Session:" : "Halo,";
     const isAiPackage = packageType === "ai-self-photo";
-    const reviewCaption = "Lihat hasilnya — sesi lanjut sebentar lagi";
-    const footerHint =
-      screen === Screen.TRIAL
+    const isPasPhoto = packageType === "pas-photo";
+    const reviewCaption = isPasPhoto
+      ? "Cek pose di oval — hasil 3×4 sedang disiapkan"
+      : "Lihat hasilnya — sesi lanjut sebentar lagi";
+    const footerHint = isPasPhoto
+      ? screen === Screen.TRIAL
+        ? "Trial — kepala di oval, mata di garis kuning"
+        : "Kepala di oval, mata di garis kuning, lalu tekan remote"
+      : screen === Screen.TRIAL
         ? "Trial — pose ke kamera, lalu tekan remote"
         : "Pose ke kamera, lalu tekan remote untuk mengambil foto";
     const videoWrapperStyle =
@@ -541,6 +564,13 @@ export function App() {
 
     return (
       <div className="screen screen--preview">
+        {isPasPhoto ? (
+          <PassportSessionIntro
+            open={showPassportIntro}
+            backgroundColor={passportBackgroundColor}
+            onDismiss={dismissPassportIntro}
+          />
+        ) : null}
         {isAiPackage ? (
           <AiSessionIntro
             open={showAiIntro}
@@ -618,6 +648,12 @@ export function App() {
                 playsInline
                 muted
               />
+              {isPasPhoto ? (
+                <PassportGuideOverlay
+                  color={passportBackgroundColor}
+                  videoRef={videoRef}
+                />
+              ) : null}
             </div>
           )}
 

@@ -1,8 +1,9 @@
-/** @typedef {"self-photo" | "ai-self-photo"} PackageType */
+/** @typedef {"self-photo" | "ai-self-photo" | "pas-photo"} PackageType */
 
 export const PACKAGE_TYPES = /** @type {const} */ ([
   "self-photo",
   "ai-self-photo",
+  "pas-photo",
 ]);
 
 const SESSION_DURATION_MINUTES =
@@ -17,12 +18,19 @@ const AI_SELF_PHOTO_DURATION_MINUTES =
     ? Number(process.env.AI_SELF_PHOTO_DURATION_MINUTES)
     : 12;
 
+const PAS_PHOTO_DURATION_MINUTES =
+  process.env.PAS_PHOTO_DURATION_MINUTES &&
+  !Number.isNaN(Number(process.env.PAS_PHOTO_DURATION_MINUTES))
+    ? Number(process.env.PAS_PHOTO_DURATION_MINUTES)
+    : 8;
+
 /**
  * @param {string | undefined | null} input
  * @returns {PackageType}
  */
 export function normalizePackageType(input) {
   if (input === "ai-self-photo") return "ai-self-photo";
+  if (input === "pas-photo") return "pas-photo";
   return "self-photo";
 }
 
@@ -34,6 +42,9 @@ export function getPackageDurationMinutes(packageType) {
   if (packageType === "ai-self-photo") {
     return AI_SELF_PHOTO_DURATION_MINUTES;
   }
+  if (packageType === "pas-photo") {
+    return PAS_PHOTO_DURATION_MINUTES;
+  }
   return SESSION_DURATION_MINUTES;
 }
 
@@ -44,6 +55,7 @@ export function getPackageDurations() {
   return {
     "self-photo": SESSION_DURATION_MINUTES,
     "ai-self-photo": AI_SELF_PHOTO_DURATION_MINUTES,
+    "pas-photo": PAS_PHOTO_DURATION_MINUTES,
   };
 }
 

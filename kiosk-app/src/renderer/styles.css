@@ -323,13 +323,67 @@ body {
 }
 
 .pas-photo-inner {
+  position: relative;
   width: min(52vw, 38vh);
   max-height: 68%;
-  border-radius: 8px;
-  border: 4px solid rgba(255, 255, 255, 0.92);
+  aspect-ratio: 3 / 4;
+  border-radius: 10px;
+  border: 4px solid #438ccb;
   box-shadow:
     0 0 0 2px rgba(0, 0, 0, 0.55),
-    0 0 60px rgba(0, 0, 0, 0.35);
+    0 0 0 9999px rgba(0, 0, 0, 0.38);
+}
+
+.pas-photo-guide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.pas-photo-inner--ok {
+  box-shadow:
+    0 0 0 2px rgba(34, 197, 94, 0.85),
+    0 0 0 9999px rgba(0, 0, 0, 0.38);
+}
+
+.pas-photo-inner--wait {
+  box-shadow:
+    0 0 0 2px rgba(239, 68, 68, 0.75),
+    0 0 0 9999px rgba(0, 0, 0, 0.38);
+}
+
+.pas-photo-status {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: clamp(0.8rem, 2.2vmin, 1.05rem);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;
+}
+
+.pas-photo-status--ok {
+  background: rgba(22, 163, 74, 0.94);
+}
+
+.pas-photo-status--wait {
+  background: rgba(220, 38, 38, 0.94);
+}
+
+.pas-photo-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  flex-shrink: 0;
 }
 
 [data-orientation="portrait"] .pas-photo-inner {

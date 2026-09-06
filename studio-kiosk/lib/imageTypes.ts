@@ -8,9 +8,9 @@ export type ProcessingStatus =
 
 export type ProcessingPhase = null | string;
 
-export type PackageType = "self-photo" | "ai-self-photo";
+export type PackageType = "self-photo" | "ai-self-photo" | "pas-photo";
 
-export type PrintVariant = "original" | "ai";
+export type PrintVariant = "original" | "ai" | "passport";
 
 export type AiThemeType = "scene" | "transform";
 
@@ -46,6 +46,9 @@ export type SessionThemeInfo = {
 
 export type ImageVariants = {
   original?: string;
+  subject?: string;
+  passport?: string;
+  passportSizes?: Record<string, string>;
   ai?: Record<string, string>;
 };
 

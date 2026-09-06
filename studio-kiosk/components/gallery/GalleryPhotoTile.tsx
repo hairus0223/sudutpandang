@@ -87,7 +87,7 @@ export function GalleryPhotoTile({
           className={`${badgePrintOutline(printVariant === "ai" ? "ai" : "original")}`}
           title="Hapus dari antrian cetak"
         >
-          Cetak {printVariant === "ai" ? "AI" : "asli"}
+          Cetak {printVariant === "ai" ? "AI" : printVariant === "passport" ? "pas foto" : "asli"}
           <X className="size-3" />
         </button>
       ) : null}

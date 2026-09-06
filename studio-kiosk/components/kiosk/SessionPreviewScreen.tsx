@@ -22,6 +22,7 @@ import { getProcessingStatusLabel } from "@/lib/processingLabels";
 import { getOriginalPreviewUrl } from "@/lib/aiGalleryUtils";
 import type { GalleryImageData, PackageType, AiThemeType } from "@/lib/imageTypes";
 import { SessionPhotoViewer } from "@/components/kiosk/SessionPhotoViewer";
+import { PassportGuideOverlay } from "@/components/kiosk/PassportGuideOverlay";
 
 const TRIAL_PRESETS = [30, 60, 90] as const;
 
@@ -40,6 +41,7 @@ export type SessionMeta = {
   aiThemeLabel: string | null;
   aiThemePreviewUrl?: string | null;
   aiThemeType?: AiThemeType | null;
+  passportBackgroundColor?: string | null;
 };
 
 type SessionPreviewScreenProps = {
@@ -105,6 +107,7 @@ export function SessionPreviewScreen({
   const phase = phaseLabel(session?.phase, sessionTimer.isPaused);
   const packageType = (session?.packageType ?? "self-photo") as PackageType;
   const isAiPackage = packageType === "ai-self-photo";
+  const isPasPhoto = packageType === "pas-photo";
   const aiQuota =
     sessionMeta?.aiGenerateLimit ??
     resolveAiGenerateLimit(
@@ -195,12 +198,28 @@ export function SessionPreviewScreen({
             </span>
           </button>
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-white/55">
-            <Camera className="size-12 text-white/25" strokeWidth={1.25} />
-            <p className="max-w-sm text-sm leading-relaxed sm:text-base">
-              Snapshot akan tampil di sini setelah customer mengambil foto di
-              kiosk. Riwayat foto sesi muncul di bawah.
-            </p>
+          <div className="relative h-full overflow-hidden bg-black">
+            {isPasPhoto ? (
+              <>
+                <PassportGuideOverlay
+                  color={sessionMeta?.passportBackgroundColor}
+                />
+                <div className="pointer-events-none absolute inset-x-0 bottom-6 z-[3] px-6 text-center">
+                  <p className="text-sm text-white/75">
+                    Panduan 3×4 — siluet orang. Di kiosk: hijau = tepat, merah =
+                    geser
+                  </p>
+                </div>
+              </>
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-white/55">
+                <Camera className="size-12 text-white/25" strokeWidth={1.25} />
+                <p className="max-w-sm text-sm leading-relaxed sm:text-base">
+                  Snapshot akan tampil di sini setelah customer mengambil foto di
+                  kiosk. Riwayat foto sesi muncul di bawah.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -285,7 +304,7 @@ export function SessionPreviewScreen({
         onChange={onSelectImage}
       />
 
-      <footer className="relative z-20 shrink-0 border-t border-white/10 bg-[#0a0a0a] pb-[max(0.25rem,env(safe-area-inset-bottom))]">
+      <footer className="relative z-20 shrink-0 border-t border-white/10 bg-[#0a0a0a] pb-safe-footer">
         <button
           type="button"
           aria-expanded={controlsOpen}

@@ -1,6 +1,10 @@
-export type PackageType = "self-photo" | "ai-self-photo";
+export type PackageType = "self-photo" | "ai-self-photo" | "pas-photo";
 
-export const PACKAGE_TYPES: PackageType[] = ["self-photo", "ai-self-photo"];
+export const PACKAGE_TYPES: PackageType[] = [
+  "self-photo",
+  "ai-self-photo",
+  "pas-photo",
+];
 
 export type PackageOption = {
   id: PackageType;
@@ -20,6 +24,12 @@ export const PACKAGE_OPTIONS: PackageOption[] = [
     label: "AI Self Photo",
     description: "Shoot dulu · pilih foto · generate AI bertema",
     badge: "Kuota AI = jumlah orang",
+  },
+  {
+    id: "pas-photo",
+    label: "Pas Photo",
+    description: "Latar merah/biru/custom · soft file 2×3, 3×4, 4×6",
+    badge: "1 orang · 8 menit",
   },
 ];
 

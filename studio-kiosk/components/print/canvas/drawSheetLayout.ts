@@ -8,6 +8,7 @@ export type SheetSlotDraw = {
   image: HTMLImageElement;
   transform?: PhotoTransform;
   faceBoxes?: FaceBox[];
+  fillColor?: string | null;
 };
 
 type PrintableArea = {
@@ -27,6 +28,7 @@ type DrawSheetLayoutOptions = {
   showPassportGuide?: boolean;
   printableArea?: PrintableArea | null;
   showPrintableGuide?: boolean;
+  slotFillColor?: string | null;
 };
 
 export function drawSheetLayout(
@@ -41,6 +43,7 @@ export function drawSheetLayout(
     showPassportGuide = false,
     printableArea = null,
     showPrintableGuide = false,
+    slotFillColor = null,
   }: DrawSheetLayoutOptions
 ) {
   const primary =
@@ -77,6 +80,13 @@ export function drawSheetLayout(
   for (const slot of slots) {
     const draw = slotDraws[slot.index];
     if (!draw) continue;
+
+    if (draw.fillColor || slotFillColor) {
+      ctx.save();
+      ctx.fillStyle = draw.fillColor || slotFillColor || "#ffffff";
+      ctx.fillRect(slot.x, slot.y, slot.w, slot.h);
+      ctx.restore();
+    }
 
     drawSmartCover(ctx, draw.image, slot.x, slot.y, slot.w, slot.h, {
       ...draw.transform,

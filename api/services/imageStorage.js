@@ -77,6 +77,15 @@ export function getPassportPath(userDir, imageId) {
 /**
  * @param {string} userDir
  * @param {string} imageId
+ * @param {string} sizeId
+ */
+export function getPassportSizePath(userDir, imageId, sizeId) {
+  return path.join(getProcessedDir(userDir, imageId), `passport-${sizeId}.png`);
+}
+
+/**
+ * @param {string} userDir
+ * @param {string} imageId
  */
 export function getThemedPath(userDir, imageId) {
   return path.join(getProcessedDir(userDir, imageId), "themed.png");
@@ -377,7 +386,8 @@ export function updateAfterPassportBg(
   imageId,
   passportColor,
   passportSizeId,
-  dimensions = {}
+  dimensions = {},
+  passportSizes = null
 ) {
   const existing = readMeta(userDir, imageId) || { imageId, variants: {} };
   const operations = Array.isArray(existing.operations) ? [...existing.operations] : [];
@@ -386,9 +396,18 @@ export function updateAfterPassportBg(
     operations.push("apply-passport-bg");
   }
 
+  const rel = (name) =>
+    path.join("processed", imageId, name).split(path.sep).join("/");
+
   const variants = {
     ...(typeof existing.variants === "object" && existing.variants ? existing.variants : {}),
-    passport: path.join("processed", imageId, "passport.png").split(path.sep).join("/"),
+    subject: rel("subject.png"),
+    passport: rel("passport.png"),
+    passportSizes: passportSizes || {
+      "2x3": rel("passport-2x3.png"),
+      "3x4": rel("passport-3x4.png"),
+      "4x6": rel("passport-4x6.png"),
+    },
   };
 
   const pipeline = {
@@ -405,6 +424,7 @@ export function updateAfterPassportBg(
     operations,
     variants,
     pipeline,
+    processingPhase: null,
     processedAt: new Date().toISOString(),
     error: null,
   };
@@ -647,6 +667,7 @@ export function findIncompletePassportJobs(baseDir, todayFolder) {
   for (const userSlug of fs.readdirSync(dayPath)) {
     const userDir = path.join(dayPath, userSlug);
     if (!fs.statSync(userDir).isDirectory()) continue;
+    if (readCustomerPackageType(userDir) !== "pas-photo") continue;
 
     const processedRoot = path.join(userDir, "processed");
     if (!fs.existsSync(processedRoot)) continue;
@@ -656,17 +677,17 @@ export function findIncompletePassportJobs(baseDir, todayFolder) {
       if (!fs.statSync(imageDir).isDirectory()) continue;
 
       const meta = readMeta(userDir, imageId);
-      if (!meta || meta.status !== PROCESSING_STATUS.PROCESSING) continue;
+      if (!meta) continue;
 
       const operations = Array.isArray(meta.operations) ? meta.operations : [];
-      if (!operations.includes("remove-bg") || operations.includes("apply-passport-bg")) {
-        continue;
-      }
+      const alreadyDone = operations.includes("apply-passport-bg");
+      const status = meta.status;
+      const incomplete =
+        !alreadyDone &&
+        (status === PROCESSING_STATUS.PENDING ||
+          status === PROCESSING_STATUS.PROCESSING);
 
-      if (readCustomerPackageType(userDir) !== "pas-photo") continue;
-
-      const subjectPath = getSubjectPath(userDir, imageId);
-      if (!fs.existsSync(subjectPath)) continue;
+      if (!incomplete) continue;
 
       jobs.push({ userDir, imageId, user: userSlug });
     }

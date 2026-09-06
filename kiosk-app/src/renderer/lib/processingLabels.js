@@ -8,5 +8,8 @@ export function getKioskProcessingMessage(isProcessing, image) {
   if (image?.processingStatus === "failed") {
     return "Proses foto gagal.";
   }
+  if (image?.processingPhase === "remove-bg" || image?.processingPhase === "apply-passport-bg") {
+    return "Menyiapkan pas foto… harap tunggu";
+  }
   return "Memproses foto… harap tunggu";
 }

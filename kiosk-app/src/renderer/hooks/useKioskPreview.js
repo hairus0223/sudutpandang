@@ -72,7 +72,8 @@ export function useKioskPreview({ userSlug, enabled, onPreviewUpdate }) {
       cancelPoll();
 
       if (payload.status === "ready") {
-        const previewUrl = payload.originalUrl ?? payload.subjectUrl ?? null;
+        const previewUrl =
+          payload.passportUrl ?? payload.originalUrl ?? payload.subjectUrl ?? null;
         onPreviewUpdate({
           previewUrl,
           isProcessing: false,

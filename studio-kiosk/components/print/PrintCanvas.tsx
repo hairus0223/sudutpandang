@@ -507,6 +507,7 @@ function SheetCanvasPage({
         activeAdjustSlotIndex,
         selectedAdjustSlotIndices,
         packageType,
+        passportBackgroundColor,
     } = useGalleryStore();
 
     const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(0);
@@ -896,9 +897,11 @@ function SheetCanvasPage({
                       : activeSlotIndex !== null
                         ? [activeSlotIndex]
                         : [],
-                showPassportGuide: false,
+                showPassportGuide: packageType === "pas-photo",
                 printableArea: geometry.printableArea,
                 showPrintableGuide: !isPrintMode,
+                slotFillColor:
+                  packageType === "pas-photo" ? passportBackgroundColor : null,
             });
         });
     }, [
@@ -917,6 +920,7 @@ function SheetCanvasPage({
         sheetSizeAssignments,
         sheetSlotAssignments,
         packageType,
+        passportBackgroundColor,
     ]);
 
     useEffect(() => {

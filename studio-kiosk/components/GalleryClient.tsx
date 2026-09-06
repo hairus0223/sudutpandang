@@ -45,6 +45,7 @@ export default function GalleryClient() {
     setAllowedPrint,
     setPrintTemplate,
     setPackageType,
+    setPassportBackgroundColor,
     setAiQuota,
     setSessionTheme,
     loadPersistedSheetTransforms,
@@ -131,6 +132,7 @@ export default function GalleryClient() {
       .then((d) => {
         setAllowedPrint(d.allowedPrint);
         setPackageType((d.packageType ?? "self-photo") as PackageType);
+        setPassportBackgroundColor(d.passportBackgroundColor ?? null);
         setAiQuota({
           limit: d.aiGenerateLimit ?? 0,
           used: d.aiGenerateUsed ?? 0,
@@ -157,6 +159,7 @@ export default function GalleryClient() {
     user,
     setAllowedPrint,
     setPackageType,
+    setPassportBackgroundColor,
     setAiQuota,
     setSessionTheme,
     setPrintTemplate,
@@ -164,6 +167,7 @@ export default function GalleryClient() {
   ]);
 
   const isAiPackage = packageType === "ai-self-photo";
+  const isPasPhoto = packageType === "pas-photo";
 
   return (
     <>
@@ -186,6 +190,11 @@ export default function GalleryClient() {
             <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-xs text-white/70">
               {getPackageLabel(packageType)}
             </span>
+            {isPasPhoto ? (
+              <span className="rounded-full bg-[#CC0000]/20 px-2.5 py-0.5 text-xs text-white/80">
+                Soft file 2×3 · 3×4 · 4×6
+              </span>
+            ) : null}
             {isAiPackage && aiThemeLabel ? (
               <span className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs text-violet-200">
                 {aiThemeLabel}

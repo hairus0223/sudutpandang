@@ -76,11 +76,13 @@ type GalleryStore = {
     aiThemePreviewUrl: string | null;
     aiThemeType: AiThemeType | null;
     galleryUser: string | null;
+    passportBackgroundColor: string | null;
 
     setImages: (images: ImageData[]) => void;
     setGalleryUser: (user: string | null) => void;
     setAllowedPrint: (n: number) => void;
     setPackageType: (packageType: PackageType) => void;
+    setPassportBackgroundColor: (color: string | null) => void;
     setAiQuota: (quota: {
         limit: number;
         used: number;
@@ -212,11 +214,14 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
     aiThemePreviewUrl: null,
     aiThemeType: null,
     galleryUser: null,
+    passportBackgroundColor: null,
 
     setImages: (images) => set({ images }),
     setGalleryUser: (galleryUser) => set({ galleryUser }),
     setAllowedPrint: (n) => set({ allowedPrint: n }),
     setPackageType: (packageType) => set({ packageType }),
+    setPassportBackgroundColor: (passportBackgroundColor) =>
+        set({ passportBackgroundColor }),
     setAiQuota: ({ limit, used, remaining }) =>
         set({
             aiGenerateLimit: limit,
@@ -460,6 +465,7 @@ export const useGalleryStore = create<GalleryStore>((set, get) => ({
             aiThemePreviewUrl: null,
             aiThemeType: null,
             galleryUser: null,
+            passportBackgroundColor: null,
             sheetSlotTransforms: {},
             activeAdjustSlotIndex: null,
             activeAdjustMeta: null,

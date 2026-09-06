@@ -115,8 +115,8 @@ function fitTiles(
   rows: number,
   gap: number
 ) {
-  const maxTileW = (width - gap * (cols - 1)) / cols;
-  const maxTileH = (height - gap * (rows - 1)) / rows;
+  const maxTileW = Math.max(1, (width - gap * (cols - 1)) / cols);
+  const maxTileH = Math.max(1, (height - gap * (rows - 1)) / rows);
 
   if (maxTileW / maxTileH > PHOTO_ASPECT) {
     const tileH = maxTileH;
@@ -127,20 +127,18 @@ function fitTiles(
   return { tileW, tileH: tileW / PHOTO_ASPECT };
 }
 
+const INITIAL_GRID = computePhotoGrid(0, 0);
+
 export function HeadlineGallery() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [grid, setGrid] = useState<PhotoGrid>(() =>
-    typeof window === "undefined"
-      ? computePhotoGrid(0, 0)
-      : computePhotoGrid(window.innerWidth, window.innerHeight)
-  );
+  const [grid, setGrid] = useState<PhotoGrid>(INITIAL_GRID);
   const [headlines, setHeadlines] = useState<Headline[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [slots, setSlots] = useState<(Headline | null)[]>(() =>
-    fillSlots([], grid.cols * grid.rows)
+    fillSlots([], INITIAL_GRID.cols * INITIAL_GRID.rows)
   );
   const [flipState, setFlipState] = useState<boolean[]>(() =>
-    Array(grid.cols * grid.rows).fill(false)
+    Array(INITIAL_GRID.cols * INITIAL_GRID.rows).fill(false)
   );
 
   const slotIndexRef = useRef(0);
@@ -321,9 +319,8 @@ export function HeadlineGallery() {
 
           return (
             <div
-              key={idx}
+              key={`slot-${idx}`}
               className="perspective relative min-h-0 overflow-hidden bg-[#111]"
-              style={{ aspectRatio: "3 / 5" }}
             >
               {isLoading || !item ? (
                 <div className="size-full animate-pulse bg-gradient-to-br from-white/[0.07] to-white/[0.02]" />

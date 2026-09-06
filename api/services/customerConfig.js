@@ -1,16 +1,14 @@
 import fs from "fs";
 import path from "path";
-import { normalizePassportSizeId } from "./passportSizes.js";
-import { normalizeThemeId } from "./themePresets.js";
+import { normalizePackageType } from "./packageTypes.js";
 
 /** @type {Record<string, string>} */
 export const PASSPORT_COLOR_PRESETS = {
-  white: "#FFFFFF",
-  blue: "#438CCB",
   red: "#CC0000",
+  blue: "#438CCB",
 };
 
-export const DEFAULT_PASSPORT_COLOR = PASSPORT_COLOR_PRESETS.white;
+export const DEFAULT_PASSPORT_COLOR = PASSPORT_COLOR_PRESETS.blue;
 
 /**
  * @param {string | undefined | null} input
@@ -29,6 +27,25 @@ export function normalizePassportColor(input) {
 }
 
 /**
+ * @param {string | undefined | null} id
+ * @param {string | undefined | null} color
+ */
+export function resolvePassportBackground(id, color) {
+  const rawId = String(id || "").trim().toLowerCase();
+  if (rawId === "red" || rawId === "blue") {
+    return {
+      passportBackgroundId: rawId,
+      passportBackgroundColor: PASSPORT_COLOR_PRESETS[rawId],
+    };
+  }
+
+  return {
+    passportBackgroundId: "custom",
+    passportBackgroundColor: normalizePassportColor(color),
+  };
+}
+
+/**
  * @param {string} userFolder
  */
 export function readCustomerJson(userFolder) {
@@ -40,8 +57,6 @@ export function readCustomerJson(userFolder) {
     return null;
   }
 }
-
-import { normalizePackageType } from "./packageTypes.js";
 
 /**
  * @param {string} userFolder
@@ -57,20 +72,4 @@ export function readCustomerPackageType(userFolder) {
 export function readPassportBackgroundColor(userFolder) {
   const data = readCustomerJson(userFolder);
   return normalizePassportColor(data?.passportBackgroundColor);
-}
-
-/**
- * @param {string} userFolder
- */
-export function readCustomerThemeId(userFolder) {
-  const data = readCustomerJson(userFolder);
-  return normalizeThemeId(data?.themeId);
-}
-
-/**
- * @param {string} userFolder
- */
-export function readPassportSizeId(userFolder) {
-  const data = readCustomerJson(userFolder);
-  return normalizePassportSizeId(data?.passportSizeId);
 }

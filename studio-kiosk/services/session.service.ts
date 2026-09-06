@@ -125,6 +125,7 @@ export async function mainStart(
 const DEFAULT_PACKAGE_DURATIONS: Record<PackageType, number> = {
   "self-photo": 10,
   "ai-self-photo": 12,
+  "pas-photo": 8,
 };
 
 export async function getKioskConfig(): Promise<KioskConfig> {
@@ -143,6 +144,9 @@ export async function getKioskConfig(): Promise<KioskConfig> {
       "ai-self-photo":
         data.packageDurations?.["ai-self-photo"] ??
         DEFAULT_PACKAGE_DURATIONS["ai-self-photo"],
+      "pas-photo":
+        data.packageDurations?.["pas-photo"] ??
+        DEFAULT_PACKAGE_DURATIONS["pas-photo"],
     },
     packages: data.packages,
     aiSelfPhoto: data.aiSelfPhoto,

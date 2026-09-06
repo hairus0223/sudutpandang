@@ -18,8 +18,12 @@ import {
   saveOriginalFromCapture,
   saveUploadedToCaptures,
 } from "./services/imageStorage.js";
+import {
+  resumeIncompletePassportJobs,
+  schedulePassportPipeline,
+} from "./services/passportPipeline.js";
 import { bootstrapStudioDirs, resolveBaseDir } from "./services/studioPaths.js";
-import { readCustomerJson } from "./services/customerConfig.js";
+import { readCustomerJson, readCustomerPackageType, readPassportBackgroundColor, resolvePassportBackground } from "./services/customerConfig.js";
 import {
   normalizePackageType,
   getPackageDurations,
@@ -154,6 +158,37 @@ function buildVariantUrls(host, todayFolder, userSlug, meta) {
     );
   }
 
+  if (meta?.variants?.subject) {
+    variants.subject = buildPublicImageUrl(
+      todayFolder,
+      userSlug,
+      String(meta.variants.subject),
+      host
+    );
+  }
+
+  if (meta?.variants?.passport) {
+    variants.passport = buildPublicImageUrl(
+      todayFolder,
+      userSlug,
+      String(meta.variants.passport),
+      host
+    );
+  }
+
+  if (meta?.variants?.passportSizes && typeof meta.variants.passportSizes === "object") {
+    variants.passportSizes = {};
+    for (const [sizeId, relPath] of Object.entries(meta.variants.passportSizes)) {
+      if (!relPath) continue;
+      variants.passportSizes[sizeId] = buildPublicImageUrl(
+        todayFolder,
+        userSlug,
+        String(relPath),
+        host
+      );
+    }
+  }
+
   if (meta?.variants?.ai && typeof meta.variants.ai === "object") {
     /** @type {Record<string, string>} */
     variants.ai = {};
@@ -189,6 +224,21 @@ function getUserPathForToday(userSlug) {
   return path.join(BASE_DIR, getTodayFolder(), userSlug);
 }
 
+function publicUrlForUser(userSlug, relativePath, host = PUBLIC_HOST) {
+  return buildPublicImageUrl(getTodayFolder(), userSlug, relativePath, host);
+}
+
+function maybeSchedulePassportPipeline(userDir, imageId, user, host = PUBLIC_HOST) {
+  if (readCustomerPackageType(userDir) !== "pas-photo") return;
+  schedulePassportPipeline({
+    userDir,
+    imageId,
+    user,
+    io,
+    buildPublicUrl: (relativePath) => publicUrlForUser(user, relativePath, host),
+  });
+}
+
 function buildKioskSyncFields(userSlug, fallback = {}) {
   const userFolder = getUserPathForToday(userSlug);
   const data = readCustomerJson(userFolder);
@@ -207,6 +257,10 @@ function buildKioskSyncFields(userSlug, fallback = {}) {
   return {
     packageType,
     peopleCount,
+    passportBackgroundColor:
+      packageType === "pas-photo"
+        ? readPassportBackgroundColor(userFolder)
+        : null,
     aiThemeId: sessionTheme.themeId,
     aiThemeLabel: sessionTheme.label,
     aiThemePreviewUrl: themePublic?.previewUrl ?? null,
@@ -249,9 +303,10 @@ function listUserImages(userPath, host, todayFolder, userSlug) {
       }
       images.push({
         filename,
-        url: variants.original,
+        url: variants.passport ?? variants.passportSizes?.["3x4"] ?? variants.original,
         imageId,
         processingStatus: meta?.status ?? "none",
+        processingPhase: meta?.processingPhase ?? null,
         processingError: meta?.error ?? null,
         variants,
         aiSelection: aiByImage.get(imageId) ?? null,
@@ -413,13 +468,18 @@ app.post("/api/register", (req, res) => {
     templateId = "4R",
     packageType: rawPackageType,
     aiThemeId: rawAiThemeId,
+    passportBackgroundId: rawPassportBackgroundId,
+    passportBackgroundColor: rawPassportBackgroundColor,
   } = req.body;
 
   if (!name || typeof name !== "string" || name.trim() === "")
     return res.status(400).json({ error: "invalid data" });
 
-  const people = Math.max(1, Math.min(8, Number(peopleCount) || 1));
   const packageType = normalizePackageType(rawPackageType);
+  const people =
+    packageType === "pas-photo"
+      ? 1
+      : Math.max(1, Math.min(8, Number(peopleCount) || 1));
   const aiGenerateLimit = resolveAiGenerateLimit(packageType, people);
 
   let aiThemeId = null;
@@ -432,6 +492,11 @@ app.post("/api/register", (req, res) => {
     aiThemeId = theme.id;
     aiThemeLabel = theme.label;
   }
+
+  const passportBg =
+    packageType === "pas-photo"
+      ? resolvePassportBackground(rawPassportBackgroundId, rawPassportBackgroundColor)
+      : { passportBackgroundId: null, passportBackgroundColor: null };
 
   const slugName = name.trim().replace(/\s+/g, "_");
   const todayFolder = getTodayFolder();
@@ -454,6 +519,8 @@ app.post("/api/register", (req, res) => {
     aiThemeId,
     aiThemeLockedAt,
     aiSelections: [],
+    passportBackgroundId: passportBg.passportBackgroundId,
+    passportBackgroundColor: passportBg.passportBackgroundColor,
     folderPath: `/images/${todayFolder}/${slugName}`,
     registeredAt,
   };
@@ -528,6 +595,10 @@ app.get("/api/customer-by-name", (req, res) => {
       aiThemePreviewUrl: themePublic?.previewUrl ?? null,
       aiThemeType: themePublic?.type ?? null,
       aiThemePreviewBeforeUrl: themePublic?.previewBeforeUrl ?? null,
+      passportBackgroundColor:
+        packageType === "pas-photo"
+          ? data.passportBackgroundColor ?? readPassportBackgroundColor(path.dirname(file))
+          : null,
     },
   });
 });
@@ -564,6 +635,10 @@ app.get("/api/print-config/:user", (req, res) => {
     aiThemePreviewUrl: themePublic?.previewUrl ?? null,
     aiThemeType: themePublic?.type ?? null,
     aiThemePreviewBeforeUrl: themePublic?.previewBeforeUrl ?? null,
+    passportBackgroundColor:
+      packageType === "pas-photo"
+        ? data.passportBackgroundColor ?? readPassportBackgroundColor(path.dirname(file))
+        : null,
   });
 });
 
@@ -1242,12 +1317,13 @@ app.post("/api/images/:user/upload", (req, res) => {
         req.file.originalname
       );
 
+      const isPasPhoto = readCustomerPackageType(userPath) === "pas-photo";
       createPendingMeta({
         userDir: userPath,
         imageId,
         sourceFilename,
         ext,
-        status: PROCESSING_STATUS.NONE,
+        status: isPasPhoto ? PROCESSING_STATUS.PENDING : PROCESSING_STATUS.NONE,
       });
 
       io.emit("new-photo", {
@@ -1256,6 +1332,8 @@ app.post("/api/images/:user/upload", (req, res) => {
         filename: path.basename(destPath),
         fullPath: destPath,
       });
+
+      maybeSchedulePassportPipeline(userPath, imageId, user, req.headers.host);
 
       res.status(201).json({
         success: true,
@@ -1499,12 +1577,13 @@ chokidar
         filePath
       );
 
+      const isPasPhoto = readCustomerPackageType(userFolder) === "pas-photo";
       createPendingMeta({
         userDir: userFolder,
         imageId,
         sourceFilename,
         ext,
-        status: PROCESSING_STATUS.NONE,
+        status: isPasPhoto ? PROCESSING_STATUS.PENDING : PROCESSING_STATUS.NONE,
       });
 
       io.emit("new-photo", {
@@ -1513,6 +1592,8 @@ chokidar
         filename: path.basename(destPath),
         fullPath: destPath,
       });
+
+      maybeSchedulePassportPipeline(userFolder, imageId, userSlug);
     } catch (err) {
       console.error("Image processing failed:", err);
     }
@@ -1552,4 +1633,11 @@ server.listen(PORT, "0.0.0.0", () => {
   }
 
   prewarmPersonSegmentation().catch(() => {});
+  resumeIncompletePassportJobs({
+    baseDir: BASE_DIR,
+    todayFolder: getTodayFolder(),
+    io,
+    buildPublicUrlForUser: (userSlug, relativePath) =>
+      publicUrlForUser(userSlug, relativePath),
+  });
 });

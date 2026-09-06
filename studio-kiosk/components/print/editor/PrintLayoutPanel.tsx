@@ -85,6 +85,7 @@ export function PrintLayoutPanel({
     setSheetPaperMarginsUniform,
     resetSheetPaperMargins,
     setSheetMarginUniform,
+    packageType,
   } = useGalleryStore();
 
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -209,6 +210,13 @@ export function PrintLayoutPanel({
     <div className={embedded ? "flex flex-col gap-5" : panelScrollClass}>
       <div className="flex flex-col gap-5">
           <PrintModeToggle />
+
+          {packageType === "pas-photo" ? (
+            <p className="rounded-lg border border-[#E8C872]/25 bg-[#E8C872]/10 px-3 py-2 text-[11px] leading-relaxed text-[#E8C872]">
+              Campur 2×3 / 3×4 / 4×6 di baris, atau pilih Custom mm. Background
+              mengikuti warna paket; subjek transparan di-composite per slot.
+            </p>
+          ) : null}
 
           <PanelSection
             title="Template cepat"

@@ -34,11 +34,17 @@ export async function stopSession() {
 
 export function getPreviewUrl(image) {
   if (!image) return null;
-  return image.url ?? null;
+  return (
+    image.variants?.passport ??
+    image.variants?.passportSizes?.["3x4"] ??
+    image.url ??
+    null
+  );
 }
 
-export function isAwaitingProcessedPreview(_image) {
-  return false;
+export function isAwaitingProcessedPreview(image) {
+  const status = image?.processingStatus;
+  return status === "pending" || status === "processing";
 }
 
 export { getKioskProcessingMessage } from "../lib/processingLabels.js";
@@ -190,5 +196,11 @@ export function applyKioskSyncFields(setters, fields = {}) {
     typeof setters.setAiGenerateLimit === "function"
   ) {
     setters.setAiGenerateLimit(Number(fields.aiGenerateLimit) || 0);
+  }
+  if (
+    fields.passportBackgroundColor !== undefined &&
+    typeof setters.setPassportBackgroundColor === "function"
+  ) {
+    setters.setPassportBackgroundColor(fields.passportBackgroundColor || null);
   }
 }

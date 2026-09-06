@@ -29,6 +29,8 @@ export function usePrintSubmit(images: ImageData[]) {
     photoTransforms,
     faceBoxes,
     persistSheetTransforms,
+    packageType,
+    passportBackgroundColor,
   } = useGalleryStore();
 
   const resolvedPaper = useResolvedSheetPaper();
@@ -81,6 +83,8 @@ export function usePrintSubmit(images: ImageData[]) {
           copies: sheetCopies,
           align: sheetAlign,
           paperMargins: sheetPaperMargins,
+          slotFillColor:
+            packageType === "pas-photo" ? passportBackgroundColor : null,
         });
 
         await fetch(`${API_BASE_URL}/api/print`, {

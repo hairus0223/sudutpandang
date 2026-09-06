@@ -39,8 +39,10 @@ async function run() {
   assert(health.body.config, "health.config missing");
   assert(health.body.mode === "studio", "expected studio mode");
   assert(
-    Array.isArray(health.body.packages) && health.body.packages.includes("ai-self-photo"),
-    "expected ai-self-photo in packages"
+    Array.isArray(health.body.packages) &&
+      health.body.packages.includes("ai-self-photo") &&
+      health.body.packages.includes("pas-photo"),
+    "expected ai-self-photo and pas-photo in packages"
   );
   console.log(`✓ GET /api/health (packages: ${health.body.packages.join(", ")})`);
 
@@ -76,9 +78,14 @@ async function run() {
     "packageDurations.ai-self-photo missing"
   );
   assert(
+    kioskConfig.body.packageDurations?.["pas-photo"],
+    "packageDurations.pas-photo missing"
+  );
+  assert(
     Array.isArray(kioskConfig.body.packages) &&
-      kioskConfig.body.packages.includes("ai-self-photo"),
-    "kiosk packages missing ai-self-photo"
+      kioskConfig.body.packages.includes("ai-self-photo") &&
+      kioskConfig.body.packages.includes("pas-photo"),
+    "kiosk packages missing pas-photo"
   );
   console.log(
     `✓ GET /api/kiosk-config (self-photo=${kioskConfig.body.packageDurations["self-photo"]}m, ai-self-photo=${kioskConfig.body.packageDurations["ai-self-photo"]}m)`

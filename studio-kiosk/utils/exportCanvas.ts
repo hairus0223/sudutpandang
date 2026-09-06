@@ -117,6 +117,7 @@ export async function exportSheetPrint({
   copies = 1,
   align = "top-left",
   paperMargins,
+  slotFillColor = null,
 }: {
   images: ImageData[];
   recipe: SheetRecipe;
@@ -130,6 +131,7 @@ export async function exportSheetPrint({
   copies?: number;
   align?: SheetGridAlign;
   paperMargins?: PaperMarginsMm | null;
+  slotFillColor?: string | null;
 }): Promise<string[]> {
   if (!images.length) return [];
 
@@ -173,6 +175,7 @@ export async function exportSheetPrint({
       slotDraws,
       showCutLines: includeCutLines,
       activeSlotIndex: null,
+      slotFillColor,
     });
 
     flattenCanvasAlpha(ctx, geometry.paperWidthPx, geometry.paperHeightPx);

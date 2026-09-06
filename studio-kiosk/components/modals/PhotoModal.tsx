@@ -24,6 +24,7 @@ import {
 } from "@/lib/aiGalleryUtils";
 import {
   hasAiPrintVariant,
+  getPassportSizeUrl,
   resolveGalleryPreviewUrl,
   resolvePrintUrl,
 } from "@/lib/resolveImageUrl";
@@ -204,10 +205,17 @@ export function PhotoModal({
   const selectionKey = image.imageId ?? image.filename;
   const canSwitchVariant =
     packageType === "ai-self-photo" && hasAiPrintVariant(image, aiThemeId);
-  const printTargetVariant = canSwitchVariant ? viewVariant : "original";
-  const displayUrl = canSwitchVariant
-    ? resolvePrintUrl(image, viewVariant, aiThemeId)
-    : resolveGalleryPreviewUrl(image);
+  const isPasPhoto = packageType === "pas-photo";
+  const printTargetVariant: PrintVariant = isPasPhoto
+    ? "passport"
+    : canSwitchVariant
+      ? viewVariant
+      : "original";
+  const displayUrl = isPasPhoto
+    ? resolveGalleryPreviewUrl(image)
+    : canSwitchVariant
+      ? resolvePrintUrl(image, viewVariant, aiThemeId)
+      : resolveGalleryPreviewUrl(image);
   const isPrintSelected = selectedForPrint.includes(image.filename);
   const selectedVariant = printVariantByFilename[image.filename] ?? "original";
   const isPrintActive =
@@ -536,9 +544,29 @@ export function PhotoModal({
               {isPrintActive
                 ? "Hapus dari antrian"
                 : isPrintSelected
-                  ? `Ganti ke ${printTargetVariant === "ai" ? "AI" : "asli"}`
-                  : `Masukkan antrian · ${printTargetVariant === "ai" ? "AI" : "asli"}`}
+                  ? `Ganti ke ${printTargetVariant === "ai" ? "AI" : printTargetVariant === "passport" ? "pas foto" : "asli"}`
+                  : `Masukkan antrian · ${printTargetVariant === "ai" ? "AI" : printTargetVariant === "passport" ? "pas foto" : "asli"}`}
             </button>
+
+            {isPasPhoto ? (
+              <div className="flex w-full flex-wrap justify-center gap-2">
+                {(["2x3", "3x4", "4x6"] as const).map((sizeId) => {
+                  const url = getPassportSizeUrl(image, sizeId);
+                  if (!url) return null;
+                  return (
+                    <a
+                      key={sizeId}
+                      href={url}
+                      download={`pasfoto-${sizeId}.png`}
+                      onClick={(e) => e.stopPropagation()}
+                      className={cn(btnNeutral(false), "px-3 py-2 text-xs")}
+                    >
+                      Unduh {sizeId.replace("x", "×")}
+                    </a>
+                  );
+                })}
+              </div>
+            ) : null}
 
             {aiMode && onGenerateAi && selectionKey ? (
               isAiReady ? (

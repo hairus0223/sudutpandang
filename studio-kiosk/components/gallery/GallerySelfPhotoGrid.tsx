@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { GalleryImageData } from "@/lib/imageTypes";
+import type { GalleryImageData, PrintVariant } from "@/lib/imageTypes";
 import { InfoCard } from "@/components/cards/InfoCard";
 import { GalleryPhotoTile } from "@/components/gallery/GalleryPhotoTile";
 import { GalleryPrintSelectionBar } from "@/components/gallery/GalleryPrintSelectionBar";
@@ -34,7 +34,10 @@ export function GallerySelfPhotoGrid({
     bulkRemoveFromPrint,
     enqueuePrintMany,
     allowedPrint,
+    packageType,
   } = useGalleryStore();
+  const isPasPhoto = packageType === "pas-photo";
+  const printVariantDefault: PrintVariant = isPasPhoto ? "passport" : "original";
 
   const selectedImages = useMemo(() => {
     return images.filter((img, index) =>
@@ -49,13 +52,15 @@ export function GallerySelfPhotoGrid({
   const originalQueuedCount = selectedImages.filter(
     (img) =>
       selectedForPrint.includes(img.filename) &&
-      (printVariantByFilename[img.filename] ?? "original") === "original"
+      (printVariantByFilename[img.filename] ?? "original") === printVariantDefault
   ).length;
 
-  const handleEnqueuePrint = (variant: "original" | "ai") => {
+  const handleEnqueuePrint = (variant: PrintVariant) => {
+    const resolved =
+      isPasPhoto && variant === "original" ? "passport" : variant;
     const result = enqueuePrintMany(
       selectedImages.map((img) => img.filename),
-      variant
+      resolved
     );
     if (result.skippedLimit > 0) {
       toast(`Antrian cetak penuh (maks. ${allowedPrint} foto).`, "error");
@@ -125,7 +130,11 @@ export function GallerySelfPhotoGrid({
           onClearSelection={clearGallerySelection}
           onEnqueuePrint={handleEnqueuePrint}
           onRemovePrintFromSelection={handleRemovePrintFromSelection}
-          hint="Pilih foto, lalu ketuk Masukkan antrian cetak. Badge emas = sudah di antrian. Lanjut Cetak di bawah layar."
+          hint={
+            isPasPhoto
+              ? "Antrian cetak default pas foto. Di editor sheet campur 2×3 / 3×4 / 4×6 atau mm custom."
+              : "Pilih foto, lalu ketuk Masukkan antrian cetak. Badge emas = sudah di antrian. Lanjut Cetak di bawah layar."
+          }
         />
       </div>
     </section>

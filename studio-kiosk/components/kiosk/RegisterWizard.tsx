@@ -13,6 +13,11 @@ import { getPackageDurationMinutes } from "@/services/session.service";
 import { RegisterAiSummaryCard } from "@/components/kiosk/RegisterAiSummaryCard";
 import { ThemePickerGrid, useAiThemes } from "@/components/kiosk/ThemePickerGrid";
 import { ThemePreviewModal } from "@/components/kiosk/ThemePreviewModal";
+import {
+  DEFAULT_PASSPORT_COLOR,
+  PASSPORT_COLOR_OPTIONS,
+  normalizePassportColor,
+} from "@/lib/passportColors";
 import { cn } from "@/lib/utils";
 
 type RegisterStep = 1 | 2 | 3;
@@ -24,7 +29,8 @@ type RegisterWizardProps = {
     phone: string,
     peopleCount: number,
     packageType: PackageType,
-    aiThemeId?: string
+    aiThemeId?: string,
+    passport?: { backgroundId: string; backgroundColor: string }
   ) => Promise<void>;
   onBack: () => void;
   onError: (message: string) => void;
@@ -34,15 +40,20 @@ type RegisterWizardProps = {
 function RegisterStepDots({
   step,
   isAiPackage,
+  isPasPhoto,
 }: {
   step: RegisterStep;
   isAiPackage: boolean;
+  isPasPhoto: boolean;
 }) {
   const labels = isAiPackage
     ? (["Paket", "Tema", "Data"] as const)
-    : (["Paket", "Data"] as const);
+    : isPasPhoto
+      ? (["Paket", "Background", "Data"] as const)
+      : (["Paket", "Data"] as const);
 
-  const activeIndex = isAiPackage ? step - 1 : step === 1 ? 0 : 1;
+  const hasMiddle = isAiPackage || isPasPhoto;
+  const activeIndex = hasMiddle ? step - 1 : step === 1 ? 0 : 1;
 
   return (
     <div className="mb-5 flex items-center justify-center gap-2">
@@ -92,6 +103,10 @@ export function RegisterWizard({
   const [packageType, setPackageType] = React.useState<PackageType>("self-photo");
   const [peopleCount, setPeopleCount] = React.useState(1);
   const [aiThemeId, setAiThemeId] = React.useState<string | null>(null);
+  const [passportBgId, setPassportBgId] = React.useState<"red" | "blue" | "custom">(
+    "blue"
+  );
+  const [customHex, setCustomHex] = React.useState("#438CCB");
   const [previewTheme, setPreviewTheme] = React.useState<AiTheme | null>(null);
   const [name, setName] = React.useState("");
   const [phone, setPhone] = React.useState("");
@@ -99,17 +114,24 @@ export function RegisterWizard({
 
   const { themes } = useAiThemes();
   const isAiPackage = packageType === "ai-self-photo";
+  const isPasPhoto = packageType === "pas-photo";
+  const hasMiddleStep = isAiPackage || isPasPhoto;
   const sessionMinutes = getPackageDurationMinutes(packageType, packageDurations);
   const aiQuotaPreview = resolveAiGenerateLimit(packageType, peopleCount);
   const selectedTheme =
     themes.find((theme) => theme.id === aiThemeId) ?? null;
+  const passportColor =
+    passportBgId === "custom"
+      ? normalizePassportColor(customHex)
+      : PASSPORT_COLOR_OPTIONS.find((option) => option.id === passportBgId)?.value ??
+        DEFAULT_PASSPORT_COLOR;
 
   React.useEffect(() => {
     onStepChange?.(step);
   }, [step, onStepChange]);
 
   const goNextFromStep1 = () => {
-    if (isAiPackage) {
+    if (hasMiddleStep) {
       setStep(2);
       return;
     }
@@ -118,7 +140,7 @@ export function RegisterWizard({
 
   const goBack = () => {
     if (step === 3) {
-      setStep(isAiPackage ? 2 : 1);
+      setStep(hasMiddleStep ? 2 : 1);
       return;
     }
     if (step === 2) {
@@ -144,9 +166,12 @@ export function RegisterWizard({
       await onSubmit(
         trimmedName,
         phone.trim(),
-        Math.max(1, Math.min(8, peopleCount)),
+        isPasPhoto ? 1 : Math.max(1, Math.min(8, peopleCount)),
         packageType,
-        aiThemeId ?? undefined
+        aiThemeId ?? undefined,
+        isPasPhoto
+          ? { backgroundId: passportBgId, backgroundColor: passportColor }
+          : undefined
       );
     } catch {
       onError("Registrasi gagal. Hubungi staf.");
@@ -157,7 +182,11 @@ export function RegisterWizard({
 
   return (
     <>
-      <RegisterStepDots step={step} isAiPackage={isAiPackage} />
+      <RegisterStepDots
+        step={step}
+        isAiPackage={isAiPackage}
+        isPasPhoto={isPasPhoto}
+      />
 
       {step === 1 ? (
         <div className="space-y-5">
@@ -172,12 +201,15 @@ export function RegisterWizard({
 
           <div className="space-y-2">
             <label className="text-xs tracking-[0.22em] text-white/60">PAKET</label>
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-3">
               {PACKAGE_OPTIONS.map((option) => (
                 <button
                   key={option.id}
                   type="button"
-                  onClick={() => setPackageType(option.id)}
+                  onClick={() => {
+                    setPackageType(option.id);
+                    if (option.id === "pas-photo") setPeopleCount(1);
+                  }}
                   className={cn(
                     "rounded-xl border px-3 py-3 text-left transition",
                     packageType === option.id
@@ -203,16 +235,22 @@ export function RegisterWizard({
             <label className="text-xs tracking-[0.22em] text-white/60">
               JUMLAH ORANG
             </label>
-            <Input
-              type="number"
-              min={1}
-              max={8}
-              value={peopleCount}
-              onChange={(e) =>
-                setPeopleCount(Math.max(1, Math.min(8, Number(e.target.value) || 1)))
-              }
-              className="h-11"
-            />
+            {isPasPhoto ? (
+              <p className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/80">
+                Dikunci 1 orang untuk paket Pas Photo
+              </p>
+            ) : (
+              <Input
+                type="number"
+                min={1}
+                max={8}
+                value={peopleCount}
+                onChange={(e) =>
+                  setPeopleCount(Math.max(1, Math.min(8, Number(e.target.value) || 1)))
+                }
+                className="h-11"
+              />
+            )}
             {isAiPackage ? (
               <p className="text-[11px] text-[#E8C872]">
                 Kuota generate AI: {aiQuotaPreview} (sesuai jumlah orang)
@@ -233,6 +271,87 @@ export function RegisterWizard({
               type="button"
               className="h-11 flex-1 bg-[#B59240] font-semibold text-black hover:bg-[#C9A855]"
               onClick={goNextFromStep1}
+            >
+              Lanjut
+              <ChevronRight className="ml-1 size-4" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {step === 2 && isPasPhoto ? (
+        <div className="space-y-5">
+          <div>
+            <h2 className="text-lg font-semibold tracking-wide text-white sm:text-xl">
+              Background pas foto
+            </h2>
+            <p className="mt-2 text-xs text-white/60 sm:text-sm">
+              Soft file memakai warna ini untuk 2×3, 3×4, dan 4×6
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {PASSPORT_COLOR_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setPassportBgId(option.id)}
+                className={cn(
+                  "flex items-center gap-3 rounded-xl border px-3 py-3 text-left transition",
+                  passportBgId === option.id
+                    ? "border-[#B59240]/50 bg-[#B59240]/15 ring-1 ring-[#B59240]/40"
+                    : "border-white/10 bg-white/5 hover:border-white/20"
+                )}
+              >
+                <span
+                  className="size-9 rounded-lg ring-1 ring-white/20"
+                  style={{ backgroundColor: option.value }}
+                />
+                <span className="text-sm font-medium text-white">{option.label}</span>
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setPassportBgId("custom")}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition",
+              passportBgId === "custom"
+                ? "border-[#B59240]/50 bg-[#B59240]/15 ring-1 ring-[#B59240]/40"
+                : "border-white/10 bg-white/5 hover:border-white/20"
+            )}
+          >
+            <span
+              className="size-9 rounded-lg ring-1 ring-white/20"
+              style={{ backgroundColor: normalizePassportColor(customHex) }}
+            />
+            <span className="text-sm font-medium text-white">Custom hex</span>
+          </button>
+
+          {passportBgId === "custom" ? (
+            <Input
+              value={customHex}
+              onChange={(e) => setCustomHex(e.target.value)}
+              placeholder="#438CCB"
+              className="h-11 font-mono"
+            />
+          ) : null}
+
+          <div className="flex gap-3 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 flex-1 border-white/20 bg-white/5 text-white hover:bg-white/10"
+              onClick={goBack}
+            >
+              <ChevronLeft className="mr-1 size-4" />
+              Kembali
+            </Button>
+            <Button
+              type="button"
+              className="h-11 flex-1 bg-[#B59240] font-semibold text-black hover:bg-[#C9A855]"
+              onClick={() => setStep(3)}
             >
               Lanjut
               <ChevronRight className="ml-1 size-4" />
@@ -310,9 +429,10 @@ export function RegisterWizard({
 
           <RegisterAiSummaryCard
             packageType={packageType}
-            peopleCount={peopleCount}
+            peopleCount={isPasPhoto ? 1 : peopleCount}
             sessionMinutes={sessionMinutes}
             theme={selectedTheme}
+            passportColor={isPasPhoto ? passportColor : null}
           />
 
           <div className="space-y-2">

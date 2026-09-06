@@ -55,6 +55,7 @@ type Customer = {
   aiThemeLabel?: string | null;
   aiThemePreviewUrl?: string | null;
   aiThemeType?: string | null;
+  passportBackgroundColor?: string | null;
 };
 
 const TRIAL_PRESETS = [30, 60, 90] as const;
@@ -74,6 +75,7 @@ const DEFAULT_KIOSK_CONFIG = {
   packageDurations: {
     "self-photo": 10,
     "ai-self-photo": 12,
+    "pas-photo": 8,
   } as Record<PackageType, number>,
 };
 
@@ -84,6 +86,8 @@ async function apiRegister(payload: {
   templateId: string;
   packageType: PackageType;
   aiThemeId?: string;
+  passportBackgroundId?: string;
+  passportBackgroundColor?: string;
 }): Promise<Customer> {
   const res = await fetch(`${API_BASE_URL}/api/register`, {
     method: "POST",
@@ -406,7 +410,7 @@ export function SessionKioskClient() {
       <RegisterOrCheckScreen
         connected={connected}
         packageDurations={kioskConfig.packageDurations}
-        onRegister={async (name, phone, peopleCount, packageType, aiThemeId) => {
+        onRegister={async (name, phone, peopleCount, packageType, aiThemeId, passport) => {
           const customer = await apiRegister({
             name,
             phone,
@@ -414,6 +418,8 @@ export function SessionKioskClient() {
             templateId: "4R",
             packageType,
             aiThemeId,
+            passportBackgroundId: passport?.backgroundId,
+            passportBackgroundColor: passport?.backgroundColor,
           });
           const meta: SessionMeta = {
             peopleCount: customer.peopleCount,
@@ -424,6 +430,7 @@ export function SessionKioskClient() {
             aiThemePreviewUrl: customer.aiThemePreviewUrl ?? null,
             aiThemeType:
               (customer.aiThemeType as SessionMeta["aiThemeType"]) ?? null,
+            passportBackgroundColor: customer.passportBackgroundColor ?? null,
           };
           setSessionMeta(meta);
           const s = await startSession({
@@ -442,7 +449,9 @@ export function SessionKioskClient() {
           const themeNote =
             packageType === "ai-self-photo" && customer.aiThemeLabel
               ? ` · tema: ${customer.aiThemeLabel}`
-              : "";
+              : packageType === "pas-photo"
+                ? " · Pas Photo"
+                : "";
           toast(`Sesi dimulai untuk ${customer.name}${quotaNote}${themeNote}`, "success");
           beginPreview(s);
         }}
@@ -462,6 +471,7 @@ export function SessionKioskClient() {
             aiThemePreviewUrl: customer.aiThemePreviewUrl ?? null,
             aiThemeType:
               (customer.aiThemeType as SessionMeta["aiThemeType"]) ?? null,
+            passportBackgroundColor: customer.passportBackgroundColor ?? null,
           };
           setSessionMeta(meta);
           const s = await startSession({
@@ -633,7 +643,8 @@ type RegisterOrCheckScreenProps = {
     phone: string,
     peopleCount: number,
     packageType: PackageType,
-    aiThemeId?: string
+    aiThemeId?: string,
+    passport?: { backgroundId: string; backgroundColor: string }
   ) => Promise<void>;
   onCheckByName: (name: string) => Promise<void>;
   onBack: () => void;
@@ -703,13 +714,14 @@ function RegisterOrCheckScreen({
               onBack={onBack}
               onError={onError}
               onStepChange={setRegisterStep}
-              onSubmit={async (name, phone, peopleCount, packageType, aiThemeId) => {
+              onSubmit={async (name, phone, peopleCount, packageType, aiThemeId, passport) => {
                 await onRegister(
                   name,
                   phone,
                   peopleCount,
                   packageType,
-                  aiThemeId
+                  aiThemeId,
+                  passport
                 );
               }}
             />

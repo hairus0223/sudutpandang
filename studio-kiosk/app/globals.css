@@ -1,5 +1,16 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@source "../components";
+@source "../hooks";
+@source "../lib";
+
+/* LightningCSS cannot parse Tailwind arbitrary env()/max() class names. */
+.pb-safe-home {
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+}
+.pb-safe-footer {
+  padding-bottom: max(0.25rem, env(safe-area-inset-bottom));
+}
 
 @custom-variant dark (&:is(.dark *));
 
