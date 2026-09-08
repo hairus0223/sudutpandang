@@ -1,14 +1,133 @@
-/** Head-and-shoulders bust in a 3×4 frame (viewBox 300×400). */
-export const PASSPORT_BUST_PATH =
-  "M150 28 C198 28 240 72 240 128 C240 172 220 202 196 224 C184 234 176 242 174 254 C214 262 250 282 270 316 C286 344 294 372 296 400 L4 400 C6 372 14 344 30 316 C50 282 86 262 126 254 C124 242 116 234 104 224 C80 202 60 172 60 128 C60 72 102 28 150 28 Z";
+/** Indonesian 3×4: crown≈8%, chin≈73%, eyes≈35% of frame. */
 
 export const PASSPORT_TARGET = {
   headCx: 0.5,
-  headCy: 0.355,
-  headW: 0.6,
-  headH: 0.5,
-  eyeY: 0.345,
+  headCy: 0.405,
+  headW: 0.58,
+  headH: 0.64,
+  eyeY: 0.355,
+  chinY: 0.725,
 };
+
+/**
+ * FaceDetector box is roughly brows→chin. Expand to crown+hair for pas-foto.
+ */
+export function faceBoxToHead(face) {
+  const chin = face.cy + face.h * 0.5;
+  const headH = face.h * 1.42;
+  const headW = face.w * 1.18;
+  const crown = chin - headH;
+  return {
+    cx: face.cx,
+    cy: (crown + chin) / 2,
+    w: headW,
+    h: headH,
+    eyeY: face.cy - face.h * 0.06,
+    chinY: chin,
+  };
+}
+
+export function lerpPose(prev, next, t = 0.38) {
+  if (!next) return prev;
+  if (!prev) return next;
+  return {
+    cx: prev.cx + (next.cx - prev.cx) * t,
+    cy: prev.cy + (next.cy - prev.cy) * t,
+    w: prev.w + (next.w - prev.w) * t,
+    h: prev.h + (next.h - prev.h) * t,
+    eyeY: prev.eyeY + (next.eyeY - prev.eyeY) * t,
+    chinY: prev.chinY + (next.chinY - prev.chinY) * t,
+  };
+}
+
+export function scorePassportPose(head, wasOk = false) {
+  if (!head) {
+    return {
+      ok: false,
+      match: 0,
+      hint: "Hadap kamera",
+      code: "no-face",
+      dx: 0,
+      dy: 0,
+      size: 0,
+    };
+  }
+
+  const dx = head.cx - PASSPORT_TARGET.headCx;
+  const dyEyes = head.eyeY - PASSPORT_TARGET.eyeY;
+  const sizeRatio = head.h / PASSPORT_TARGET.headH;
+  const sizeErr = sizeRatio - 1;
+
+  const absX = Math.abs(dx);
+  const absY = Math.abs(dyEyes);
+  const absS = Math.abs(sizeErr);
+
+  const loose = wasOk;
+  const xLim = loose ? 0.12 : 0.09;
+  const yLim = loose ? 0.08 : 0.055;
+  const sLo = loose ? 0.74 : 0.8;
+  const sHi = loose ? 1.34 : 1.2;
+
+  let match = 100;
+  match -= Math.min(36, absX * 240);
+  match -= Math.min(32, absY * 280);
+  match -= Math.min(28, absS * 80);
+  match = Math.max(0, Math.round(match));
+
+  const issues = [];
+  if (absX > xLim) {
+    issues.push({
+      code: dx > 0 ? "right" : "left",
+      hint: dx > 0 ? "Geser sedikit ke kiri" : "Geser sedikit ke kanan",
+      weight: absX,
+    });
+  }
+  if (sizeRatio < sLo) {
+    issues.push({
+      code: "far",
+      hint: "Maju sedikit",
+      weight: sLo - sizeRatio,
+    });
+  } else if (sizeRatio > sHi) {
+    issues.push({
+      code: "close",
+      hint: "Mundur sedikit",
+      weight: sizeRatio - sHi,
+    });
+  }
+  if (absY > yLim) {
+    issues.push({
+      code: dyEyes > 0 ? "low" : "high",
+      hint: dyEyes > 0 ? "Naikkan sedikit" : "Turunkan sedikit",
+      weight: absY,
+    });
+  }
+
+  issues.sort((a, b) => b.weight - a.weight);
+  const worst = issues[0];
+
+  if (!worst) {
+    return {
+      ok: true,
+      match: Math.max(match, 86),
+      hint: "Pas — siap foto",
+      code: "ok",
+      dx,
+      dy: dyEyes,
+      size: sizeRatio,
+    };
+  }
+
+  return {
+    ok: false,
+    match,
+    hint: worst.hint,
+    code: worst.code,
+    dx,
+    dy: dyEyes,
+    size: sizeRatio,
+  };
+}
 
 function parseObjectPosition(value) {
   const parts = String(value || "50% 50%").trim().split(/\s+/);
@@ -46,40 +165,4 @@ export function mapVideoPointToOverlay(video, overlayEl, x, y) {
     x: (originX + x * scale - oRect.left) / Math.max(1, oRect.width),
     y: (originY + y * scale - oRect.top) / Math.max(1, oRect.height),
   };
-}
-
-export function scorePassportPose(face) {
-  if (!face) {
-    return {
-      ok: false,
-      hint: "Hadap kamera — wajah belum terlihat",
-      code: "no-face",
-    };
-  }
-
-  const dx = face.cx - PASSPORT_TARGET.headCx;
-  const eyeY = face.cy - face.h * 0.1;
-  const dyEyes = eyeY - PASSPORT_TARGET.eyeY;
-  const sizeRatio = face.h / PASSPORT_TARGET.headH;
-
-  if (Math.abs(dx) > 0.09) {
-    return {
-      ok: false,
-      hint: dx > 0 ? "Geser sedikit ke kiri" : "Geser sedikit ke kanan",
-      code: "x",
-    };
-  }
-  if (sizeRatio < 0.78) {
-    return { ok: false, hint: "Maju mendekati kamera", code: "far" };
-  }
-  if (sizeRatio > 1.24) {
-    return { ok: false, hint: "Mundur sedikit dari kamera", code: "close" };
-  }
-  if (dyEyes > 0.06) {
-    return { ok: false, hint: "Naikkan posisi kepala", code: "low" };
-  }
-  if (dyEyes < -0.06) {
-    return { ok: false, hint: "Turunkan dagu sedikit", code: "high" };
-  }
-  return { ok: true, hint: "Posisi tepat — siap foto", code: "ok" };
 }

@@ -1,6 +1,81 @@
 import React, { useRef } from "react";
-import { PASSPORT_BUST_PATH } from "../lib/passportPose.js";
+import { PASSPORT_TARGET } from "../lib/passportPose.js";
 import { usePassportPose } from "../hooks/usePassportPose.js";
+
+function poseStroke(aligned, match) {
+  if (aligned) return "rgba(52, 211, 153, 0.95)";
+  if ((match || 0) >= 58) return "rgba(251, 191, 36, 0.9)";
+  return "rgba(248, 113, 113, 0.88)";
+}
+
+function PassportFigure({ liveHead, aligned, match }) {
+  const tx = PASSPORT_TARGET.headCx * 300;
+  const ty = PASSPORT_TARGET.headCy * 400;
+  const trx = (PASSPORT_TARGET.headW / 2) * 300;
+  const tryR = (PASSPORT_TARGET.headH / 2) * 400;
+  const eyeY = PASSPORT_TARGET.eyeY * 400;
+  const neckTop = ty + tryR - 4;
+  const stroke = poseStroke(aligned, match);
+  const shoulder = `M ${tx - 26} ${neckTop}
+    C ${tx - 24} ${neckTop + 26}, ${tx - 56} ${neckTop + 50}, ${tx - 118} ${neckTop + 66}
+    C ${tx - 150} ${neckTop + 82}, 12 358, 8 400
+    L 292 400
+    C 288 358, ${tx + 150} ${neckTop + 82}, ${tx + 118} ${neckTop + 66}
+    C ${tx + 56} ${neckTop + 50}, ${tx + 24} ${neckTop + 26}, ${tx + 26} ${neckTop} Z`;
+
+  return (
+    <svg viewBox="0 0 300 400" className="pas-photo-guide">
+      <defs>
+        <mask id="pasBustHole">
+          <rect width="300" height="400" fill="white" />
+          <ellipse cx={tx} cy={ty} rx={trx} ry={tryR} fill="black" />
+          <path d={shoulder} fill="black" />
+        </mask>
+      </defs>
+
+      <rect
+        width="300"
+        height="400"
+        fill="rgba(0,0,0,0.42)"
+        mask="url(#pasBustHole)"
+      />
+
+      <ellipse
+        cx={tx}
+        cy={ty}
+        rx={trx}
+        ry={tryR}
+        fill="none"
+        stroke={stroke}
+        strokeWidth="1.35"
+      />
+      <path d={shoulder} fill="none" stroke={stroke} strokeWidth="1.2" />
+
+      <line
+        x1={tx - trx + 14}
+        y1={eyeY}
+        x2={tx + trx - 14}
+        y2={eyeY}
+        stroke="rgba(250, 204, 21, 0.75)"
+        strokeWidth="1.1"
+        strokeDasharray="4 5"
+      />
+
+      {liveHead ? (
+        <ellipse
+          cx={liveHead.cx * 300}
+          cy={liveHead.cy * 400}
+          rx={(liveHead.w / 2) * 300}
+          ry={(liveHead.h / 2) * 400}
+          fill="none"
+          stroke="rgba(255,255,255,0.55)"
+          strokeWidth="1"
+          strokeDasharray="4 5"
+        />
+      ) : null}
+    </svg>
+  );
+}
 
 /**
  * @param {object} props
@@ -14,43 +89,26 @@ export function PassportGuideOverlay({ color, visible = true, videoRef = null })
 
   if (!visible) return null;
   const aligned = pose.ok;
-  const stroke = aligned ? "#22c55e" : "#ef4444";
-  const frameStroke = aligned ? "#22c55e" : color || "#438CCB";
+  const near = !aligned && (pose.match || 0) >= 58;
+  const frame = aligned ? "rgba(52, 211, 153, 0.85)" : color || "rgba(255,255,255,0.35)";
 
   return (
-    <div className="pas-photo-frame" aria-hidden="true">
+    <div className="pas-photo-frame">
       <div
         ref={overlayRef}
-        className={`pas-photo-inner${aligned ? " pas-photo-inner--ok" : " pas-photo-inner--wait"}`}
-        style={{ borderColor: frameStroke }}
+        className={`pas-photo-inner${aligned ? " is-ok" : near ? " is-near" : " is-wait"}`}
+        style={{ borderColor: frame }}
       >
-        <svg viewBox="0 0 300 400" className="pas-photo-guide">
-          <path
-            d={`M0 0 H300 V400 H0 Z ${PASSPORT_BUST_PATH}`}
-            fillRule="evenodd"
-            fill="rgba(0,0,0,0.48)"
+        <PassportFigure liveHead={pose.head} aligned={aligned} match={pose.match} />
+        <div className="pas-photo-meter" aria-hidden="true">
+          <div
+            className={`pas-photo-meter-fill${aligned ? " is-ok" : near ? " is-near" : ""}`}
+            style={{ width: `${pose.match || 0}%` }}
           />
-          <path
-            d={PASSPORT_BUST_PATH}
-            fill="none"
-            stroke={stroke}
-            strokeWidth="4.5"
-            strokeLinejoin="round"
-          />
-          <line
-            x1="48"
-            y1="138"
-            x2="252"
-            y2="138"
-            stroke={aligned ? "rgba(34,197,94,0.9)" : "rgba(232,200,114,0.92)"}
-            strokeWidth="2.2"
-            strokeDasharray="6 5"
-          />
-        </svg>
+        </div>
         <div
-          className={`pas-photo-status${aligned ? " pas-photo-status--ok" : " pas-photo-status--wait"}`}
+          className={`pas-photo-status${aligned ? " is-ok" : near ? " is-near" : " is-wait"}`}
         >
-          <span className="pas-photo-status-dot" />
           {pose.hint}
         </div>
       </div>

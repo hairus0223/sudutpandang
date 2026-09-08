@@ -1,5 +1,5 @@
 /**
- * Pas-foto composition guides (head + shoulders + eye line) on the active slot.
+ * Pas-foto composition guides (head, eye line, shoulders) on the active slot.
  */
 export function drawPassportGuide(
   ctx: CanvasRenderingContext2D,
@@ -8,33 +8,53 @@ export function drawPassportGuide(
   w: number,
   h: number
 ) {
-  const scaleX = w / 300;
-  const scaleY = h / 400;
-  const bust = new Path2D(
-    "M150 28 C198 28 240 72 240 128 C240 172 220 202 196 224 C184 234 176 242 174 254 C214 262 250 282 270 316 C286 344 294 372 296 400 L4 400 C6 372 14 344 30 316 C50 282 86 262 126 254 C124 242 116 234 104 224 C80 202 60 172 60 128 C60 72 102 28 150 28 Z"
-  );
-  const eyeY = y + h * 0.345;
+  const cx = x + w * 0.5;
+  const headCy = y + h * 0.405;
+  const rx = (w * 0.58) / 2;
+  const ry = (h * 0.64) / 2;
+  const eyeY = y + h * 0.355;
+  const chin = headCy + ry;
 
   ctx.save();
-  ctx.translate(x, y);
-  ctx.scale(scaleX, scaleY);
-  ctx.strokeStyle = "rgba(34, 197, 94, 0.7)";
-  ctx.lineWidth = 3 / Math.max(scaleX, scaleY);
-  ctx.stroke(bust);
-  ctx.restore();
-
-  ctx.save();
-  ctx.strokeStyle = "rgba(234, 179, 8, 0.75)";
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = "rgba(74, 222, 128, 0.8)";
+  ctx.lineWidth = Math.max(0.9, w * 0.0035);
   ctx.beginPath();
-  ctx.moveTo(x + w * 0.16, eyeY);
-  ctx.lineTo(x + w * 0.84, eyeY);
+  ctx.ellipse(cx, headCy, rx, ry, 0, 0, Math.PI * 2);
   ctx.stroke();
 
-  ctx.fillStyle = "rgba(34, 197, 94, 0.9)";
-  ctx.font = "11px system-ui, sans-serif";
-  ctx.fillText("Sesuaikan kepala & bahu ke siluet", x + 6, y + h - 8);
+  ctx.beginPath();
+  ctx.moveTo(cx - w * 0.09, chin);
+  ctx.bezierCurveTo(
+    cx - w * 0.18,
+    chin + h * 0.08,
+    x + w * 0.04,
+    y + h * 0.9,
+    x + 4,
+    y + h
+  );
+  ctx.moveTo(cx + w * 0.09, chin);
+  ctx.bezierCurveTo(
+    cx + w * 0.18,
+    chin + h * 0.08,
+    x + w * 0.96,
+    y + h * 0.9,
+    x + w - 4,
+    y + h
+  );
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(250, 204, 21, 0.7)";
+  ctx.setLineDash([4, 4]);
+  ctx.lineWidth = Math.max(0.8, w * 0.003);
+  ctx.beginPath();
+  ctx.moveTo(cx - rx + 8, eyeY);
+  ctx.lineTo(cx + rx - 8, eyeY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.font = `${Math.max(9, w * 0.03)}px system-ui, sans-serif`;
+  ctx.fillText("Kepala di oval · mata di garis", x + 6, y + h - 8);
 
   ctx.restore();
 }

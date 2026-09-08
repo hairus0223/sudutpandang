@@ -206,8 +206,7 @@ export function SessionPreviewScreen({
                 />
                 <div className="pointer-events-none absolute inset-x-0 bottom-6 z-[3] px-6 text-center">
                   <p className="text-sm text-white/75">
-                    Panduan 3×4 — siluet orang. Di kiosk: hijau = tepat, merah =
-                    geser
+                    Panduan 3×4 — oval kepala realistis, mata di garis kuning
                   </p>
                 </div>
               </>

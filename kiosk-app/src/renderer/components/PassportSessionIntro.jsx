@@ -38,8 +38,9 @@ export function PassportSessionIntro({ open, backgroundColor, onDismiss }) {
           Pose di bingkai <span>3×4</span>
         </h2>
         <p className="ai-intro-copy">
-          Isi siluet orang (kepala & bahu). Bingkai hijau = posisi tepat, merah
-          = geser dulu. Soft file memakai warna ini untuk 2×3, 3×4, dan 4×6.
+          Cocokkan wajah ke oval orang (bukan kotak). Mata di garis kuning.
+          Hijau = pas, merah = geser. Soft file memakai warna ini untuk 2×3,
+          3×4, dan 4×6.
         </p>
         <button type="button" className="ai-intro-skip" onClick={onDismiss}>
           Mulai sesi →
