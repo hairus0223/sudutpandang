@@ -505,7 +505,7 @@ export function RegisterWizard({
               className="h-11 flex-1 bg-[#B59240] font-semibold text-black hover:bg-[#C9A855]"
               disabled={submitting || !name.trim()}
             >
-              {submitting ? "Memproses…" : "Daftarkan & Mulai"}
+              {submitting ? "Mendaftar…" : "Daftarkan"}
             </Button>
           </div>
         </form>

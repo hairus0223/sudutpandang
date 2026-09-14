@@ -70,10 +70,21 @@ export async function startSession(payload: {
   duration: number;
   packageType?: PackageType;
 }): Promise<Session> {
-  const data = await postJson<{ session: Session }>(
-    `${API_BASE_URL}/api/session/start`,
-    payload
-  );
+  const res = await fetch(`${API_BASE_URL}/api/session/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (res.status === 409) {
+    const data = (await res.json().catch(() => ({}))) as { activeUser?: string };
+    throw Object.assign(new Error("session_in_progress"), {
+      activeUser: data.activeUser ?? "",
+    });
+  }
+
+  if (!res.ok) throw new Error("session_start_failed");
+  const data = (await res.json()) as { session: Session };
   return data.session;
 }
 

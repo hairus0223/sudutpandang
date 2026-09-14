@@ -1043,6 +1043,25 @@ app.post("/api/session/start", (req, res) => {
   if (!user || !peopleCount)
     return res.status(400).json({ error: "user & peopleCount required" });
 
+  const sessionBusy = (() => {
+    if (!activeSession || sessionLocked) return false;
+    if (activeSession.pausedAt != null) {
+      return (activeSession.remainingMs ?? 0) > 1000;
+    }
+    return Number(activeSession.endsAt) > Date.now();
+  })();
+
+  if (sessionBusy && activeSession.user !== user) {
+    return res.status(409).json({
+      error: "session_in_progress",
+      activeUser: activeSession.user,
+    });
+  }
+
+  if (sessionBusy && activeSession.user === user) {
+    return res.json({ success: true, session: activeSession });
+  }
+
   const userFolder = getUserPathForToday(user);
   const customer = readCustomerJson(userFolder);
   const packageType = normalizePackageType(

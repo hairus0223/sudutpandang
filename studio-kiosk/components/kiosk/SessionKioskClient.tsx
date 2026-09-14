@@ -422,42 +422,10 @@ export function SessionKioskClient() {
             passportBackgroundId: passport?.backgroundId,
             passportBackgroundColor: passport?.backgroundColor,
           });
-          const meta: SessionMeta = {
-            peopleCount: customer.peopleCount,
-            aiGenerateLimit:
-              customer.aiGenerateLimit ??
-              resolveAiGenerateLimit(packageType, peopleCount),
-            aiThemeId: customer.aiThemeId ?? null,
-            aiThemeLabel: customer.aiThemeLabel ?? null,
-            aiThemePreviewUrl: customer.aiThemePreviewUrl ?? null,
-            aiThemeType:
-              (customer.aiThemeType as SessionMeta["aiThemeType"]) ?? null,
-            passportBackgroundColor: customer.passportBackgroundColor ?? null,
-          };
-          setSessionMeta(meta);
-          const s = await startSession({
-            user: customer.user,
-            peopleCount: customer.peopleCount,
-            duration: getPackageDurationMinutes(
-              packageType,
-              kioskConfig.packageDurations
-            ),
-            packageType,
-          });
-          const quotaNote =
-            packageType === "ai-self-photo"
-              ? ` · kuota edit: ${customer.aiGenerateLimit ?? resolveAiGenerateLimit(packageType, peopleCount)}`
-              : "";
-          const themeNote =
-            (packageType === "ai-self-photo" ||
-              packageType === "theme-self-photo") &&
-            customer.aiThemeLabel
-              ? ` · tema: ${customer.aiThemeLabel}`
-              : packageType === "pas-photo"
-                ? " · Pas Photo"
-                : "";
-          toast(`Sesi dimulai untuk ${customer.name}${quotaNote}${themeNote}`, "success");
-          beginPreview(s);
+          toast(
+            `${customer.name} terdaftar. Mulai sesi lewat Cek Nama ketika booth kosong.`,
+            "success"
+          );
         }}
         onCheckByName={async (name) => {
           const customer = await apiCustomerByName(name);
@@ -479,17 +447,34 @@ export function SessionKioskClient() {
             passportBackgroundColor: customer.passportBackgroundColor ?? null,
           };
           setSessionMeta(meta);
-          const s = await startSession({
-            user: customer.user,
-            peopleCount: customer.peopleCount,
-            duration: getPackageDurationMinutes(
+          try {
+            const s = await startSession({
+              user: customer.user,
+              peopleCount: customer.peopleCount,
+              duration: getPackageDurationMinutes(
+                packageType,
+                kioskConfig.packageDurations
+              ),
               packageType,
-              kioskConfig.packageDurations
-            ),
-            packageType,
-          });
-          toast(`Sesi dilanjutkan untuk ${customer.name}`, "success");
-          beginPreview(s);
+            });
+            toast(`Sesi dimulai untuk ${customer.name}`, "success");
+            beginPreview(s);
+          } catch (err) {
+            const activeUser =
+              err instanceof Error && "activeUser" in err
+                ? String((err as { activeUser?: string }).activeUser || "")
+                : "";
+            if (err instanceof Error && err.message === "session_in_progress") {
+              toast(
+                activeUser
+                  ? `Booth sedang dipakai ${activeUser.replaceAll("_", " ")}. Tunggu sesi selesai, lalu cek nama lagi.`
+                  : "Booth sedang dipakai sesi lain. Tunggu selesai dulu.",
+                "error"
+              );
+              return;
+            }
+            throw err;
+          }
         }}
         onBack={() => router.push("/")}
         onError={(message) => toast(message, "error")}
@@ -672,7 +657,12 @@ function RegisterOrCheckScreen({
   onBack,
   onError,
 }: RegisterOrCheckScreenProps) {
-  const [mode, setMode] = React.useState<"register" | "check">("register");
+  const [mode, setMode] = React.useState<"register" | "check">(() => {
+    if (typeof window === "undefined") return "register";
+    return new URLSearchParams(window.location.search).get("mode") === "check"
+      ? "check"
+      : "register";
+  });
   const [checkName, setCheckName] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
   const [registerStep, setRegisterStep] = React.useState<1 | 2 | 3>(1);
@@ -720,6 +710,10 @@ function RegisterOrCheckScreen({
               Cek Nama
             </button>
           </div>
+          <p className="mb-4 text-center text-[11px] leading-relaxed text-white/45 sm:text-xs">
+            Registrasi hanya mendaftarkan customer. Sesi foto dimulai dari Cek Nama
+            supaya sesi yang sedang berjalan tidak terputus.
+          </p>
 
           {mode === "register" ? (
             <RegisterWizard
@@ -736,6 +730,8 @@ function RegisterOrCheckScreen({
                   aiThemeId,
                   passport
                 );
+                setCheckName(name);
+                setMode("check");
               }}
             />
           ) : null}
@@ -746,7 +742,8 @@ function RegisterOrCheckScreen({
                 Cek by Name
               </h2>
               <p className="mt-2 text-xs text-white/60 sm:text-sm">
-                Lanjutkan sesi customer yang sudah terdaftar hari ini.
+                Hanya Cek Nama yang memulai sesi foto. Jangan mulai jika booth
+                masih dipakai customer lain.
               </p>
               <div className="mt-5 space-y-4">
                 <div className="space-y-2">

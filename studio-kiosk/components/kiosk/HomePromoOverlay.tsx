@@ -2,65 +2,79 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { FolderOpen, SlidersHorizontal, Sparkles } from "lucide-react";
+import {
+  ClipboardList,
+  FolderOpen,
+  SlidersHorizontal,
+  Sparkles,
+  UserSearch,
+} from "lucide-react";
 import logo from "@/assets/light-logo.png";
 
 type HomePromoOverlayProps = {
   onAccessClick: () => void;
 };
 
+const actionBtnClass =
+  "inline-flex h-9 max-w-full touch-manipulation items-center justify-center gap-1.5 rounded-full border border-white/15 bg-black/45 px-3.5 text-[11px] font-medium text-white/90 no-underline backdrop-blur-md transition hover:border-white/30 hover:bg-black/60 hover:text-white sm:h-10 sm:px-4 sm:text-xs";
+
+const startBtnClass =
+  "inline-flex h-9 max-w-full touch-manipulation items-center justify-center gap-1.5 rounded-full border border-[#E8C872]/50 bg-[#E8C872] px-3.5 text-[11px] font-semibold text-black no-underline transition hover:bg-[#f3d78a] sm:h-10 sm:px-4 sm:text-xs";
+
+const quietLinkClass =
+  "inline-flex h-8 touch-manipulation items-center gap-1 rounded-full px-2.5 text-[10px] text-white/45 no-underline transition hover:text-[#E8C872] sm:text-[11px]";
+
 export function HomePromoOverlay({ onAccessClick }: HomePromoOverlayProps) {
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
       <div
-        className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/25"
+        className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/25"
         aria-hidden
       />
 
-      <div className="pointer-events-auto absolute right-3 top-3 z-20 flex flex-wrap justify-end gap-x-4 gap-y-1 text-[11px] text-white/30 sm:right-5 sm:top-4">
-        <Link
-          href="/session"
-          className="!text-white/30 no-underline transition hover:!text-[#E8C872] focus-visible:!text-[#E8C872]"
-        >
-          Mulai sesi
-        </Link>
-        <button
-          type="button"
-          onClick={onAccessClick}
-          className="inline-flex items-center gap-1 text-white/30 transition hover:text-white/70"
-        >
-          <FolderOpen className="size-3" />
-          Akses foto
-        </button>
-        <Link
-          href="/operator/print-tune"
-          className="inline-flex items-center gap-1 !text-white/30 no-underline transition hover:!text-[#E8C872]"
-        >
-          <SlidersHorizontal className="size-3" />
-          Tuning
-        </Link>
-        <Link
-          href="/admin/ai-theme-research"
-          className="inline-flex items-center gap-1 !text-white/30 no-underline transition hover:!text-violet-200/80"
-        >
-          <Sparkles className="size-3" />
-          AI
-        </Link>
-      </div>
-
-      <div className="absolute inset-x-0 bottom-0 flex justify-center px-4 pb-safe-home sm:px-6 sm:pb-8 lg:pb-10">
-        <div className="home-brand-mark pointer-events-none flex flex-col items-center text-center">
+      <div className="absolute inset-x-0 bottom-0 flex flex-col items-center px-4 pb-safe-home sm:px-6 sm:pb-7 lg:pb-9">
+        <div className="home-brand-mark flex flex-col items-center text-center">
           <Image
             src={logo}
             alt="Sudut Pandang"
             priority
-            className="h-12 w-auto drop-shadow-[0_8px_24px_rgba(0,0,0,0.65)] sm:h-16 lg:h-[4.75rem]"
+            className="h-11 w-auto drop-shadow-[0_8px_24px_rgba(0,0,0,0.65)] sm:h-14 lg:h-16"
           />
           <span className="home-brand-rule" aria-hidden />
-          <p className="mt-3 text-[0.7rem] font-semibold uppercase tracking-[0.42em] text-[#E8C872] sm:text-sm sm:tracking-[0.48em] lg:text-base lg:tracking-[0.52em]">
+          <p className="home-brand-kicker mt-3 font-semibold uppercase text-[#E8C872]">
             Self Photo Studio
           </p>
         </div>
+
+        <nav
+          aria-label="Aksi studio"
+          className="pointer-events-auto mt-4 flex w-full max-w-lg flex-col items-center gap-2 sm:mt-5"
+        >
+          <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2">
+            <Link href="/session" className={actionBtnClass}>
+              <ClipboardList className="size-3.5 shrink-0" />
+              Registrasi
+            </Link>
+            <Link href="/session?mode=check" className={startBtnClass}>
+              <UserSearch className="size-3.5 shrink-0" />
+              Cek nama
+            </Link>
+            <button type="button" onClick={onAccessClick} className={actionBtnClass}>
+              <FolderOpen className="size-3.5 shrink-0" />
+              Akses foto
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-1">
+            <Link href="/operator/print-tune" className={quietLinkClass}>
+              <SlidersHorizontal className="size-3 shrink-0" />
+              Tuning
+            </Link>
+            <Link href="/admin/ai-theme-research" className={quietLinkClass}>
+              <Sparkles className="size-3 shrink-0" />
+              AI Research
+            </Link>
+          </div>
+        </nav>
       </div>
     </div>
   );

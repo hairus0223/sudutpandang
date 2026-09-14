@@ -1,8 +1,9 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 @import "tw-animate-css";
-@source "../components";
-@source "../hooks";
-@source "../lib";
+@source "../app/**/*.{js,ts,jsx,tsx}";
+@source "../components/**/*.{js,ts,jsx,tsx}";
+@source "../hooks/**/*.{js,ts,jsx,tsx}";
+@source "../lib/**/*.{js,ts,jsx,tsx}";
 
 /* LightningCSS cannot parse Tailwind arbitrary env()/max() class names. */
 .pb-safe-home {
@@ -295,17 +296,23 @@ img {
   padding: 0.85rem 1.4rem 1rem;
 }
 
-.home-brand-rule {
-  display: block;
-  width: 3.25rem;
-  height: 1px;
-  margin-top: 0.85rem;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(232, 200, 114, 0.95),
-    transparent
-  );
+.home-brand-kicker {
+  font-size: 0.65rem;
+  letter-spacing: 0.4em;
+}
+
+@media (min-width: 640px) {
+  .home-brand-kicker {
+    font-size: 0.75rem;
+    letter-spacing: 0.5em;
+  }
+}
+
+@media (min-width: 1024px) {
+  .home-brand-kicker {
+    font-size: 0.875rem;
+    letter-spacing: 0.52em;
+  }
 }
 
 @media (min-width: 640px) {
