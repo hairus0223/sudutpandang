@@ -9,7 +9,6 @@ import { ConnectionBanner } from "@/components/kiosk/ConnectionBanner";
 import {
   ArrowLeft,
   Camera,
-  ChevronDown,
   Lock,
   Maximize2,
   Pause,
@@ -23,6 +22,7 @@ import { getOriginalPreviewUrl } from "@/lib/aiGalleryUtils";
 import type { GalleryImageData, PackageType, AiThemeType } from "@/lib/imageTypes";
 import { SessionPhotoViewer } from "@/components/kiosk/SessionPhotoViewer";
 import { PassportGuideOverlay } from "@/components/kiosk/PassportGuideOverlay";
+import { SessionThemeTunePanel } from "@/components/kiosk/SessionThemeTunePanel";
 
 const TRIAL_PRESETS = [30, 60, 90] as const;
 
@@ -38,6 +38,7 @@ export type SessionAction =
 export type SessionMeta = {
   peopleCount: number;
   aiGenerateLimit: number;
+  aiThemeId?: string | null;
   aiThemeLabel: string | null;
   aiThemePreviewUrl?: string | null;
   aiThemeType?: AiThemeType | null;
@@ -75,7 +76,7 @@ function phaseLabel(phase?: string | null, isPaused?: boolean) {
   if (isPaused) return "Jeda";
   if (phase === "trial") return "Trial";
   if (phase === "main") return "Sesi utama";
-  return "Siap";
+  return "Menunggu mulai";
 }
 
 export function SessionPreviewScreen({
@@ -101,13 +102,16 @@ export function SessionPreviewScreen({
   onAddTime,
   onEndSession,
 }: SessionPreviewScreenProps) {
-  const [controlsOpen, setControlsOpen] = React.useState(false);
   const [detailOpen, setDetailOpen] = React.useState(false);
   const timerWarn = sessionTimer.remainingMs <= 60_000 && !sessionTimer.isPaused;
   const phase = phaseLabel(session?.phase, sessionTimer.isPaused);
   const packageType = (session?.packageType ?? "self-photo") as PackageType;
   const isAiPackage = packageType === "ai-self-photo";
+  const isThemePackage = packageType === "theme-self-photo";
   const isPasPhoto = packageType === "pas-photo";
+  const isLive =
+    session?.phase === "trial" || session?.phase === "main";
+  const awaitingStart = !isLive;
   const aiQuota =
     sessionMeta?.aiGenerateLimit ??
     resolveAiGenerateLimit(
@@ -126,6 +130,22 @@ export function SessionPreviewScreen({
     el?.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
   }, [selectedImageIndex]);
 
+  const handleBack = () => {
+    if (!session) {
+      onBack();
+      return;
+    }
+    if (window.confirm("Keluar ke beranda? Sesi customer masih berjalan.")) {
+      onBack();
+    }
+  };
+
+  const handleEnd = () => {
+    if (window.confirm("Akhiri sesi ini sekarang?")) {
+      onEndSession();
+    }
+  };
+
   return (
     <main className="flex h-[100dvh] w-full flex-col overflow-hidden bg-black">
       <ConnectionBanner connected={connected} />
@@ -133,11 +153,11 @@ export function SessionPreviewScreen({
       <header className="flex shrink-0 items-center gap-3 border-b border-white/10 px-3 py-2.5 sm:px-5">
         <button
           type="button"
-          onClick={onBack}
+          onClick={handleBack}
           className="flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-1 text-sm text-white/80 hover:text-white"
         >
           <ArrowLeft className="size-4" />
-          <span className="hidden sm:inline">Kembali</span>
+          <span className="hidden sm:inline">Beranda</span>
         </button>
 
         <div className="min-w-0 flex-1">
@@ -153,7 +173,9 @@ export function SessionPreviewScreen({
             {phase} · {session?.user ?? "-"} · {images.length} foto
             {isAiPackage && sessionMeta?.aiThemeLabel
               ? ` · ${sessionMeta.aiThemeLabel}`
-              : ""}
+              : isThemePackage && sessionMeta?.aiThemeLabel
+                ? ` · ${sessionMeta.aiThemeLabel}`
+                : ""}
           </p>
         </div>
 
@@ -187,8 +209,10 @@ export function SessionPreviewScreen({
             {lastImageProcessing && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/45">
                 <span className="rounded-full bg-amber-500/90 px-4 py-2 text-sm text-white">
-                  {getProcessingStatusLabel(selectedImage?.processingStatus) ??
-                    "Memproses foto…"}
+                  {getProcessingStatusLabel(
+                    selectedImage?.processingStatus,
+                    isThemePackage ? "theme" : isPasPhoto ? "passport" : "default"
+                  ) ?? "Memproses foto…"}
                 </span>
               </div>
             )}
@@ -206,7 +230,7 @@ export function SessionPreviewScreen({
                 />
                 <div className="pointer-events-none absolute inset-x-0 bottom-6 z-[3] px-6 text-center">
                   <p className="text-sm text-white/75">
-                    Panduan 3×4 — oval kepala realistis, mata di garis kuning
+                    Panduan 3×4 — cocokkan kepala ke oval, mata di garis kuning
                   </p>
                 </div>
               </>
@@ -214,8 +238,13 @@ export function SessionPreviewScreen({
               <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-white/55">
                 <Camera className="size-12 text-white/25" strokeWidth={1.25} />
                 <p className="max-w-sm text-sm leading-relaxed sm:text-base">
-                  Snapshot akan tampil di sini setelah customer mengambil foto di
-                  kiosk. Riwayat foto sesi muncul di bawah.
+                  {awaitingStart
+                    ? isThemePackage
+                      ? "Mulai trial atau sesi utama. Setiap foto otomatis mendapat latar tema — orang tetap identik, siap cetak 4R."
+                      : isAiPackage
+                        ? "Mulai trial atau sesi utama di bawah. Foto customer dari kiosk akan tampil di sini — hasil edit AI dikerjakan di galeri."
+                        : "Mulai trial atau sesi utama di bawah. Foto customer dari kiosk akan tampil di sini."
+                    : "Snapshot akan tampil di sini setelah customer mengambil foto di kiosk."}
                 </p>
               </div>
             )}
@@ -235,6 +264,20 @@ export function SessionPreviewScreen({
             <Lock className="size-3" />
             {sessionMeta.aiThemeLabel}
           </div>
+        ) : null}
+        {isThemePackage && sessionMeta?.aiThemeLabel ? (
+          <div className="pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-full border border-[#E8C872]/30 bg-black/60 px-2.5 py-1 text-[11px] text-[#E8C872] backdrop-blur-sm sm:left-4 sm:top-4">
+            <Lock className="size-3" />
+            {sessionMeta.aiThemeLabel}
+          </div>
+        ) : null}
+        {isThemePackage && session?.user ? (
+          <SessionThemeTunePanel
+            user={session.user}
+            imageId={selectedImage?.imageId}
+            themeId={sessionMeta?.aiThemeId}
+            themeLabel={sessionMeta?.aiThemeLabel}
+          />
         ) : null}
       </section>
 
@@ -301,145 +344,130 @@ export function SessionPreviewScreen({
         index={selectedImageIndex}
         onClose={() => setDetailOpen(false)}
         onChange={onSelectImage}
+        processingKind={
+          isThemePackage ? "theme" : isPasPhoto ? "passport" : "default"
+        }
       />
 
       <footer className="relative z-20 shrink-0 border-t border-white/10 bg-[#0a0a0a] pb-safe-footer">
-        <button
-          type="button"
-          aria-expanded={controlsOpen}
-          onClick={() => setControlsOpen((open) => !open)}
-          className="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-2.5 text-left sm:px-5"
-        >
-          <span className="text-sm font-medium text-white">Kontrol sesi</span>
-          <span className="hidden text-xs text-white/40 sm:inline">
-            {controlsOpen
-              ? "Tutup untuk lihat foto lebih besar"
-              : "Buka untuk atur sesi"}
-          </span>
-          <ChevronDown
-            className={cn(
-              "size-5 shrink-0 text-white/55 transition-transform duration-200",
-              controlsOpen && "rotate-180"
-            )}
-          />
-        </button>
-
-        {controlsOpen ? (
-          <div className="max-h-[min(42vh,22rem)] overflow-y-auto border-t border-white/8 px-3 py-3 sm:px-5">
-            {session ? (
-              <div className="flex flex-col gap-2">
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <select
-                    value={trialSeconds}
-                    onChange={(e) =>
-                      onTrialSecondsChange(Number(e.target.value))
-                    }
-                    className="h-11 rounded-md border border-white/15 bg-white/5 px-2 text-sm text-white"
-                  >
-                    {TRIAL_PRESETS.map((seconds) => (
-                      <option
-                        key={seconds}
-                        value={seconds}
-                        className="text-black"
-                      >
-                        Trial {seconds} detik
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11"
-                    disabled={pendingAction === "trial"}
-                    onClick={() => void onTrialStart()}
-                  >
-                    {pendingAction === "trial" ? "…" : "Mulai trial"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11"
-                    onClick={onTrialSkip}
-                  >
-                    Lewati trial
-                  </Button>
-                  <Button
-                    type="button"
-                    className="h-11 bg-[#B59240] font-semibold text-black hover:bg-[#C9A855]"
-                    disabled={pendingAction === "main"}
-                    onClick={() => void onMainStart()}
-                  >
-                    {pendingAction === "main"
-                      ? "…"
-                      : `Sesi utama (${mainDurationMinutes} mnt)`}
-                  </Button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11"
-                    disabled={sessionTimer.isPaused || pendingAction === "pause"}
-                    onClick={() => void onPause()}
-                  >
-                    <Pause className="size-4" />
-                    Jeda
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11"
-                    disabled={!sessionTimer.isPaused || pendingAction === "resume"}
-                    onClick={() => void onResume()}
-                  >
-                    <Play className="size-4" />
-                    Lanjut
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11"
-                    disabled={pendingAction === "add1"}
-                    onClick={() => void onAddTime(1)}
-                  >
-                    <Plus className="size-4" />
-                    1 menit
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11"
-                    disabled={pendingAction === "add5"}
-                    onClick={() => void onAddTime(5)}
-                  >
-                    <Plus className="size-4" />
-                    5 menit
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    className="col-span-2 h-11 sm:col-span-1"
-                    disabled={pendingAction === "end"}
-                    onClick={onEndSession}
-                  >
-                    Akhiri sesi
-                  </Button>
-                </div>
+        <div className="px-3 py-3 sm:px-5">
+          {awaitingStart ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-[11px] text-white/45">
+                Customer menunggu di kiosk. Mulai trial untuk tes pose, atau langsung sesi utama.
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <select
+                  value={trialSeconds}
+                  onChange={(e) =>
+                    onTrialSecondsChange(Number(e.target.value))
+                  }
+                  className="h-11 rounded-md border border-white/15 bg-white/5 px-2 text-sm text-white"
+                >
+                  {TRIAL_PRESETS.map((seconds) => (
+                    <option
+                      key={seconds}
+                      value={seconds}
+                      className="text-black"
+                    >
+                      Trial {seconds} detik
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11"
+                  disabled={pendingAction === "trial"}
+                  onClick={() => void onTrialStart()}
+                >
+                  {pendingAction === "trial" ? "…" : "Mulai trial"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11"
+                  onClick={onTrialSkip}
+                >
+                  Lewati trial
+                </Button>
+                <Button
+                  type="button"
+                  className="h-11 bg-[#B59240] font-semibold text-black hover:bg-[#C9A855]"
+                  disabled={pendingAction === "main"}
+                  onClick={() => void onMainStart()}
+                >
+                  {pendingAction === "main"
+                    ? "…"
+                    : `Sesi utama (${mainDurationMinutes} mnt)`}
+                </Button>
               </div>
-            ) : (
               <Button
                 type="button"
                 variant="destructive"
                 className="h-11 w-full sm:w-auto"
                 disabled={pendingAction === "end"}
-                onClick={onEndSession}
+                onClick={handleEnd}
               >
                 Akhiri sesi
               </Button>
-            )}
-          </div>
-        ) : null}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11"
+                  disabled={sessionTimer.isPaused || pendingAction === "pause"}
+                  onClick={() => void onPause()}
+                >
+                  <Pause className="size-4" />
+                  Jeda
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11"
+                  disabled={!sessionTimer.isPaused || pendingAction === "resume"}
+                  onClick={() => void onResume()}
+                >
+                  <Play className="size-4" />
+                  Lanjut
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11"
+                  disabled={pendingAction === "add1"}
+                  onClick={() => void onAddTime(1)}
+                >
+                  <Plus className="size-4" />
+                  1 menit
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11"
+                  disabled={pendingAction === "add5"}
+                  onClick={() => void onAddTime(5)}
+                >
+                  <Plus className="size-4" />
+                  5 menit
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="col-span-2 h-11 sm:col-span-1"
+                  disabled={pendingAction === "end"}
+                  onClick={handleEnd}
+                >
+                  Akhiri sesi
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
       </footer>
     </main>
   );

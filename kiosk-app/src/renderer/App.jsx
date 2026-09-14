@@ -98,7 +98,8 @@ export function App() {
 
   const maybeShowSessionIntro = useCallback((fields) => {
     if (
-      fields?.packageType === "ai-self-photo" &&
+      (fields?.packageType === "ai-self-photo" ||
+        fields?.packageType === "theme-self-photo") &&
       (fields?.aiThemeLabel || fields?.aiThemePreviewUrl)
     ) {
       setShowAiIntro(true);
@@ -546,10 +547,13 @@ export function App() {
   if (screen === Screen.TRIAL || screen === Screen.MAIN) {
     const phaseLabel = screen === Screen.TRIAL ? "Trial Session:" : "Halo,";
     const isAiPackage = packageType === "ai-self-photo";
+    const isThemePackage = packageType === "theme-self-photo";
     const isPasPhoto = packageType === "pas-photo";
     const reviewCaption = isPasPhoto
       ? "Cek pose di oval — hasil 3×4 sedang disiapkan"
-      : "Lihat hasilnya — sesi lanjut sebentar lagi";
+      : isThemePackage
+        ? "Lihat hasilnya — latar tema disusun otomatis"
+        : "Lihat hasilnya — sesi lanjut sebentar lagi";
     const footerHint = isPasPhoto
       ? screen === Screen.TRIAL
         ? "Trial — kepala di oval, mata di garis kuning"
@@ -571,9 +575,10 @@ export function App() {
             onDismiss={dismissPassportIntro}
           />
         ) : null}
-        {isAiPackage ? (
+        {isAiPackage || isThemePackage ? (
           <AiSessionIntro
             open={showAiIntro}
+            mode={isThemePackage ? "theme" : "ai"}
             themeLabel={aiThemeLabel}
             themePreviewUrl={aiThemePreviewUrl}
             themeType={aiThemeType}
@@ -737,6 +742,7 @@ export function App() {
 
   if (screen === Screen.END) {
     const isAiPackage = endedPackageType === "ai-self-photo";
+    const isThemePackage = endedPackageType === "theme-self-photo";
     return (
       <div className="screen screen--idle screen--end">
         <div className="idle-content">
@@ -750,6 +756,11 @@ export function App() {
                 Ke meja operator · pilih foto · lihat hasil
                 {endedAiThemeLabel ? ` ${endedAiThemeLabel}` : ""}
                 {endedAiGenerateLimit > 0 ? ` · kuota ${endedAiGenerateLimit}×` : ""}.
+              </>
+            ) : isThemePackage ? (
+              <>
+                Ke meja operator · cetak versi tema
+                {endedAiThemeLabel ? ` ${endedAiThemeLabel}` : ""} atau foto asli.
               </>
             ) : (
               <>Silakan hubungi tim studio bila ingin melihat atau mencetak.</>

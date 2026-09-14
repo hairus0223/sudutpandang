@@ -26,8 +26,9 @@ export const LOOK_DEFAULT_INTENSITY = 0.6;
  * @returns {LookId}
  */
 export function defaultLookForPackage(packageType) {
+  if (packageType === "theme-self-photo") return "natural";
   if (packageType === "pas-photo") return "natural";
-  if (packageType === "ai-photo") return "natural";
+  if (packageType === "ai-self-photo") return "natural";
   return "soft";
 }
 
@@ -89,11 +90,12 @@ export function getLookSharpAdjustments(lookId, intensity = LOOK_DEFAULT_INTENSI
         warmOverlayAlpha: 0.1 * i,
       };
     case "cinematic": {
-      const contrast = 1 + 0.15 * i;
+      const contrast = 1 + 0.18 * i;
       return {
-        brightness: 1 - 0.05 * i,
-        saturation: 1 + 0.05 * i,
+        brightness: 1 - 0.04 * i,
+        saturation: 1 - 0.08 * i,
         linear: { a: contrast, b: -128 * (contrast - 1) },
+        warmOverlayAlpha: 0.07 * i,
       };
     }
     case "natural":
@@ -171,4 +173,80 @@ export async function applyLookBakeToBuffer(
   }
 
   return result;
+}
+
+/**
+ * Soft radial vignette for print composites.
+ * @param {Buffer} buffer
+ * @param {number} amount 0–1
+ */
+export async function applyVignette(buffer, amount) {
+  const strength = Math.max(0, Math.min(0.55, amount));
+  if (strength < 0.02) return buffer;
+
+  const meta = await sharp(buffer).metadata();
+  const w = meta.width ?? 0;
+  const h = meta.height ?? 0;
+  if (!w || !h) return buffer;
+
+  const svg = Buffer.from(
+    `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="v" cx="50%" cy="40%" r="74%">
+          <stop offset="52%" stop-color="rgb(255,255,255)" stop-opacity="0"/>
+          <stop offset="100%" stop-color="rgb(0,0,0)" stop-opacity="${strength.toFixed(3)}"/>
+        </radialGradient>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#v)"/>
+    </svg>`
+  );
+
+  const overlay = await sharp(svg).png().toBuffer();
+  return sharp(buffer)
+    .composite([{ input: overlay, blend: "multiply" }])
+    .png()
+    .toBuffer();
+}
+
+/**
+ * Shared print finish: mild contrast, slight film desat, vignette.
+ * Applied on the flattened composite so subject and background share one grade.
+ * @param {Buffer} buffer
+ * @param {number} [intensity]
+ */
+export async function applyCinematicPrintFinish(buffer, intensity = 0.42) {
+  const i = Math.max(0, Math.min(1, intensity));
+  if (i < 0.05) return buffer;
+
+  const contrast = 1 + 0.1 * i;
+  let result = await sharp(buffer)
+    .ensureAlpha()
+    .modulate({
+      brightness: Number((1 - 0.025 * i).toFixed(4)),
+      saturation: Number((1 - 0.06 * i).toFixed(4)),
+    })
+    .linear(contrast, -128 * (contrast - 1))
+    .png()
+    .toBuffer();
+
+  const meta = await sharp(result).metadata();
+  const w = meta.width || 1;
+  const h = meta.height || 1;
+  const warm = await sharp({
+    create: {
+      width: w,
+      height: h,
+      channels: 4,
+      background: { r: 255, g: 214, b: 170, alpha: 0.05 * i },
+    },
+  })
+    .png()
+    .toBuffer();
+
+  result = await sharp(result)
+    .composite([{ input: warm, blend: "soft-light" }])
+    .png()
+    .toBuffer();
+
+  return applyVignette(result, 0.22 * i);
 }

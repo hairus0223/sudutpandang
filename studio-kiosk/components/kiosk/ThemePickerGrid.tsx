@@ -8,6 +8,7 @@ import {
   ThemePreviewCard,
   ThemePreviewCardSkeleton,
 } from "@/components/kiosk/ThemePreviewCard";
+import { isAiThemeSelectable } from "@/lib/aiUiCopy";
 
 type ThemePickerGridProps = {
   selectedThemeId: string | null;
@@ -30,16 +31,15 @@ export function ThemePickerGrid({
     fetchAiThemes()
       .then((res) => {
         setThemes(res.themes);
-        if (!selectedThemeId && res.themes[0]) {
-          onSelect(res.themes[0].id);
+        const ready = res.themes.filter(isAiThemeSelectable);
+        if (!selectedThemeId && ready[0]) {
+          onSelect(ready[0].id);
         }
       })
       .catch(() => onError?.("Gagal memuat tema AI."))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only load once on mount
   }, [onError]);
-
-  const selectedTheme = themes.find((theme) => theme.id === selectedThemeId);
 
   if (loading) {
     return (
@@ -59,17 +59,32 @@ export function ThemePickerGrid({
     );
   }
 
+  if (!themes.some(isAiThemeSelectable)) {
+    return (
+      <p className="rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-8 text-center text-sm text-amber-100/80">
+        Tema belum punya preview atau background. Hubungi staf.
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-3">
-      <ThemePickerHint type={selectedTheme?.type} />
+      <ThemePickerHint />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {themes.map((theme) => (
           <ThemePreviewCard
             key={theme.id}
             theme={theme}
             selected={selectedThemeId === theme.id}
-            onSelect={() => onSelect(theme.id)}
-            onExpand={onExpand ? () => onExpand(theme) : undefined}
+            onSelect={() => {
+              if (!isAiThemeSelectable(theme)) return;
+              onSelect(theme.id);
+            }}
+            onExpand={
+              onExpand && isAiThemeSelectable(theme)
+                ? () => onExpand(theme)
+                : undefined
+            }
           />
         ))}
       </div>

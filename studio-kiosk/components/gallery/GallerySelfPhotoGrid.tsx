@@ -5,8 +5,9 @@ import type { GalleryImageData, PrintVariant } from "@/lib/imageTypes";
 import { InfoCard } from "@/components/cards/InfoCard";
 import { GalleryPhotoTile } from "@/components/gallery/GalleryPhotoTile";
 import { GalleryPrintSelectionBar } from "@/components/gallery/GalleryPrintSelectionBar";
-import { useGalleryStore } from "@/stores/useGalleryStore";
 import { useToast } from "@/components/ui/ToastProvider";
+import { useGalleryStore } from "@/stores/useGalleryStore";
+import { hasThemePrintVariant } from "@/lib/resolveImageUrl";
 
 type GallerySelfPhotoGridProps = {
   userName: string;
@@ -37,7 +38,7 @@ export function GallerySelfPhotoGrid({
     packageType,
   } = useGalleryStore();
   const isPasPhoto = packageType === "pas-photo";
-  const printVariantDefault: PrintVariant = isPasPhoto ? "passport" : "original";
+  const isThemePackage = packageType === "theme-self-photo";
 
   const selectedImages = useMemo(() => {
     return images.filter((img, index) =>
@@ -52,16 +53,27 @@ export function GallerySelfPhotoGrid({
   const originalQueuedCount = selectedImages.filter(
     (img) =>
       selectedForPrint.includes(img.filename) &&
-      (printVariantByFilename[img.filename] ?? "original") === printVariantDefault
+      (printVariantByFilename[img.filename] ?? "original") === "original"
   ).length;
+  const themeQueuedCount = selectedImages.filter(
+    (img) =>
+      selectedForPrint.includes(img.filename) &&
+      printVariantByFilename[img.filename] === "theme"
+  ).length;
+  const themePrintReadyCount = selectedImages.filter(hasThemePrintVariant).length;
 
   const handleEnqueuePrint = (variant: PrintVariant) => {
     const resolved =
-      isPasPhoto && variant === "original" ? "passport" : variant;
-    const result = enqueuePrintMany(
-      selectedImages.map((img) => img.filename),
-      resolved
-    );
+      isPasPhoto && variant === "original"
+        ? "passport"
+        : isThemePackage && variant === "theme"
+          ? "theme"
+          : variant;
+    const files =
+      resolved === "theme"
+        ? selectedImages.filter(hasThemePrintVariant).map((img) => img.filename)
+        : selectedImages.map((img) => img.filename);
+    const result = enqueuePrintMany(files, resolved);
     if (result.skippedLimit > 0) {
       toast(`Antrian cetak penuh (maks. ${allowedPrint} foto).`, "error");
     } else if (result.added === 0 && result.updated === 0) {
@@ -110,8 +122,11 @@ export function GallerySelfPhotoGrid({
               selectionIndex={selectionIndex}
               isPrintSelected={isPrintSelected}
               printVariant={printVariant}
-              accent="gold"
               onToggleSelect={() => toggleGallerySelection(key)}
+              isBusy={
+                isThemePackage &&
+                ["pending", "processing"].includes(img.processingStatus || "")
+              }
               onTogglePrint={() => removeFromPrint(img.filename)}
               onOpenPhoto={() => onOpenPhoto(index)}
             />
@@ -127,13 +142,18 @@ export function GallerySelfPhotoGrid({
           allowedPrint={allowedPrint}
           totalPrintSelected={selectedForPrint.length}
           originalQueuedCount={originalQueuedCount}
+          showThemePrint={isThemePackage}
+          themeQueuedCount={themeQueuedCount}
+          themePrintReadyCount={themePrintReadyCount}
           onClearSelection={clearGallerySelection}
           onEnqueuePrint={handleEnqueuePrint}
           onRemovePrintFromSelection={handleRemovePrintFromSelection}
           hint={
             isPasPhoto
               ? "Antrian cetak default pas foto. Di editor sheet campur 2×3 / 3×4 / 4×6 atau mm custom."
-              : "Pilih foto, lalu ketuk Masukkan antrian cetak. Badge emas = sudah di antrian. Lanjut Cetak di bawah layar."
+              : isThemePackage
+                ? "Cetak versi tema (siap 4R) atau asli. Hasil tema muncul otomatis setelah foto."
+                : "Pilih foto, lalu ketuk Masukkan antrian cetak. Badge emas = sudah di antrian. Lanjut Cetak di bawah layar."
           }
         />
       </div>

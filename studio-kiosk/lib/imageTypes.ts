@@ -8,11 +8,12 @@ export type ProcessingStatus =
 
 export type ProcessingPhase = null | string;
 
-export type PackageType = "self-photo" | "ai-self-photo" | "pas-photo";
+export type PackageType = "self-photo" | "theme-self-photo" | "ai-self-photo" | "pas-photo";
 
-export type PrintVariant = "original" | "ai" | "passport";
+export type PrintVariant = "original" | "ai" | "theme" | "passport";
 
 export type AiThemeType = "scene" | "transform";
+export type AiPipelineMode = "direct" | "composite-only" | "composite-costume";
 
 export type AiTheme = {
   id: string;
@@ -24,6 +25,8 @@ export type AiTheme = {
   previewBeforeUrl?: string | null;
   previewSource?: "studio" | "bundled";
   seasonal?: boolean;
+  selectable?: boolean;
+  pipelineMode?: AiPipelineMode;
 };
 
 export type AiSelectionEntry = {
@@ -49,7 +52,9 @@ export type ImageVariants = {
   subject?: string;
   passport?: string;
   passportSizes?: Record<string, string>;
+  passportPrintSizes?: Record<string, string>;
   ai?: Record<string, string>;
+  theme?: string;
 };
 
 export type GalleryImageData = {

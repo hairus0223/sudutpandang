@@ -21,14 +21,18 @@ export function BottomPrintBar({ onContinue }: BottomPrintBarProps) {
   if (selectedForPrint.length === 0) return null;
 
   const isAi = packageType === "ai-self-photo";
+  const isThemePackage = packageType === "theme-self-photo";
   const isPasPhoto = packageType === "pas-photo";
   const aiCount = selectedForPrint.filter(
     (filename) => printVariantByFilename[filename] === "ai"
   ).length;
+  const themeCount = selectedForPrint.filter(
+    (filename) => printVariantByFilename[filename] === "theme"
+  ).length;
   const passportCount = selectedForPrint.filter(
     (filename) => printVariantByFilename[filename] === "passport"
   ).length;
-  const originalCount = selectedForPrint.length - aiCount - passportCount;
+  const originalCount = selectedForPrint.length - aiCount - themeCount - passportCount;
 
   return (
     <div
@@ -48,6 +52,12 @@ export function BottomPrintBar({ onContinue }: BottomPrintBarProps) {
             <span className="ml-2 text-sm font-medium text-white/55">
               ({originalCount} asli
               {aiCount > 0 ? ` · ${aiCount} AI` : ""})
+            </span>
+          ) : null}
+          {isThemePackage ? (
+            <span className="ml-2 text-sm font-medium text-white/55">
+              ({originalCount} asli
+              {themeCount > 0 ? ` · ${themeCount} tema` : ""})
             </span>
           ) : null}
         </div>

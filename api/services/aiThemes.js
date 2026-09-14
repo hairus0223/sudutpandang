@@ -6,8 +6,10 @@ import {
   getActiveAiThemeMap,
   getThemeCostumePrompt,
   getThemeCostumeNegativePrompt,
+  getThemePipelineMode,
 } from "./aiThemeCatalog.js";
 import { resolveBaseDir } from "./studioPaths.js";
+import { isThemeSelectableForRegister } from "./aiThemeProduction.js";
 
 /** @typedef {import("./aiThemeCatalog.js").AiTheme} AiTheme */
 
@@ -63,12 +65,17 @@ export function toPublicAiTheme(theme, baseDir = resolveBaseDir(), host = "local
   const previews = resolveThemePreviewUrls(theme.id, baseDir, host);
   const background = resolveAiThemeBackgroundPublicUrl(theme.id, baseDir, host);
 
+  const pipelineMode = getThemePipelineMode(theme);
+  const selectable = isThemeSelectableForRegister(theme, baseDir);
+
   return {
     id: theme.id,
     label: theme.label,
     description: theme.description,
     previewColor: theme.previewColor,
-    type: "transform",
+    type: pipelineMode === "composite-only" ? "scene" : "transform",
+    pipelineMode,
+    selectable,
     previewUrl: previews.afterUrl,
     ...(previews.beforeUrl ? { previewBeforeUrl: previews.beforeUrl } : {}),
     ...(previews.source ? { previewSource: previews.source } : {}),

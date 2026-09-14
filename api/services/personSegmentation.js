@@ -37,7 +37,7 @@ const TINY_PNG_BUFFER = Buffer.from(
 );
 
 export const PERSON_SEGMENTATION_USER_ERROR =
-  "Segmentasi foto gagal. Silakan coba lagi atau hubungi staf.";
+  "Tidak bisa memisahkan orang dari foto. Ambil ulang dengan latar lebih polos.";
 
 /**
  * @returns {{ assetsPath: string, assetsFound: boolean, model: string, bundledModels: string[] }}
@@ -87,6 +87,10 @@ export function mapPersonSegmentationErrorToUserMessage(error) {
 
   const lower = message.toLowerCase();
 
+  if (message === "segmentation_failed" || message === "person_segmentation_disabled") {
+    return PERSON_SEGMENTATION_USER_ERROR;
+  }
+
   if (
     lower.includes("assets") ||
     lower.includes("wasm") ||
@@ -108,14 +112,16 @@ export function mapPersonSegmentationErrorToUserMessage(error) {
  * @param {string} inputPath
  * @returns {Promise<{ subjectBuffer: Buffer, width: number, height: number }>}
  */
-export async function segmentPersonFromFile(inputPath) {
+export async function segmentPersonFromFile(inputPath, options = {}) {
   if (!PERSON_SEGMENTATION_ENABLED) {
     throw new Error("person_segmentation_disabled");
   }
 
-  const prepared = await prepareSegmentationInput(inputPath);
+  const prepared = await prepareSegmentationInput(inputPath, options);
   const rawSubject = await withSegmentationTimeout(
-    segmentPersonFromBuffer(prepared.buffer, "image/png"),
+    segmentPersonFromBuffer(prepared.buffer, "image/png", {
+      model: options.model,
+    }),
     PERSON_SEGMENTATION_TIMEOUT_MS,
     "segment"
   );
@@ -153,8 +159,17 @@ export async function buildSegmentationMasks(subjectBuffer) {
  *   sourcePath: string,
  * }} params
  */
-export async function segmentAndSaveArtifacts({ userDir, imageId, sourcePath }) {
-  const { subjectBuffer } = await segmentPersonFromFile(sourcePath);
+export async function segmentAndSaveArtifacts({
+  userDir,
+  imageId,
+  sourcePath,
+  portraitBoost = false,
+  model,
+}) {
+  const { subjectBuffer } = await segmentPersonFromFile(sourcePath, {
+    portraitBoost,
+    model,
+  });
   const { segmentMask, editMask } = await buildSegmentationMasks(subjectBuffer);
 
   const processedDir = getProcessedDir(userDir, imageId);

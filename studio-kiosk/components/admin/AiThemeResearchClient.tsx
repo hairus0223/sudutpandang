@@ -178,6 +178,7 @@ export function AiThemeResearchClient() {
   const [publishDescription, setPublishDescription] = useState("");
   const [publishColor, setPublishColor] = useState("#A67B5B");
   const [publishing, setPublishing] = useState(false);
+  const [identityCertified, setIdentityCertified] = useState(false);
 
   const selectedSample = useMemo(
     () => samples.find((sample) => sample.id === selectedSampleId) ?? null,
@@ -522,10 +523,19 @@ export function AiThemeResearchClient() {
       toast("Upload background foto dulu.", "error");
       return;
     }
+    const draft = drafts.find((entry) => entry.id === activeDraftId);
+    if (!draft?.identityPreviewReady) {
+      toast(
+        "Generate preview booth (composite) dulu, lalu cek wajah/pose vs sample.",
+        "error"
+      );
+      return;
+    }
     setPublishLabel(form.label ?? form.workingTitle);
     setPublishDescription(form.description ?? form.workingTitle);
     setPublishId(slugifyThemeId(form.themeId || form.workingTitle));
     setPublishColor(form.previewColor ?? "#A67B5B");
+    setIdentityCertified(false);
     setPublishOpen(true);
   };
 
@@ -533,6 +543,10 @@ export function AiThemeResearchClient() {
     if (!token || !activeDraftId) return;
     if (!publishId.trim() || !publishLabel.trim()) {
       toast("ID slug dan label wajib diisi.", "error");
+      return;
+    }
+    if (!identityCertified) {
+      toast("Centang konfirmasi identitas dulu.", "error");
       return;
     }
 
@@ -544,6 +558,7 @@ export function AiThemeResearchClient() {
         label: publishLabel.trim(),
         description: publishDescription.trim() || publishLabel.trim(),
         previewColor: publishColor,
+        identityCertified,
       });
       setPublishOpen(false);
       toast(`Tema "${result.theme.label}" dipublish ke registrasi.`, "success");
@@ -1082,8 +1097,8 @@ export function AiThemeResearchClient() {
           <DialogHeader>
             <DialogTitle>Publish tema ke registrasi</DialogTitle>
             <DialogDescription className="text-white/55">
-              Tema akan muncul di wizard AI Self Photo. Upload preview card manual ke{" "}
-              <code className="text-white/80">themes/&#123;id&#125;/after.jpg</code> bila perlu.
+              Hanya tema composite dengan preview identitas (sample vs hasil)
+              yang masuk registrasi. Background tidak di-generate per customer.
             </DialogDescription>
           </DialogHeader>
 
@@ -1128,13 +1143,30 @@ export function AiThemeResearchClient() {
                 />
               </div>
             </label>
+            <label className="flex items-start gap-2 rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-sm text-white/80">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={identityCertified}
+                onChange={(e) => setIdentityCertified(e.target.checked)}
+              />
+              <span>
+                Saya bandingkan sample vs hasil: orang, wajah, dan pose identik.
+                Preview before/after akan dipakai di kartu registrasi.
+              </span>
+            </label>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setPublishOpen(false)}>
               Batal
             </Button>
-            <button type="button" className={btnSuccess()} disabled={publishing} onClick={handlePublish}>
+            <button
+              type="button"
+              className={btnSuccess()}
+              disabled={publishing || !identityCertified}
+              onClick={handlePublish}
+            >
               {publishing ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />}
               Publish
             </button>

@@ -1,7 +1,8 @@
-export type PackageType = "self-photo" | "ai-self-photo" | "pas-photo";
+export type PackageType = "self-photo" | "theme-self-photo" | "ai-self-photo" | "pas-photo";
 
 export const PACKAGE_TYPES: PackageType[] = [
   "self-photo",
+  "theme-self-photo",
   "ai-self-photo",
   "pas-photo",
 ];
@@ -20,10 +21,16 @@ export const PACKAGE_OPTIONS: PackageOption[] = [
     description: "Sesi foto studio klasik · cetak dari galeri",
   },
   {
+    id: "theme-self-photo",
+    label: "Foto Tema",
+    description: "Orang identik · latar tema · tanpa AI",
+    badge: "Otomatis setelah foto · siap cetak",
+  },
+  {
     id: "ai-self-photo",
     label: "AI Self Photo",
-    description: "Shoot dulu · pilih foto · generate AI bertema",
-    badge: "Kuota AI = jumlah orang",
+    description: "Ambil foto dulu · edit latar & kostum di galeri",
+    badge: "Kuota edit = jumlah orang",
   },
   {
     id: "pas-photo",
@@ -38,6 +45,14 @@ export function getPackageLabel(packageType: PackageType): string {
     PACKAGE_OPTIONS.find((option) => option.id === packageType)?.label ??
     packageType
   );
+}
+
+export function isThemePhotoPackage(packageType: PackageType): boolean {
+  return packageType === "theme-self-photo";
+}
+
+export function usesSessionTheme(packageType: PackageType): boolean {
+  return packageType === "ai-self-photo" || packageType === "theme-self-photo";
 }
 
 export function resolveAiGenerateLimit(

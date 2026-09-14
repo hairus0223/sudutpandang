@@ -33,6 +33,7 @@ export type ResearchDraft = DraftInput & {
   id: string;
   backgroundReady?: boolean;
   backgroundUrl?: string;
+  identityPreviewReady?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -123,6 +124,7 @@ export type PublishInput = {
   label: string;
   description: string;
   previewColor: string;
+  identityCertified: boolean;
 };
 
 export class AiThemeResearchError extends Error {

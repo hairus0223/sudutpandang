@@ -29,6 +29,9 @@ type GalleryPrintSelectionBarProps = {
   extraActions?: ReactNode;
   hint?: string;
   showAiPrint?: boolean;
+  showThemePrint?: boolean;
+  themeQueuedCount?: number;
+  themePrintReadyCount?: number;
 };
 
 export function GalleryPrintSelectionBar({
@@ -46,6 +49,9 @@ export function GalleryPrintSelectionBar({
   extraActions,
   hint,
   showAiPrint = false,
+  showThemePrint = false,
+  themeQueuedCount = 0,
+  themePrintReadyCount = 0,
 }: GalleryPrintSelectionBarProps) {
   const borderClass =
     accent === "violet" ? "border-violet-400/30" : "border-[#E8C872]/30";
@@ -54,10 +60,14 @@ export function GalleryPrintSelectionBar({
   const allAiQueued =
     showAiPrint && aiPrintReadyCount > 0 && aiQueuedCount === aiPrintReadyCount;
 
-  const originalSuffix = showAiPrint ? " · asli" : "";
+  const originalSuffix = showAiPrint || showThemePrint ? " · asli" : "";
+  const allThemeQueued =
+    showThemePrint &&
+    themePrintReadyCount > 0 &&
+    themeQueuedCount === themePrintReadyCount;
   const originalLabel = allOriginalQueued
     ? `Sudah di antrian${originalSuffix}`
-    : originalQueuedCount > 0 || aiQueuedCount > 0
+    : originalQueuedCount > 0 || aiQueuedCount > 0 || themeQueuedCount > 0
       ? "Ganti ke versi asli"
       : `Masukkan antrian cetak${originalSuffix}`;
 
@@ -142,6 +152,27 @@ export function GalleryPrintSelectionBar({
           )}
           {originalLabel}
         </button>
+
+        {showThemePrint && themePrintReadyCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => onEnqueuePrint("theme")}
+            disabled={allThemeQueued}
+            className={cn(
+              allThemeQueued ? btnPrint(true) : btnPrint(false),
+              "flex-1 sm:flex-none"
+            )}
+          >
+            {allThemeQueued ? (
+              <Check className="size-4" />
+            ) : (
+              <Printer className="size-4" />
+            )}
+            {allThemeQueued
+              ? "Sudah di antrian · tema"
+              : `Masukkan antrian · tema (${themePrintReadyCount})`}
+          </button>
+        ) : null}
 
         {showAiPrint && aiPrintReadyCount > 0 ? (
           <button

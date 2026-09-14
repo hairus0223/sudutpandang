@@ -20,6 +20,7 @@ import { resolveBaseDir } from "./studioPaths.js";
  *   placement?: { scale?: number, yOffset?: number },
  *   overlays?: Array<{ file: string, blend?: string, opacity?: number }>,
  *   publishedAt?: string,
+ *   identityCertifiedAt?: string,
  * }} AiTheme */
 
 export const AI_PIPELINE_MODES = [
@@ -36,8 +37,8 @@ export const BOOTH_THEME_DEFAULTS = {
   pipelineMode: "composite-costume",
   backgroundRequired: true,
   lookId: "warm",
-  placement: { scale: 0.94, yOffset: 0.03 },
-  overlays: [{ file: "frame.png", blend: "over", opacity: 0.82 }],
+  placement: { scale: 0.94, yOffset: 0 },
+  overlays: [],
 };
 
 const IDENTITY_LOCK = [
@@ -73,8 +74,8 @@ function buildNegativePrompt(extra = "") {
 }
 
 const COSTUME_ONLY_PREFIX = [
-  "Replace clothing and visible accessories on the subject only.",
-  "Do NOT change the background, studio backdrop, environment, scenery, or global lighting.",
+  "Replace clothing and visible accessories on the subject only. The new garments must be fully opaque — no ghosting, no transparent blend, no original shirt showing through.",
+  "Do NOT change the background, studio backdrop, environment, scenery, pose, hands, or face.",
   IDENTITY_LOCK,
 ].join("\n\n");
 
@@ -85,7 +86,7 @@ function buildCostumePrompt(wardrobe) {
   return [
     COSTUME_ONLY_PREFIX,
     wardrobe,
-    "Photorealistic fabric and material textures. Same pose, hands, face, and hair.",
+    "Photorealistic fabric. Completely replace the original outfit. Same pose, hands, face, and hair.",
   ].join("\n\n");
 }
 
@@ -195,7 +196,6 @@ export const BUNDLED_AI_THEMES = [
     previewColor: "#DB2777",
     backgroundThemeId: "cyberpunk-neon",
     lookId: "cinematic",
-    placement: { scale: 0.93, yOffset: 0.035 },
   },
   {
     ...BOOTH_THEME_DEFAULTS,
@@ -221,7 +221,6 @@ export const BUNDLED_AI_THEMES = [
     previewColor: "#7C2D12",
     backgroundThemeId: "royal-fantasy",
     lookId: "cinematic",
-    placement: { scale: 0.95, yOffset: 0.028 },
   },
   {
     ...BOOTH_THEME_DEFAULTS,
@@ -247,7 +246,6 @@ export const BUNDLED_AI_THEMES = [
     previewColor: "#EC4899",
     backgroundThemeId: "k-pop-idol",
     lookId: "soft",
-    placement: { scale: 0.96, yOffset: 0.025 },
   },
   {
     ...BOOTH_THEME_DEFAULTS,
@@ -273,7 +271,6 @@ export const BUNDLED_AI_THEMES = [
     previewColor: "#CA8A04",
     backgroundThemeId: "vintage-glam",
     lookId: "warm",
-    placement: { scale: 0.94, yOffset: 0.032 },
   },
   {
     ...BOOTH_THEME_DEFAULTS,
@@ -299,7 +296,6 @@ export const BUNDLED_AI_THEMES = [
     previewColor: "#6366F1",
     backgroundThemeId: "anime-hero",
     lookId: "cinematic",
-    placement: { scale: 0.92, yOffset: 0.04 },
   },
 ];
 
@@ -375,6 +371,9 @@ function normalizeThemeEntry(raw) {
     ...(placement && Object.keys(placement).length ? { placement } : {}),
     ...(overlays?.length ? { overlays } : {}),
     ...(typeof entry.publishedAt === "string" ? { publishedAt: entry.publishedAt } : {}),
+    ...(typeof entry.identityCertifiedAt === "string"
+      ? { identityCertifiedAt: entry.identityCertifiedAt }
+      : {}),
   };
 }
 

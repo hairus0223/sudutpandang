@@ -66,17 +66,27 @@ export function RegisterAiSummaryCard({
               </div>
             </>
           ) : null}
+          {packageType === "theme-self-photo" && theme ? (
+            <>
+              <div className="flex justify-between gap-2">
+                <dt className="text-white/50">Tema sesi</dt>
+                <dd className="truncate font-medium">{theme.label}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-white/50">Hasil</dt>
+                <dd className="font-medium">Otomatis per foto</dd>
+              </div>
+            </>
+          ) : null}
           {packageType === "ai-self-photo" && theme ? (
             <>
               <div className="flex justify-between gap-2">
                 <dt className="text-white/50">Tema sesi</dt>
-                <dd className="truncate font-medium text-violet-100">
-                  {theme.label}
-                </dd>
+                <dd className="truncate font-medium">{theme.label}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-white/50">Kuota AI</dt>
-                <dd className="font-medium">{aiQuota}×</dd>
+                <dt className="text-white/50">Kuota edit</dt>
+                <dd className="font-medium">{aiQuota} foto</dd>
               </div>
             </>
           ) : null}
@@ -93,10 +103,16 @@ export function RegisterAiSummaryCard({
           atau ukuran mm custom.
         </p>
       ) : null}
+      {packageType === "theme-self-photo" && theme ? (
+        <p className="mt-3 text-[11px] leading-relaxed text-white/45">
+          Tema <b className="text-white/70">{theme.label}</b> terkunci. Orang identik;
+          hanya latar dan cahaya mengikuti tema. Siap cetak 4R.
+        </p>
+      ) : null}
       {packageType === "ai-self-photo" && theme ? (
         <p className="mt-3 text-[11px] leading-relaxed text-white/45">
-          Tema <b className="text-white/70">{theme.label}</b> berlaku untuk seluruh
-          sesi — semua generate memakai contoh di atas.
+          Tema <b className="text-white/70">{theme.label}</b> terkunci untuk sesi
+          ini. Orang tetap sama; pakaian dan latar mengikuti contoh.
         </p>
       ) : null}
     </div>

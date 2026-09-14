@@ -14,11 +14,11 @@ export function getAiSelectionStatus(image: GalleryImageData): string | null {
 }
 
 const AI_STATUS_LABELS: Record<string, string> = {
-  ready: "Sudah di-generate",
-  pending: "Antrian AI",
-  queued: "Antrian AI",
-  processing: "Sedang di-generate",
-  failed: "Generate gagal",
+  ready: "Edit selesai",
+  pending: "Antrian edit",
+  queued: "Antrian edit",
+  processing: "Sedang diedit",
+  failed: "Edit gagal",
 };
 
 export function getAiSelectionStatusLabel(status: string | null | undefined): string | null {

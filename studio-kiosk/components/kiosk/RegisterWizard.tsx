@@ -13,6 +13,7 @@ import { getPackageDurationMinutes } from "@/services/session.service";
 import { RegisterAiSummaryCard } from "@/components/kiosk/RegisterAiSummaryCard";
 import { ThemePickerGrid, useAiThemes } from "@/components/kiosk/ThemePickerGrid";
 import { ThemePreviewModal } from "@/components/kiosk/ThemePreviewModal";
+import { isAiThemeSelectable } from "@/lib/aiUiCopy";
 import {
   DEFAULT_PASSPORT_COLOR,
   PASSPORT_COLOR_OPTIONS,
@@ -39,20 +40,20 @@ type RegisterWizardProps = {
 
 function RegisterStepDots({
   step,
-  isAiPackage,
+  needsTheme,
   isPasPhoto,
 }: {
   step: RegisterStep;
-  isAiPackage: boolean;
+  needsTheme: boolean;
   isPasPhoto: boolean;
 }) {
-  const labels = isAiPackage
+  const labels = needsTheme
     ? (["Paket", "Tema", "Data"] as const)
     : isPasPhoto
       ? (["Paket", "Background", "Data"] as const)
       : (["Paket", "Data"] as const);
 
-  const hasMiddle = isAiPackage || isPasPhoto;
+  const hasMiddle = needsTheme || isPasPhoto;
   const activeIndex = hasMiddle ? step - 1 : step === 1 ? 0 : 1;
 
   return (
@@ -114,12 +115,15 @@ export function RegisterWizard({
 
   const { themes } = useAiThemes();
   const isAiPackage = packageType === "ai-self-photo";
+  const isThemePackage = packageType === "theme-self-photo";
   const isPasPhoto = packageType === "pas-photo";
-  const hasMiddleStep = isAiPackage || isPasPhoto;
+  const needsTheme = isAiPackage || isThemePackage;
+  const hasMiddleStep = needsTheme || isPasPhoto;
   const sessionMinutes = getPackageDurationMinutes(packageType, packageDurations);
   const aiQuotaPreview = resolveAiGenerateLimit(packageType, peopleCount);
   const selectedTheme =
     themes.find((theme) => theme.id === aiThemeId) ?? null;
+  const themeReady = Boolean(selectedTheme && isAiThemeSelectable(selectedTheme));
   const passportColor =
     passportBgId === "custom"
       ? normalizePassportColor(customHex)
@@ -155,8 +159,8 @@ export function RegisterWizard({
     const trimmedName = name.trim();
     if (!trimmedName) return;
 
-    if (isAiPackage && !aiThemeId) {
-      onError("Pilih tema AI untuk sesi ini.");
+    if (needsTheme && !themeReady) {
+      onError("Pilih tema dengan contoh hasil untuk sesi ini.");
       setStep(2);
       return;
     }
@@ -184,7 +188,7 @@ export function RegisterWizard({
     <>
       <RegisterStepDots
         step={step}
-        isAiPackage={isAiPackage}
+        needsTheme={needsTheme}
         isPasPhoto={isPasPhoto}
       />
 
@@ -201,7 +205,7 @@ export function RegisterWizard({
 
           <div className="space-y-2">
             <label className="text-xs tracking-[0.22em] text-white/60">PAKET</label>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-2">
               {PACKAGE_OPTIONS.map((option) => (
                 <button
                   key={option.id}
@@ -240,20 +244,45 @@ export function RegisterWizard({
                 Dikunci 1 orang untuk paket Pas Photo
               </p>
             ) : (
-              <Input
-                type="number"
-                min={1}
-                max={8}
-                value={peopleCount}
-                onChange={(e) =>
-                  setPeopleCount(Math.max(1, Math.min(8, Number(e.target.value) || 1)))
-                }
-                className="h-11"
-              />
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 w-11 shrink-0 border-white/20 bg-white/5 text-white hover:bg-white/10"
+                  onClick={() => setPeopleCount((n) => Math.max(1, n - 1))}
+                >
+                  −
+                </Button>
+                <Input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={peopleCount}
+                  onChange={(e) =>
+                    setPeopleCount(
+                      Math.max(1, Math.min(8, Number(e.target.value) || 1))
+                    )
+                  }
+                  className="h-11 flex-1 text-center text-lg"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 w-11 shrink-0 border-white/20 bg-white/5 text-white hover:bg-white/10"
+                  onClick={() => setPeopleCount((n) => Math.min(8, n + 1))}
+                >
+                  +
+                </Button>
+              </div>
             )}
+            {isThemePackage ? (
+              <p className="text-[11px] text-[#E8C872]">
+                Setiap foto otomatis memakai latar tema. Orang dan pose tidak diubah.
+              </p>
+            ) : null}
             {isAiPackage ? (
               <p className="text-[11px] text-[#E8C872]">
-                Kuota generate AI: {aiQuotaPreview} (sesuai jumlah orang)
+                Kuota edit AI: {aiQuotaPreview} foto (sesuai jumlah orang)
               </p>
             ) : null}
           </div>
@@ -360,14 +389,16 @@ export function RegisterWizard({
         </div>
       ) : null}
 
-      {step === 2 && isAiPackage ? (
+      {step === 2 && needsTheme ? (
         <div className="space-y-5">
           <div>
             <h2 className="text-lg font-semibold tracking-wide text-white sm:text-xl">
               Pilih tema sesi
             </h2>
             <p className="mt-2 text-xs text-white/60 sm:text-sm">
-              Satu tema untuk seluruh sesi — contoh hasil di bawah
+              {isThemePackage
+                ? "Tap kartu untuk lihat contoh. Orang, wajah, dan pose tetap sama — hanya latar mengikuti tema."
+                : "Tap kartu untuk lihat contoh. Orang tetap sama; latar dan suasana mengikuti tema."}
             </p>
           </div>
 
@@ -379,7 +410,7 @@ export function RegisterWizard({
           />
 
           {selectedTheme ? (
-            <div className="flex items-center gap-3 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2">
+            <div className="flex items-center gap-3 rounded-xl border border-[#B59240]/25 bg-[#B59240]/10 px-3 py-2">
               {selectedTheme.previewUrl ? (
                 <img
                   src={selectedTheme.previewUrl}
@@ -387,7 +418,7 @@ export function RegisterWizard({
                   className="size-12 rounded-lg object-cover"
                 />
               ) : null}
-              <p className="text-sm text-violet-100">
+              <p className="text-sm text-white/85">
                 Terpilih: <b>{selectedTheme.label}</b>
               </p>
             </div>
@@ -406,7 +437,7 @@ export function RegisterWizard({
             <Button
               type="button"
               className="h-11 flex-1 bg-[#B59240] font-semibold text-black hover:bg-[#C9A855]"
-              disabled={!aiThemeId}
+              disabled={!themeReady}
               onClick={() => setStep(3)}
             >
               Lanjut
@@ -442,6 +473,7 @@ export function RegisterWizard({
               onChange={(e) => setName(e.target.value)}
               autoComplete="off"
               className="h-11"
+              placeholder="Nama customer"
               required
             />
           </div>

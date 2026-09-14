@@ -1,7 +1,8 @@
-/** @typedef {"self-photo" | "ai-self-photo" | "pas-photo"} PackageType */
+/** @typedef {"self-photo" | "theme-self-photo" | "ai-self-photo" | "pas-photo"} PackageType */
 
 export const PACKAGE_TYPES = /** @type {const} */ ([
   "self-photo",
+  "theme-self-photo",
   "ai-self-photo",
   "pas-photo",
 ]);
@@ -10,6 +11,12 @@ const SESSION_DURATION_MINUTES =
   process.env.SESSION_DURATION_MINUTES &&
   !Number.isNaN(Number(process.env.SESSION_DURATION_MINUTES))
     ? Number(process.env.SESSION_DURATION_MINUTES)
+    : 10;
+
+const THEME_SELF_PHOTO_DURATION_MINUTES =
+  process.env.THEME_SELF_PHOTO_DURATION_MINUTES &&
+  !Number.isNaN(Number(process.env.THEME_SELF_PHOTO_DURATION_MINUTES))
+    ? Number(process.env.THEME_SELF_PHOTO_DURATION_MINUTES)
     : 10;
 
 const AI_SELF_PHOTO_DURATION_MINUTES =
@@ -30,6 +37,7 @@ const PAS_PHOTO_DURATION_MINUTES =
  */
 export function normalizePackageType(input) {
   if (input === "ai-self-photo") return "ai-self-photo";
+  if (input === "theme-self-photo") return "theme-self-photo";
   if (input === "pas-photo") return "pas-photo";
   return "self-photo";
 }
@@ -41,6 +49,9 @@ export function normalizePackageType(input) {
 export function getPackageDurationMinutes(packageType) {
   if (packageType === "ai-self-photo") {
     return AI_SELF_PHOTO_DURATION_MINUTES;
+  }
+  if (packageType === "theme-self-photo") {
+    return THEME_SELF_PHOTO_DURATION_MINUTES;
   }
   if (packageType === "pas-photo") {
     return PAS_PHOTO_DURATION_MINUTES;
@@ -54,6 +65,7 @@ export function getPackageDurationMinutes(packageType) {
 export function getPackageDurations() {
   return {
     "self-photo": SESSION_DURATION_MINUTES,
+    "theme-self-photo": THEME_SELF_PHOTO_DURATION_MINUTES,
     "ai-self-photo": AI_SELF_PHOTO_DURATION_MINUTES,
     "pas-photo": PAS_PHOTO_DURATION_MINUTES,
   };
@@ -65,6 +77,15 @@ export function getPackageDurations() {
  * @param {number} peopleCount
  * @returns {number}
  */
+export function isThemePhotoPackage(packageType) {
+  return normalizePackageType(packageType) === "theme-self-photo";
+}
+
+export function usesSessionTheme(packageType) {
+  const type = normalizePackageType(packageType);
+  return type === "ai-self-photo" || type === "theme-self-photo";
+}
+
 export function resolveAiGenerateLimit(packageType, peopleCount) {
   if (packageType !== "ai-self-photo") return 0;
   return Math.max(1, Math.min(8, Number(peopleCount) || 1));

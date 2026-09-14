@@ -24,7 +24,8 @@ import {
 } from "@/lib/aiGalleryUtils";
 import {
   hasAiPrintVariant,
-  getPassportSizeUrl,
+  hasThemePrintVariant,
+  getPassportDownload,
   resolveGalleryPreviewUrl,
   resolvePrintUrl,
 } from "@/lib/resolveImageUrl";
@@ -128,10 +129,18 @@ export function PhotoModal({
 
   useEffect(() => {
     if (!open || index === null || !images[index]) return;
-    const filename = images[index].filename;
-    setViewVariant(printVariantByFilename[filename] ?? "original");
+    const current = images[index];
+    const filename = current.filename;
+    const queued = printVariantByFilename[filename];
+    if (packageType === "theme-self-photo" && hasThemePrintVariant(current)) {
+      setViewVariant(queued === "original" ? "original" : "theme");
+    } else if (packageType === "ai-self-photo" && hasAiPrintVariant(current, aiThemeId)) {
+      setViewVariant(queued === "original" ? "original" : "ai");
+    } else {
+      setViewVariant(queued ?? "original");
+    }
     resetZoom();
-  }, [open, index, images, printVariantByFilename, resetZoom]);
+  }, [open, index, images, printVariantByFilename, packageType, aiThemeId, resetZoom]);
 
   const resetHideUI = useCallback(() => {
     setShowUI(true);
@@ -203,8 +212,12 @@ export function PhotoModal({
 
   const image = images[index];
   const selectionKey = image.imageId ?? image.filename;
+  const processedVariant: PrintVariant =
+    packageType === "theme-self-photo" ? "theme" : "ai";
   const canSwitchVariant =
-    packageType === "ai-self-photo" && hasAiPrintVariant(image, aiThemeId);
+    (packageType === "ai-self-photo" && hasAiPrintVariant(image, aiThemeId)) ||
+    (packageType === "theme-self-photo" && hasThemePrintVariant(image));
+  const isThemePackage = packageType === "theme-self-photo";
   const isPasPhoto = packageType === "pas-photo";
   const printTargetVariant: PrintVariant = isPasPhoto
     ? "passport"
@@ -449,17 +462,34 @@ export function PhotoModal({
             {isAiReady ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold text-white shadow-lg">
                 <CheckCircle2 className="size-3.5" />
-                AI selesai
+                Edit selesai
               </span>
             ) : isAiFailed ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500 px-3 py-1 text-xs font-semibold text-white shadow-lg">
                 <AlertCircle className="size-3.5" />
-                Generate gagal
+                Edit gagal
               </span>
             ) : isAiProcessing ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white shadow-lg">
                 <Loader2 className="size-3.5 animate-spin" />
                 Sedang diproses…
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
+        {isThemePackage && !canSwitchVariant ? (
+          <div className="pointer-events-none absolute left-1/2 top-[4.5rem] -translate-x-1/2 sm:top-20">
+            {image.processingStatus === "failed" ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500 px-3 py-1 text-xs font-semibold text-white shadow-lg">
+                <AlertCircle className="size-3.5" />
+                Latar tema gagal · foto asli tetap ada
+              </span>
+            ) : image.processingStatus === "pending" ||
+              image.processingStatus === "processing" ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white shadow-lg">
+                <Loader2 className="size-3.5 animate-spin" />
+                Menyusun latar tema…
               </span>
             ) : null}
           </div>
@@ -472,7 +502,9 @@ export function PhotoModal({
         >
           {canSwitchVariant ? (
             <div className="flex gap-1.5 rounded-xl border-2 border-white/25 bg-black/70 p-1.5 backdrop-blur-md">
-              {(["original", "ai"] as const).map((variant) => (
+              {(
+                ["original", processedVariant] as const
+              ).map((variant) => (
                 <button
                   key={variant}
                   type="button"
@@ -483,10 +515,14 @@ export function PhotoModal({
                   }}
                   className={btnSegment(
                     viewVariant === variant,
-                    variant === "ai" ? "ai" : "original"
+                    variant === "original" ? "original" : "ai"
                   )}
                 >
-                  {variant === "ai" ? "AI" : "Asli"}
+                  {variant === "original"
+                    ? "Asli"
+                    : variant === "theme"
+                      ? "Tema"
+                      : "AI"}
                 </button>
               ))}
             </div>
@@ -544,20 +580,20 @@ export function PhotoModal({
               {isPrintActive
                 ? "Hapus dari antrian"
                 : isPrintSelected
-                  ? `Ganti ke ${printTargetVariant === "ai" ? "AI" : printTargetVariant === "passport" ? "pas foto" : "asli"}`
-                  : `Masukkan antrian · ${printTargetVariant === "ai" ? "AI" : printTargetVariant === "passport" ? "pas foto" : "asli"}`}
+                  ? `Ganti ke ${printTargetVariant === "ai" ? "AI" : printTargetVariant === "theme" ? "tema" : printTargetVariant === "passport" ? "pas foto" : "asli"}`
+                  : `Masukkan antrian · ${printTargetVariant === "ai" ? "AI" : printTargetVariant === "theme" ? "tema" : printTargetVariant === "passport" ? "pas foto" : "asli"}`}
             </button>
 
             {isPasPhoto ? (
               <div className="flex w-full flex-wrap justify-center gap-2">
                 {(["2x3", "3x4", "4x6"] as const).map((sizeId) => {
-                  const url = getPassportSizeUrl(image, sizeId);
-                  if (!url) return null;
+                  const download = getPassportDownload(image, sizeId);
+                  if (!download) return null;
                   return (
                     <a
                       key={sizeId}
-                      href={url}
-                      download={`pasfoto-${sizeId}.png`}
+                      href={download.url}
+                      download={download.filename}
                       onClick={(e) => e.stopPropagation()}
                       className={cn(btnNeutral(false), "px-3 py-2 text-xs")}
                     >
@@ -580,7 +616,7 @@ export function PhotoModal({
                   className={cn(btnSuccess(), "flex-1 sm:flex-none")}
                 >
                   <CheckCircle2 className="size-4" />
-                  Lihat AI
+                  Lihat hasil
                 </button>
               ) : isAiProcessing ? (
                 <span
@@ -624,7 +660,7 @@ export function PhotoModal({
                   ) : (
                     <Sparkles className="size-4" />
                   )}
-                  Generate AI
+                  Edit foto
                 </button>
               ) : null
             ) : null}

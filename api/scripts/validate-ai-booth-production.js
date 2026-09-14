@@ -1,36 +1,22 @@
 /**
- * Production readiness check for bundled Pro Booth themes (PR-5).
+ * Production readiness check for bundled Pro Booth themes (PR-5 / Phase 3).
  *
  * Usage:
  *   npm run validate:ai-booth-production
  */
-import fs from "fs";
-import path from "path";
 import {
   BUNDLED_AI_THEMES,
-  isCompositePipelineMode,
 } from "../services/aiThemeCatalog.js";
-import {
-  getBundledPhotoBackgroundPath,
-  validateBundledThemeBackgrounds,
-} from "../services/aiThemeBackgrounds.js";
-import { BUNDLED_THEME_PREVIEWS_DIR } from "../services/aiThemePreviews.js";
+import { validateBundledThemeBackgrounds } from "../services/aiThemeBackgrounds.js";
 import { validateBundledThemeOverlays } from "../services/aiThemeOverlays.js";
 import { BOOTH_BACKGROUND_THEME_IDS } from "../services/themeBackgroundSvgs.js";
+import {
+  evaluateThemeProduction,
+  MIN_THEME_BACKGROUND_SHORT_EDGE,
+  readImageSize,
+} from "../services/aiThemeProduction.js";
 
-function findAfterPreview(themeId) {
-  const dir = path.join(BUNDLED_THEME_PREVIEWS_DIR, themeId);
-  if (!fs.existsSync(dir)) return null;
-
-  for (const ext of [".jpg", ".jpeg", ".png", ".webp"]) {
-    const candidate = path.join(dir, `after${ext}`);
-    if (fs.existsSync(candidate)) return candidate;
-  }
-
-  return null;
-}
-
-function main() {
+async function main() {
   /** @type {string[]} */
   const issues = [];
 
@@ -50,20 +36,7 @@ function main() {
     issues.push(`missing overlays: ${overlayReport.missing.join(", ")}`);
   }
 
-  let previewOk = 0;
-  for (const themeId of BOOTH_BACKGROUND_THEME_IDS) {
-    const after = findAfterPreview(themeId);
-    if (after) {
-      previewOk += 1;
-      console.log(`[OK] preview ${themeId} → ${path.basename(after)}`);
-    } else {
-      issues.push(`missing preview after.* for ${themeId}`);
-      console.log(`[MISSING] preview ${themeId}`);
-    }
-  }
-  console.log(`Previews: ${previewOk}/${BOOTH_BACKGROUND_THEME_IDS.length}`);
-
-  let configOk = 0;
+  let ready = 0;
   for (const themeId of BOOTH_BACKGROUND_THEME_IDS) {
     const theme = BUNDLED_AI_THEMES.find((entry) => entry.id === themeId);
     if (!theme) {
@@ -71,26 +44,25 @@ function main() {
       continue;
     }
 
-    const themeIssues = [];
-    if (!isCompositePipelineMode(theme.pipelineMode ?? "direct")) {
-      themeIssues.push("pipelineMode not composite");
-    }
-    if (!theme.lookId) themeIssues.push("lookId missing");
-    if (!theme.placement) themeIssues.push("placement missing");
-    if (!theme.overlays?.length) themeIssues.push("overlays missing");
-    if (!getBundledPhotoBackgroundPath(themeId)) {
-      themeIssues.push("bg.jpg missing");
+    const report = evaluateThemeProduction(theme);
+    if (report.backgroundPath) {
+      const size = await readImageSize(report.backgroundPath);
+      if (size.shortEdge < MIN_THEME_BACKGROUND_SHORT_EDGE) {
+        report.issues.push(
+          `background short edge ${size.shortEdge}px < ${MIN_THEME_BACKGROUND_SHORT_EDGE}`
+        );
+      }
     }
 
-    if (themeIssues.length === 0) {
-      configOk += 1;
-      console.log(`[OK] config ${themeId} (look=${theme.lookId}, overlays=${theme.overlays?.length ?? 0})`);
+    if (report.issues.length === 0) {
+      ready += 1;
+      console.log(`[OK] ${themeId} look=${theme.lookId} before/after + photo bg`);
     } else {
-      issues.push(`${themeId}: ${themeIssues.join(", ")}`);
-      console.log(`[WARN] config ${themeId} — ${themeIssues.join(", ")}`);
+      issues.push(`${themeId}: ${report.issues.join(", ")}`);
+      console.log(`[WARN] ${themeId} — ${report.issues.join(", ")}`);
     }
   }
-  console.log(`Theme config: ${configOk}/${BOOTH_BACKGROUND_THEME_IDS.length}`);
+  console.log(`Theme production: ${ready}/${BOOTH_BACKGROUND_THEME_IDS.length}`);
 
   if (issues.length > 0) {
     console.error("\n❌ Production validation failed:");
@@ -107,4 +79,7 @@ function main() {
   console.log("\n✅ All bundled Pro Booth themes are production-ready.\n");
 }
 
-main();
+main().catch((err) => {
+  console.error("\n❌ Production validation failed:", err.message);
+  process.exit(1);
+});

@@ -11,7 +11,7 @@ const STEPS: {
   label: string;
   icon: typeof Images;
 }[] = [
-  { id: "compose", label: "Pilih & Generate", icon: Wand2 },
+  { id: "compose", label: "Pilih & Edit", icon: Wand2 },
   { id: "results", label: "Hasil & Cetak", icon: Sparkles },
 ];
 
@@ -100,7 +100,7 @@ export function AiWizardStepper({
 
         <div className="flex flex-wrap items-center gap-2 text-xs text-white/50">
           <span className="rounded-full bg-white/5 px-2.5 py-1">
-            Slot AI: {aiSlotsUsed}/{aiGenerateLimit}
+            Slot edit: {aiSlotsUsed}/{aiGenerateLimit}
           </span>
           {readyCount > 0 ? (
             <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-emerald-200">

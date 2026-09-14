@@ -1,11 +1,34 @@
 import fs from "fs";
 import path from "path";
-import { readCustomerJson } from "./customerConfig.js";
+import { readCustomerJson, readCustomerPackageType } from "./customerConfig.js";
 import {
   normalizePackageType,
   readAiQuotaFromCustomer,
+  usesSessionTheme,
 } from "./packageTypes.js";
 import { getAiTheme } from "./aiThemes.js";
+import { isThemeSelectableForRegister } from "./aiThemeProduction.js";
+
+export const INCOMPLETE_AI_STATUSES = ["pending", "queued", "processing"];
+
+export const AI_JOB_INTERRUPTED_MESSAGE =
+  "Job terputus karena server restart. Coba edit lagi.";
+
+/**
+ * Theme chosen at register. Gallery cannot replace it with another theme.
+ * @param {string | undefined | null} rawThemeId
+ * @param {string} [baseDir]
+ */
+export function resolveAiRegisterTheme(rawThemeId, baseDir) {
+  const theme = getAiTheme(rawThemeId, baseDir);
+  if (!theme) {
+    throw new Error("theme_required");
+  }
+  if (!isThemeSelectableForRegister(theme, baseDir)) {
+    throw new Error("theme_not_ready");
+  }
+  return theme;
+}
 
 /**
  * @param {string} userFolder
@@ -53,16 +76,22 @@ export function setSessionTheme(userFolder, themeId) {
   const data = readCustomerJson(userFolder);
   if (!data) throw new Error("customer_not_found");
 
-  if (normalizePackageType(data.packageType) !== "ai-self-photo") {
-    throw new Error("package_not_ai");
+  if (!usesSessionTheme(normalizePackageType(data.packageType))) {
+    throw new Error("package_not_themed");
   }
 
   if (data.aiThemeLockedAt) throw new Error("theme_locked");
   if ((Number(data.aiGenerateUsed) || 0) > 0) throw new Error("theme_locked");
   if (countActiveAiJobs(data) > 0) throw new Error("theme_locked");
+  if (data.aiThemeId && String(data.aiThemeId) !== String(themeId).trim()) {
+    throw new Error("theme_locked");
+  }
 
   const theme = getAiTheme(themeId);
   if (!theme) throw new Error("invalid_theme");
+  if (!isThemeSelectableForRegister(theme)) {
+    throw new Error("theme_not_ready");
+  }
 
   data.aiThemeId = theme.id;
   writeCustomerJson(userFolder, data);
@@ -210,4 +239,91 @@ export function upsertAiSelection(userFolder, selection) {
 export function findAiSelectionByJobId(userFolder, jobId) {
   const data = readCustomerJson(userFolder);
   return getAiSelections(data).find((entry) => entry.jobId === jobId);
+}
+
+/**
+ * Incomplete AI jobs on disk (queued/processing after an API crash).
+ * @param {string} baseDir
+ * @param {string} todayFolder
+ * @returns {Array<{ userDir: string, user: string, imageId: string, themeId: string, jobId: string | null }>}
+ */
+export function findIncompleteAiJobs(baseDir, todayFolder) {
+  const dayPath = path.join(baseDir, todayFolder);
+  if (!fs.existsSync(dayPath)) return [];
+
+  /** @type {Array<{ userDir: string, user: string, imageId: string, themeId: string, jobId: string | null }>} */
+  const jobs = [];
+
+  for (const userSlug of fs.readdirSync(dayPath)) {
+    const userDir = path.join(dayPath, userSlug);
+    try {
+      if (!fs.statSync(userDir).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    if (readCustomerPackageType(userDir) !== "ai-self-photo") continue;
+
+    const customer = readCustomerJson(userDir);
+    if (!customer) continue;
+
+    for (const entry of getAiSelections(customer)) {
+      if (!INCOMPLETE_AI_STATUSES.includes(String(entry.status))) continue;
+      const imageId = String(entry.imageId || "").trim();
+      if (!imageId) continue;
+      jobs.push({
+        userDir,
+        user: userSlug,
+        imageId,
+        themeId: String(entry.themeId || customer.aiThemeId || ""),
+        jobId: entry.jobId ? String(entry.jobId) : null,
+      });
+    }
+  }
+
+  return jobs;
+}
+
+/**
+ * After API restart, mark stuck jobs failed and release quota so operators can retry.
+ * OpenAI work is not resumable; leaving status=processing would block generate forever.
+ *
+ * @param {{
+ *   baseDir: string,
+ *   todayFolder: string,
+ *   io?: { emit: (event: string, payload: Record<string, unknown>) => void } | null,
+ * }} params
+ */
+export function recoverIncompleteAiJobs({ baseDir, todayFolder, io = null }) {
+  const jobs = findIncompleteAiJobs(baseDir, todayFolder);
+
+  for (const job of jobs) {
+    releaseAiQuota(job.userDir);
+    upsertAiSelection(job.userDir, {
+      imageId: job.imageId,
+      themeId: job.themeId,
+      jobId: job.jobId,
+      status: "failed",
+      phase: null,
+      error: AI_JOB_INTERRUPTED_MESSAGE,
+      errorCode: "job_interrupted",
+    });
+
+    io?.emit("ai-generation-complete", {
+      user: job.user,
+      imageId: job.imageId,
+      themeId: job.themeId,
+      jobId: job.jobId,
+      status: "failed",
+      error: AI_JOB_INTERRUPTED_MESSAGE,
+      errorCode: "job_interrupted",
+    });
+  }
+
+  if (jobs.length > 0) {
+    console.log(
+      `[ai] recovered ${jobs.length} incomplete job(s) as failed (quota released)`
+    );
+  }
+
+  return jobs;
 }

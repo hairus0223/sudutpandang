@@ -44,6 +44,19 @@ export function getBundledSegmentationModels() {
   return bundledModels;
 }
 
+export function getPassportSegmentationModel() {
+  const available = getBundledSegmentationModels();
+  for (const model of ["large", "medium", "small"]) {
+    if (available.includes(model)) return model;
+  }
+  return getSegmentationModel();
+}
+
+/** Prefer the most precise bundled model for print composites. */
+export function getThemeSegmentationModel() {
+  return getPassportSegmentationModel();
+}
+
 export function getSegmentationModel() {
   const requested = (process.env.PERSON_SEGMENTATION_MODEL || "medium")
     .trim()
@@ -68,12 +81,12 @@ export function getSegmentationModel() {
   return available[0] || "medium";
 }
 
-export function getSegmentationConfig() {
+export function getSegmentationConfig(overrides = {}) {
   const distDir = getSegmentationDistDir();
 
   return {
     publicPath: `${url.pathToFileURL(distDir).toString()}/`,
-    model: getSegmentationModel(),
+    model: overrides.model || getSegmentationModel(),
     output: {
       format: "image/png",
       quality: 1,
@@ -130,10 +143,17 @@ function normalizeImageMimeType(extOrMime) {
  * @param {string} [mimeType]
  * @returns {Promise<Buffer>}
  */
-export async function segmentPersonFromBuffer(buffer, mimeType = "image/png") {
+export async function segmentPersonFromBuffer(
+  buffer,
+  mimeType = "image/png",
+  options = {}
+) {
   const normalizedMime = normalizeImageMimeType(mimeType);
   const blob = new Blob([buffer], { type: normalizedMime });
-  const resultBlob = await removeBackground(blob, getSegmentationConfig());
+  const resultBlob = await removeBackground(
+    blob,
+    getSegmentationConfig(options)
+  );
   return Buffer.from(await resultBlob.arrayBuffer());
 }
 

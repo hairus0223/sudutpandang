@@ -14,6 +14,9 @@ import { buildAiJobId, getAiTheme } from "./aiThemes.js";
 import { getAiGenerationConfig } from "./packageTypes.js";
 import { resolveBaseDir } from "./studioPaths.js";
 
+const PROGRESS_HEARTBEAT_MS =
+  Number(process.env.AI_PROGRESS_HEARTBEAT_MS) || 2500;
+
 /** @typedef {{
  *   jobId: string,
  *   user: string,
@@ -70,6 +73,7 @@ class AiGenerationQueue {
     const initialPhase = theme
       ? getAiGenerationInitialPhaseForTheme(theme)
       : getAiGenerationInitialPhase();
+    let currentPhase = initialPhase;
 
     logAiAnalyticsEvent(baseDir, {
       type: "generate_started",
@@ -89,14 +93,23 @@ class AiGenerationQueue {
       error: null,
     });
 
-    job.emitProgress({
-      user,
-      imageId,
-      themeId,
-      jobId,
-      status: "processing",
-      phase: initialPhase,
-    });
+    const emitPhase = (phase, heartbeat = false) => {
+      job.emitProgress({
+        user,
+        imageId,
+        themeId,
+        jobId,
+        status: "processing",
+        phase,
+        ...(heartbeat ? { heartbeat: true } : {}),
+      });
+    };
+
+    emitPhase(initialPhase);
+
+    const heartbeat = setInterval(() => {
+      emitPhase(currentPhase, true);
+    }, PROGRESS_HEARTBEAT_MS);
 
     try {
       const result = await runAiGeneration({
@@ -106,6 +119,7 @@ class AiGenerationQueue {
         jobId,
         user,
         onProgress: (phase) => {
+          currentPhase = phase;
           upsertAiSelection(userDir, {
             imageId,
             themeId,
@@ -113,14 +127,7 @@ class AiGenerationQueue {
             status: "processing",
             phase,
           });
-          job.emitProgress({
-            user,
-            imageId,
-            themeId,
-            jobId,
-            status: "processing",
-            phase,
-          });
+          emitPhase(phase);
         },
       });
 
@@ -190,6 +197,8 @@ class AiGenerationQueue {
         durationMs: Date.now() - startedAt,
         errorCode: code,
       });
+    } finally {
+      clearInterval(heartbeat);
     }
   }
 

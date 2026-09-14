@@ -118,9 +118,10 @@ export function resolveConfiguredOverlayPaths(theme, baseDir = resolveBaseDir())
  * @param {string} [baseDir]
  */
 export function listThemeOverlayPaths(theme, baseDir = resolveBaseDir()) {
-  const configured = resolveConfiguredOverlayPaths(theme, baseDir);
-  if (configured.length > 0) return configured;
-  return resolveThemeOverlayPaths(theme.id, baseDir);
+  if (!Array.isArray(theme.overlays) || theme.overlays.length === 0) {
+    return [];
+  }
+  return resolveConfiguredOverlayPaths(theme, baseDir);
 }
 
 /**

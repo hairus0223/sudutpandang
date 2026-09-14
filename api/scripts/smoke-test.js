@@ -41,8 +41,9 @@ async function run() {
   assert(
     Array.isArray(health.body.packages) &&
       health.body.packages.includes("ai-self-photo") &&
+      health.body.packages.includes("theme-self-photo") &&
       health.body.packages.includes("pas-photo"),
-    "expected ai-self-photo and pas-photo in packages"
+    "expected theme-self-photo, ai-self-photo and pas-photo in packages"
   );
   console.log(`✓ GET /api/health (packages: ${health.body.packages.join(", ")})`);
 
@@ -78,14 +79,19 @@ async function run() {
     "packageDurations.ai-self-photo missing"
   );
   assert(
+    kioskConfig.body.packageDurations?.["theme-self-photo"],
+    "packageDurations.theme-self-photo missing"
+  );
+  assert(
     kioskConfig.body.packageDurations?.["pas-photo"],
     "packageDurations.pas-photo missing"
   );
   assert(
     Array.isArray(kioskConfig.body.packages) &&
       kioskConfig.body.packages.includes("ai-self-photo") &&
+      kioskConfig.body.packages.includes("theme-self-photo") &&
       kioskConfig.body.packages.includes("pas-photo"),
-    "kiosk packages missing pas-photo"
+    "kiosk packages missing theme-self-photo"
   );
   console.log(
     `✓ GET /api/kiosk-config (self-photo=${kioskConfig.body.packageDurations["self-photo"]}m, ai-self-photo=${kioskConfig.body.packageDurations["ai-self-photo"]}m)`

@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { stabilizePrintMatte } from "./personMask.js";
 
 const MAX_INPUT_PX =
   Number(process.env.PERSON_SEGMENTATION_MAX_INPUT_PX) || 4096;
@@ -7,7 +8,7 @@ const MAX_INPUT_PX =
  * Normalize camera JPEG to display-oriented pixels for segmentation.
  * @param {string} inputPath
  */
-export async function prepareSegmentationInput(inputPath) {
+export async function prepareSegmentationInput(inputPath, options = {}) {
   let buffer = await sharp(inputPath, {
     failOn: "none",
     limitInputPixels: false,
@@ -35,6 +36,15 @@ export async function prepareSegmentationInput(inputPath) {
     meta = await sharp(buffer).metadata();
     targetWidth = meta.width ?? targetWidth;
     targetHeight = meta.height ?? targetHeight;
+  }
+
+  if (options.portraitBoost) {
+    buffer = await sharp(buffer)
+      .median(3)
+      .modulate({ brightness: 1.12, saturation: 1.05 })
+      .sharpen({ sigma: 0.9, m1: 0.6, m2: 1.2 })
+      .png({ compressionLevel: 6, effort: 7 })
+      .toBuffer();
   }
 
   buffer = await sharp(buffer)
@@ -147,19 +157,7 @@ export async function refineSubjectAlpha(buffer) {
       return buffer;
     }
 
-    const alpha = await sharp(buffer)
-      .ensureAlpha()
-      .extractChannel("alpha")
-      .blur(0.25)
-      .toBuffer();
-
-    return sharp(buffer)
-      .removeAlpha()
-      .joinChannel(alpha)
-      .ensureAlpha()
-      .withMetadata({ orientation: 1 })
-      .png({ compressionLevel: 6, effort: 10 })
-      .toBuffer();
+    return stabilizePrintMatte(buffer);
   } catch {
     return buffer;
   }

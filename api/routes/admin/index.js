@@ -195,9 +195,9 @@ export function createAiThemeResearchRouter({ baseDir, publicHost }) {
     }
   });
 
-  router.post("/publish", requireAdminToken, (req, res) => {
+  router.post("/publish", requireAdminToken, async (req, res) => {
     try {
-      const theme = publishDraftAsTheme(baseDir, req.body ?? {});
+      const theme = await publishDraftAsTheme(baseDir, req.body ?? {});
       res.status(201).json({
         ok: true,
         theme: {

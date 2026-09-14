@@ -23,7 +23,7 @@ function createCaptureSynth() {
     if (!c) return null;
     if (!master) {
       master = c.createGain();
-      master.gain.value = 1;
+      master.gain.value = 0.72;
       master.connect(c.destination);
     }
     return master;
@@ -94,84 +94,87 @@ function createCaptureSynth() {
    */
   function beep(remainingSeconds = 3) {
     const remaining = Number(remainingSeconds || 0);
-    const freq = remaining <= 1 ? 1318 : remaining <= 2 ? 1046 : 880;
+    const freq = remaining <= 1 ? 988 : remaining <= 2 ? 784 : 659;
 
     playTone({
       frequency: freq,
-      duration: 0.22,
+      duration: 0.12,
       type: "sine",
-      peak: 0.9,
-      attack: 0.003,
+      peak: 0.38,
+      attack: 0.006,
     });
     playTone({
       frequency: freq * 2,
-      duration: 0.14,
-      type: "sine",
-      peak: 0.28,
-      startAt: 0.012,
-      attack: 0.004,
-    });
-
-    if (remaining <= 1) {
-      playTone({
-        frequency: 1568,
-        duration: 0.26,
-        type: "sine",
-        peak: 0.95,
-        startAt: 0.14,
-        attack: 0.003,
-      });
-    }
-  }
-
-  /** Punchy digital shutter for silent cameras. */
-  function shutter() {
-    playTone({ frequency: 140, duration: 0.05, type: "square", peak: 0.7 });
-    playNoiseBurst({
-      duration: 0.07,
-      peak: 0.95,
-      startAt: 0.012,
-      filterFreq: 3200,
-    });
-    playTone({
-      frequency: 880,
-      duration: 0.09,
-      type: "triangle",
-      peak: 0.55,
-      startAt: 0.025,
-    });
-    playNoiseBurst({
-      duration: 0.12,
-      peak: 0.45,
-      startAt: 0.05,
-      filterFreq: 700,
-      filterType: "lowpass",
-    });
-    playTone({
-      frequency: 220,
       duration: 0.08,
       type: "sine",
-      peak: 0.4,
-      startAt: 0.06,
+      peak: 0.1,
+      startAt: 0.01,
+      attack: 0.008,
     });
   }
 
-  /** Clear confirm when review photo appears. */
-  function captureSuccess() {
-    playTone({ frequency: 523.25, duration: 0.14, type: "sine", peak: 0.55 });
+  /** Soft shutter click — present, not harsh. */
+  function shutter() {
     playTone({
-      frequency: 659.25,
-      duration: 0.2,
+      frequency: 196,
+      duration: 0.045,
       type: "sine",
-      peak: 0.6,
-      startAt: 0.08,
+      peak: 0.28,
+      attack: 0.002,
+    });
+    playNoiseBurst({
+      duration: 0.04,
+      peak: 0.22,
+      startAt: 0.008,
+      filterFreq: 1800,
     });
     playTone({
-      frequency: 783.99,
-      duration: 0.28,
+      frequency: 523,
+      duration: 0.07,
+      type: "triangle",
+      peak: 0.16,
+      startAt: 0.018,
+      attack: 0.004,
+    });
+  }
+
+  /** Short confirm when the photo appears. */
+  function captureSuccess() {
+    playTone({ frequency: 523.25, duration: 0.09, type: "sine", peak: 0.22, attack: 0.008 });
+    playTone({
+      frequency: 659.25,
+      duration: 0.14,
       type: "sine",
-      peak: 0.5,
-      startAt: 0.16,
+      peak: 0.2,
+      startAt: 0.07,
+      attack: 0.01,
+    });
+  }
+
+  /** Session complete: two notes, under 0.7s. */
+  function sessionEnd() {
+    playTone({
+      frequency: 392,
+      duration: 0.12,
+      type: "sine",
+      peak: 0.24,
+      attack: 0.01,
+    });
+    playTone({
+      frequency: 523.25,
+      duration: 0.22,
+      type: "sine",
+      peak: 0.26,
+      startAt: 0.11,
+      attack: 0.012,
+    });
+    playTone({
+      frequency: 659.25,
+      duration: 0.18,
+      type: "sine",
+      peak: 0.14,
+      startAt: 0.28,
+      attack: 0.02,
     });
   }
 
@@ -180,7 +183,7 @@ function createCaptureSynth() {
     getMaster();
   }
 
-  return { beep, shutter, captureSuccess, unlock };
+  return { beep, shutter, captureSuccess, sessionEnd, unlock };
 }
 
 export function useKioskAudio() {
@@ -194,14 +197,10 @@ export function useKioskAudio() {
       new URL(relativePath, document.baseURI).toString();
     const map = {
       timeWarning: new Audio(assetUrl("./audio/time-warning-id.mp3")),
-      // Original Indonesian voice — correct session-end UX
-      sessionEnd: new Audio(assetUrl("./audio/session-end-id.mp3")),
     };
     Object.values(map).forEach((audio) => {
-      audio.volume = 1;
+      audio.volume = 0.85;
     });
-    // Slightly softer so the voice reads warmer on TV speakers
-    map.sessionEnd.volume = 0.85;
     return map;
   }, []);
 
@@ -220,11 +219,15 @@ export function useKioskAudio() {
         synth?.captureSuccess();
         return;
       }
+      if (key === "sessionEnd") {
+        synth?.sessionEnd();
+        return;
+      }
 
       const audio = sounds[key];
       if (!audio) return;
       try {
-        if (key !== "sessionEnd") audio.volume = 1;
+        if (key !== "sessionEnd") audio.volume = 0.85;
         audio.currentTime = 0;
         audio.play().catch(() => {});
       } catch {

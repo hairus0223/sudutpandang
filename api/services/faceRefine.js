@@ -5,14 +5,14 @@ import {
   PERSON_SEGMENTATION_ENABLED,
 } from "./personSegmentation.js";
 
-/** Opt-in: blends original face pixels onto AI-edited output (PR-3). */
-export const FACE_REFINE_ENABLED = process.env.FACE_REFINE_ENABLED === "true";
+/** Default on: blends original face pixels onto costume-edited output. */
+export const FACE_REFINE_ENABLED = process.env.FACE_REFINE_ENABLED !== "false";
 
 const FACE_REFINE_BLEND_STRENGTH =
   Number(process.env.FACE_REFINE_BLEND_STRENGTH) || 0.85;
 
 const FACE_REFINE_FEATHER_PX =
-  Number(process.env.FACE_REFINE_FEATHER_PX) || 8;
+  Number(process.env.FACE_REFINE_FEATHER_PX) || 5;
 
 /**
  * @returns {boolean}

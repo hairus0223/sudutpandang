@@ -1088,7 +1088,7 @@
             }
             return dispatcher.useContext(Context);
           }
-          function useState4(initialState) {
+          function useState5(initialState) {
             var dispatcher = resolveDispatcher();
             return dispatcher.useState(initialState);
           }
@@ -1096,11 +1096,11 @@
             var dispatcher = resolveDispatcher();
             return dispatcher.useReducer(reducer, initialArg, init);
           }
-          function useRef6(initialValue) {
+          function useRef8(initialValue) {
             var dispatcher = resolveDispatcher();
             return dispatcher.useRef(initialValue);
           }
-          function useEffect6(create, deps) {
+          function useEffect8(create, deps) {
             var dispatcher = resolveDispatcher();
             return dispatcher.useEffect(create, deps);
           }
@@ -1883,15 +1883,15 @@
           exports.useContext = useContext;
           exports.useDebugValue = useDebugValue;
           exports.useDeferredValue = useDeferredValue;
-          exports.useEffect = useEffect6;
+          exports.useEffect = useEffect8;
           exports.useId = useId;
           exports.useImperativeHandle = useImperativeHandle;
           exports.useInsertionEffect = useInsertionEffect;
           exports.useLayoutEffect = useLayoutEffect;
           exports.useMemo = useMemo3;
           exports.useReducer = useReducer;
-          exports.useRef = useRef6;
-          exports.useState = useState4;
+          exports.useRef = useRef8;
+          exports.useState = useState5;
           exports.useSyncExternalStore = useSyncExternalStore;
           exports.useTransition = useTransition;
           exports.version = ReactVersion;
@@ -2387,9 +2387,9 @@
           if (typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ !== "undefined" && typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart === "function") {
             __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart(new Error());
           }
-          var React4 = require_react();
+          var React6 = require_react();
           var Scheduler = require_scheduler();
-          var ReactSharedInternals = React4.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
+          var ReactSharedInternals = React6.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
           var suppressWarning = false;
           function setSuppressWarning(newSuppressWarning) {
             {
@@ -3996,7 +3996,7 @@
             {
               if (props.value == null) {
                 if (typeof props.children === "object" && props.children !== null) {
-                  React4.Children.forEach(props.children, function(child) {
+                  React6.Children.forEach(props.children, function(child) {
                     if (child == null) {
                       return;
                     }
@@ -23592,7 +23592,7 @@
       if (true) {
         (function() {
           "use strict";
-          var React4 = require_react();
+          var React6 = require_react();
           var REACT_ELEMENT_TYPE = /* @__PURE__ */ Symbol.for("react.element");
           var REACT_PORTAL_TYPE = /* @__PURE__ */ Symbol.for("react.portal");
           var REACT_FRAGMENT_TYPE = /* @__PURE__ */ Symbol.for("react.fragment");
@@ -23618,7 +23618,7 @@
             }
             return null;
           }
-          var ReactSharedInternals = React4.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
+          var ReactSharedInternals = React6.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
           function error(format) {
             {
               {
@@ -24468,11 +24468,11 @@
               return jsxWithValidation(type, props, key, false);
             }
           }
-          var jsx4 = jsxWithValidationDynamic;
-          var jsxs3 = jsxWithValidationStatic;
+          var jsx6 = jsxWithValidationDynamic;
+          var jsxs5 = jsxWithValidationStatic;
           exports.Fragment = REACT_FRAGMENT_TYPE;
-          exports.jsx = jsx4;
-          exports.jsxs = jsxs3;
+          exports.jsx = jsx6;
+          exports.jsxs = jsxs5;
         })();
       }
     }
@@ -24491,11 +24491,11 @@
   });
 
   // src/renderer/main.jsx
-  var import_react8 = __toESM(require_react());
+  var import_react11 = __toESM(require_react());
   var import_client = __toESM(require_client());
 
   // src/renderer/App.jsx
-  var import_react7 = __toESM(require_react());
+  var import_react10 = __toESM(require_react());
 
   // src/renderer/config.js
   var DEFAULT_API_BASE = "http://localhost:4000";
@@ -24508,7 +24508,9 @@
   }
   var DEFAULT_PACKAGE_DURATIONS = {
     "self-photo": 10,
-    "ai-self-photo": 12
+    "theme-self-photo": 10,
+    "ai-self-photo": 12,
+    "pas-photo": 8
   };
   var DEFAULT_KIOSK_CONFIG = {
     sessionDurationMinutes: 10,
@@ -24538,7 +24540,9 @@
     }
     return {
       "self-photo": Number(fromApi["self-photo"]) || DEFAULT_PACKAGE_DURATIONS["self-photo"],
-      "ai-self-photo": Number(fromApi["ai-self-photo"]) || DEFAULT_PACKAGE_DURATIONS["ai-self-photo"]
+      "theme-self-photo": Number(fromApi["theme-self-photo"]) || DEFAULT_PACKAGE_DURATIONS["theme-self-photo"],
+      "ai-self-photo": Number(fromApi["ai-self-photo"]) || DEFAULT_PACKAGE_DURATIONS["ai-self-photo"],
+      "pas-photo": Number(fromApi["pas-photo"]) || DEFAULT_PACKAGE_DURATIONS["pas-photo"]
     };
   }
   async function fetchKioskConfig() {
@@ -24563,6 +24567,9 @@
     if (image?.processingStatus === "failed") {
       return "Proses foto gagal.";
     }
+    if (image?.processingPhase === "remove-bg" || image?.processingPhase === "apply-passport-bg") {
+      return "Menyiapkan pas foto\u2026 harap tunggu";
+    }
     return "Memproses foto\u2026 harap tunggu";
   }
 
@@ -24573,10 +24580,11 @@
   }
   function getPreviewUrl(image) {
     if (!image) return null;
-    return image.url ?? null;
+    return image.variants?.passport ?? image.variants?.passportSizes?.["3x4"] ?? image.url ?? null;
   }
-  function isAwaitingProcessedPreview(_image) {
-    return false;
+  function isAwaitingProcessedPreview(image) {
+    const status = image?.processingStatus;
+    return status === "pending" || status === "processing";
   }
   async function fetchLatestImage(userSlug) {
     const res = await fetch(`${API_BASE}/api/images/${encodeURIComponent(userSlug)}`);
@@ -24681,6 +24689,9 @@
     if (fields.aiGenerateLimit !== void 0 && typeof setters.setAiGenerateLimit === "function") {
       setters.setAiGenerateLimit(Number(fields.aiGenerateLimit) || 0);
     }
+    if (fields.passportBackgroundColor !== void 0 && typeof setters.setPassportBackgroundColor === "function") {
+      setters.setPassportBackgroundColor(fields.passportBackgroundColor || null);
+    }
   }
 
   // src/renderer/hooks/useKioskPreview.js
@@ -24739,7 +24750,7 @@
         if (!userSlug || payload.user !== userSlug) return;
         cancelPoll();
         if (payload.status === "ready") {
-          const previewUrl = payload.originalUrl ?? payload.subjectUrl ?? null;
+          const previewUrl = payload.passportUrl ?? payload.originalUrl ?? payload.subjectUrl ?? null;
           onPreviewUpdate({
             previewUrl,
             isProcessing: false,
@@ -24786,7 +24797,7 @@
       if (!c) return null;
       if (!master) {
         master = c.createGain();
-        master.gain.value = 1;
+        master.gain.value = 0.72;
         master.connect(c.destination);
       }
       return master;
@@ -24850,85 +24861,87 @@
     }
     function beep(remainingSeconds = 3) {
       const remaining = Number(remainingSeconds || 0);
-      const freq = remaining <= 1 ? 1318 : remaining <= 2 ? 1046 : 880;
+      const freq = remaining <= 1 ? 988 : remaining <= 2 ? 784 : 659;
       playTone({
         frequency: freq,
-        duration: 0.22,
+        duration: 0.12,
         type: "sine",
-        peak: 0.9,
-        attack: 3e-3
+        peak: 0.38,
+        attack: 6e-3
       });
       playTone({
         frequency: freq * 2,
-        duration: 0.14,
-        type: "sine",
-        peak: 0.28,
-        startAt: 0.012,
-        attack: 4e-3
-      });
-      if (remaining <= 1) {
-        playTone({
-          frequency: 1568,
-          duration: 0.26,
-          type: "sine",
-          peak: 0.95,
-          startAt: 0.14,
-          attack: 3e-3
-        });
-      }
-    }
-    function shutter() {
-      playTone({ frequency: 140, duration: 0.05, type: "square", peak: 0.7 });
-      playNoiseBurst({
-        duration: 0.07,
-        peak: 0.95,
-        startAt: 0.012,
-        filterFreq: 3200
-      });
-      playTone({
-        frequency: 880,
-        duration: 0.09,
-        type: "triangle",
-        peak: 0.55,
-        startAt: 0.025
-      });
-      playNoiseBurst({
-        duration: 0.12,
-        peak: 0.45,
-        startAt: 0.05,
-        filterFreq: 700,
-        filterType: "lowpass"
-      });
-      playTone({
-        frequency: 220,
         duration: 0.08,
         type: "sine",
-        peak: 0.4,
-        startAt: 0.06
+        peak: 0.1,
+        startAt: 0.01,
+        attack: 8e-3
+      });
+    }
+    function shutter() {
+      playTone({
+        frequency: 196,
+        duration: 0.045,
+        type: "sine",
+        peak: 0.28,
+        attack: 2e-3
+      });
+      playNoiseBurst({
+        duration: 0.04,
+        peak: 0.22,
+        startAt: 8e-3,
+        filterFreq: 1800
+      });
+      playTone({
+        frequency: 523,
+        duration: 0.07,
+        type: "triangle",
+        peak: 0.16,
+        startAt: 0.018,
+        attack: 4e-3
       });
     }
     function captureSuccess() {
-      playTone({ frequency: 523.25, duration: 0.14, type: "sine", peak: 0.55 });
+      playTone({ frequency: 523.25, duration: 0.09, type: "sine", peak: 0.22, attack: 8e-3 });
       playTone({
         frequency: 659.25,
-        duration: 0.2,
+        duration: 0.14,
         type: "sine",
-        peak: 0.6,
-        startAt: 0.08
+        peak: 0.2,
+        startAt: 0.07,
+        attack: 0.01
+      });
+    }
+    function sessionEnd() {
+      playTone({
+        frequency: 392,
+        duration: 0.12,
+        type: "sine",
+        peak: 0.24,
+        attack: 0.01
       });
       playTone({
-        frequency: 783.99,
-        duration: 0.28,
+        frequency: 523.25,
+        duration: 0.22,
         type: "sine",
-        peak: 0.5,
-        startAt: 0.16
+        peak: 0.26,
+        startAt: 0.11,
+        attack: 0.012
+      });
+      playTone({
+        frequency: 659.25,
+        duration: 0.18,
+        type: "sine",
+        peak: 0.14,
+        startAt: 0.28,
+        attack: 0.02
       });
     }
     function unlock() {
       getCtx();
       getMaster();
     }
-    return { beep, shutter, captureSuccess, unlock };
+    return { beep, shutter, captureSuccess, sessionEnd, unlock };
   }
   function useKioskAudio() {
     const synthRef = (0, import_react2.useRef)(null);
@@ -24938,14 +24951,11 @@
     const sounds = (0, import_react2.useMemo)(() => {
       const assetUrl = (relativePath) => new URL(relativePath, document.baseURI).toString();
       const map = {
-        timeWarning: new Audio(assetUrl("./audio/time-warning-id.mp3")),
-        // Original Indonesian voice — correct session-end UX
-        sessionEnd: new Audio(assetUrl("./audio/session-end-id.mp3"))
+        timeWarning: new Audio(assetUrl("./audio/time-warning-id.mp3"))
       };
       Object.values(map).forEach((audio) => {
-        audio.volume = 1;
+        audio.volume = 0.85;
       });
-      map.sessionEnd.volume = 0.85;
       return map;
     }, []);
     const play = (0, import_react2.useCallback)(
@@ -24963,10 +24973,14 @@
           synth?.captureSuccess();
           return;
         }
+        if (key === "sessionEnd") {
+          synth?.sessionEnd();
+          return;
+        }
         const audio = sounds[key];
         if (!audio) return;
         try {
-          if (key !== "sessionEnd") audio.volume = 1;
+          if (key !== "sessionEnd") audio.volume = 0.85;
           audio.currentTime = 0;
           audio.play().catch(() => {
           });
@@ -25191,6 +25205,7 @@
   var INTRO_AUTO_DISMISS_MS = 4500;
   function AiSessionIntro({
     open,
+    mode = "ai",
     themeLabel,
     themePreviewUrl,
     themeType,
@@ -25203,21 +25218,21 @@
       return () => window.clearTimeout(timer);
     }, [open, onDismiss]);
     if (!open) return null;
-    const typeLabel = themeType === "transform" ? "Transform AI" : "Latar Premium";
-    const actionCopy = themeType === "transform" ? "Ambil foto dulu \u2014 transformasi di meja operator" : "Ambil foto dulu \u2014 hasil AI di meja operator";
+    const isThemeMode = mode === "theme";
+    const styleLabel = isThemeMode ? "Orang identik \xB7 latar tema" : themeType === "scene" ? "Latar saja" : "Latar + kostum";
     return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
       "div",
       {
         className: "ai-intro-overlay",
         role: "dialog",
         "aria-modal": "true",
-        "aria-label": "Pengenalan AI Self Photo",
+        "aria-label": isThemeMode ? "Pengenalan Foto Tema" : "Pengenalan AI Self Photo",
         onClick: onDismiss,
         onKeyDown: (event) => {
           if (event.key === "Escape") onDismiss();
         },
         children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "ai-intro-card", onClick: (event) => event.stopPropagation(), children: [
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "ai-intro-badge", children: "AI Self Photo" }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { className: "ai-intro-badge", children: isThemeMode ? "Foto Tema" : "AI Self Photo" }),
           themePreviewUrl ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
             "img",
             {
@@ -25230,14 +25245,396 @@
             "Tema: ",
             /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: themeLabel ?? "\u2014" })
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "ai-intro-type", children: typeLabel }),
-          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "ai-intro-copy", children: actionCopy }),
-          aiGenerateLimit > 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "ai-intro-quota", children: [
-            "Kuota generate: ",
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "ai-intro-type", children: styleLabel }),
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: "ai-intro-copy", children: isThemeMode ? "Ambil foto. Wajah dan pose tetap sama \u2014 latar tema disusun otomatis, siap cetak." : "Ambil foto dulu. Orang, wajah, dan pose tetap sama \u2014 edit di meja operator." }),
+          !isThemeMode && aiGenerateLimit > 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", { className: "ai-intro-quota", children: [
+            "Kuota edit: ",
             aiGenerateLimit,
             "\xD7 foto"
           ] }) : null,
           /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "ai-intro-skip", onClick: onDismiss, children: "Mulai sesi \u2192" })
+        ] })
+      }
+    );
+  }
+
+  // src/renderer/components/PassportGuideOverlay.jsx
+  var import_react8 = __toESM(require_react());
+
+  // src/renderer/lib/passportPose.js
+  var PASSPORT_TARGET = {
+    headCx: 0.5,
+    headCy: 0.405,
+    headW: 0.58,
+    headH: 0.64,
+    eyeY: 0.355,
+    chinY: 0.725
+  };
+  function faceBoxToHead(face) {
+    const chin = face.cy + face.h * 0.5;
+    const headH = face.h * 1.42;
+    const headW = face.w * 1.18;
+    const crown = chin - headH;
+    return {
+      cx: face.cx,
+      cy: (crown + chin) / 2,
+      w: headW,
+      h: headH,
+      eyeY: face.cy - face.h * 0.06,
+      chinY: chin
+    };
+  }
+  function lerpPose(prev, next, t = 0.38) {
+    if (!next) return prev;
+    if (!prev) return next;
+    return {
+      cx: prev.cx + (next.cx - prev.cx) * t,
+      cy: prev.cy + (next.cy - prev.cy) * t,
+      w: prev.w + (next.w - prev.w) * t,
+      h: prev.h + (next.h - prev.h) * t,
+      eyeY: prev.eyeY + (next.eyeY - prev.eyeY) * t,
+      chinY: prev.chinY + (next.chinY - prev.chinY) * t
+    };
+  }
+  function scorePassportPose(head, wasOk = false) {
+    if (!head) {
+      return {
+        ok: false,
+        match: 0,
+        hint: "Hadap kamera",
+        code: "no-face",
+        dx: 0,
+        dy: 0,
+        size: 0
+      };
+    }
+    const dx = head.cx - PASSPORT_TARGET.headCx;
+    const dyEyes = head.eyeY - PASSPORT_TARGET.eyeY;
+    const sizeRatio = head.h / PASSPORT_TARGET.headH;
+    const sizeErr = sizeRatio - 1;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dyEyes);
+    const absS = Math.abs(sizeErr);
+    const loose = wasOk;
+    const xLim = loose ? 0.12 : 0.09;
+    const yLim = loose ? 0.08 : 0.055;
+    const sLo = loose ? 0.74 : 0.8;
+    const sHi = loose ? 1.34 : 1.2;
+    let match = 100;
+    match -= Math.min(36, absX * 240);
+    match -= Math.min(32, absY * 280);
+    match -= Math.min(28, absS * 80);
+    match = Math.max(0, Math.round(match));
+    const issues = [];
+    if (absX > xLim) {
+      issues.push({
+        code: dx > 0 ? "right" : "left",
+        hint: dx > 0 ? "Geser sedikit ke kiri" : "Geser sedikit ke kanan",
+        weight: absX
+      });
+    }
+    if (sizeRatio < sLo) {
+      issues.push({
+        code: "far",
+        hint: "Maju sedikit",
+        weight: sLo - sizeRatio
+      });
+    } else if (sizeRatio > sHi) {
+      issues.push({
+        code: "close",
+        hint: "Mundur sedikit",
+        weight: sizeRatio - sHi
+      });
+    }
+    if (absY > yLim) {
+      issues.push({
+        code: dyEyes > 0 ? "low" : "high",
+        hint: dyEyes > 0 ? "Naikkan sedikit" : "Turunkan sedikit",
+        weight: absY
+      });
+    }
+    issues.sort((a, b) => b.weight - a.weight);
+    const worst = issues[0];
+    if (!worst) {
+      return {
+        ok: true,
+        match: Math.max(match, 86),
+        hint: "Pas \u2014 siap foto",
+        code: "ok",
+        dx,
+        dy: dyEyes,
+        size: sizeRatio
+      };
+    }
+    return {
+      ok: false,
+      match,
+      hint: worst.hint,
+      code: worst.code,
+      dx,
+      dy: dyEyes,
+      size: sizeRatio
+    };
+  }
+  function parseObjectPosition(value2) {
+    const parts2 = String(value2 || "50% 50%").trim().split(/\s+/);
+    const toUnit = (token, fallback) => {
+      if (!token) return fallback;
+      if (token === "center") return 0.5;
+      if (token === "left" || token === "top") return 0;
+      if (token === "right" || token === "bottom") return 1;
+      const n = parseFloat(token);
+      return Number.isFinite(n) ? n / 100 : fallback;
+    };
+    return { x: toUnit(parts2[0], 0.5), y: toUnit(parts2[1], toUnit(parts2[0], 0.5)) };
+  }
+  function mapVideoPointToOverlay(video, overlayEl, x, y) {
+    const vRect = video.getBoundingClientRect();
+    const oRect = overlayEl.getBoundingClientRect();
+    const vw = video.videoWidth || 1;
+    const vh = video.videoHeight || 1;
+    const scale = Math.max(vRect.width / vw, vRect.height / vh);
+    const extraX = vw * scale - vRect.width;
+    const extraY = vh * scale - vRect.height;
+    const pos = parseObjectPosition(
+      typeof window !== "undefined" ? window.getComputedStyle(video).objectPosition : "50% 50%"
+    );
+    const originX = vRect.left - extraX * pos.x;
+    const originY = vRect.top - extraY * pos.y;
+    return {
+      x: (originX + x * scale - oRect.left) / Math.max(1, oRect.width),
+      y: (originY + y * scale - oRect.top) / Math.max(1, oRect.height)
+    };
+  }
+
+  // src/renderer/hooks/usePassportPose.js
+  var import_react7 = __toESM(require_react());
+  var IDLE = {
+    ok: false,
+    match: 0,
+    hint: "Cocokkan kepala ke oval",
+    code: "idle",
+    head: null,
+    dx: 0,
+    dy: 0,
+    size: 0
+  };
+  function usePassportPose(videoRef, overlayRef, enabled) {
+    const [pose, setPose] = (0, import_react7.useState)(IDLE);
+    const smoothRef = (0, import_react7.useRef)(null);
+    const okRef = (0, import_react7.useRef)(false);
+    (0, import_react7.useEffect)(() => {
+      if (!enabled) {
+        smoothRef.current = null;
+        okRef.current = false;
+        setPose(IDLE);
+        return void 0;
+      }
+      let cancelled = false;
+      let timer = 0;
+      let detector = null;
+      if (typeof window !== "undefined" && "FaceDetector" in window) {
+        try {
+          detector = new window.FaceDetector({
+            fastMode: false,
+            maxDetectedFaces: 1
+          });
+        } catch {
+          detector = null;
+        }
+      }
+      async function tick() {
+        const video = videoRef?.current;
+        const overlay = overlayRef?.current;
+        if (!cancelled && detector && video && overlay && video.readyState >= 2 && video.videoWidth > 0) {
+          try {
+            const faces = await detector.detect(video);
+            const box = faces[0]?.boundingBox;
+            if (!box) {
+              smoothRef.current = null;
+              okRef.current = false;
+              setPose(scorePassportPose(null));
+            } else {
+              const tl = mapVideoPointToOverlay(video, overlay, box.x, box.y);
+              const br = mapVideoPointToOverlay(
+                video,
+                overlay,
+                box.x + box.width,
+                box.y + box.height
+              );
+              const raw = faceBoxToHead({
+                cx: (tl.x + br.x) / 2,
+                cy: (tl.y + br.y) / 2,
+                w: Math.abs(br.x - tl.x),
+                h: Math.abs(br.y - tl.y)
+              });
+              const head = lerpPose(smoothRef.current, raw, 0.4);
+              smoothRef.current = head;
+              const scored = scorePassportPose(head, okRef.current);
+              okRef.current = scored.ok;
+              setPose({ ...scored, head });
+            }
+          } catch {
+          }
+        }
+        if (!cancelled) timer = window.setTimeout(tick, 90);
+      }
+      tick();
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+      };
+    }, [enabled, overlayRef, videoRef]);
+    return pose;
+  }
+
+  // src/renderer/components/PassportGuideOverlay.jsx
+  var import_jsx_runtime2 = __toESM(require_jsx_runtime());
+  function poseStroke(aligned, match) {
+    if (aligned) return "rgba(52, 211, 153, 0.95)";
+    if ((match || 0) >= 58) return "rgba(251, 191, 36, 0.9)";
+    return "rgba(248, 113, 113, 0.88)";
+  }
+  function PassportFigure({ liveHead, aligned, match }) {
+    const tx = PASSPORT_TARGET.headCx * 300;
+    const ty = PASSPORT_TARGET.headCy * 400;
+    const trx = PASSPORT_TARGET.headW / 2 * 300;
+    const tryR = PASSPORT_TARGET.headH / 2 * 400;
+    const eyeY = PASSPORT_TARGET.eyeY * 400;
+    const neckTop = ty + tryR - 4;
+    const stroke = poseStroke(aligned, match);
+    const shoulder = `M ${tx - 26} ${neckTop}
+    C ${tx - 24} ${neckTop + 26}, ${tx - 56} ${neckTop + 50}, ${tx - 118} ${neckTop + 66}
+    C ${tx - 150} ${neckTop + 82}, 12 358, 8 400
+    L 292 400
+    C 288 358, ${tx + 150} ${neckTop + 82}, ${tx + 118} ${neckTop + 66}
+    C ${tx + 56} ${neckTop + 50}, ${tx + 24} ${neckTop + 26}, ${tx + 26} ${neckTop} Z`;
+    return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("svg", { viewBox: "0 0 300 400", className: "pas-photo-guide", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("defs", { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("mask", { id: "pasBustHole", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("rect", { width: "300", height: "400", fill: "white" }),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("ellipse", { cx: tx, cy: ty, rx: trx, ry: tryR, fill: "black" }),
+        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("path", { d: shoulder, fill: "black" })
+      ] }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+        "rect",
+        {
+          width: "300",
+          height: "400",
+          fill: "rgba(0,0,0,0.42)",
+          mask: "url(#pasBustHole)"
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+        "ellipse",
+        {
+          cx: tx,
+          cy: ty,
+          rx: trx,
+          ry: tryR,
+          fill: "none",
+          stroke,
+          strokeWidth: "1.35"
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("path", { d: shoulder, fill: "none", stroke, strokeWidth: "1.2" }),
+      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+        "line",
+        {
+          x1: tx - trx + 14,
+          y1: eyeY,
+          x2: tx + trx - 14,
+          y2: eyeY,
+          stroke: "rgba(250, 204, 21, 0.75)",
+          strokeWidth: "1.1",
+          strokeDasharray: "4 5"
+        }
+      ),
+      liveHead ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+        "ellipse",
+        {
+          cx: liveHead.cx * 300,
+          cy: liveHead.cy * 400,
+          rx: liveHead.w / 2 * 300,
+          ry: liveHead.h / 2 * 400,
+          fill: "none",
+          stroke: "rgba(255,255,255,0.55)",
+          strokeWidth: "1",
+          strokeDasharray: "4 5"
+        }
+      ) : null
+    ] });
+  }
+  function PassportGuideOverlay({ color, visible = true, videoRef = null }) {
+    const overlayRef = (0, import_react8.useRef)(null);
+    const pose = usePassportPose(videoRef, overlayRef, visible && Boolean(videoRef));
+    if (!visible) return null;
+    const aligned = pose.ok;
+    const near = !aligned && (pose.match || 0) >= 58;
+    const frame = aligned ? "rgba(52, 211, 153, 0.85)" : color || "rgba(255,255,255,0.35)";
+    return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "pas-photo-frame", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+      "div",
+      {
+        ref: overlayRef,
+        className: `pas-photo-inner${aligned ? " is-ok" : near ? " is-near" : " is-wait"}`,
+        style: { borderColor: frame },
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(PassportFigure, { liveHead: pose.head, aligned, match: pose.match }),
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "pas-photo-meter", "aria-hidden": "true", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+            "div",
+            {
+              className: `pas-photo-meter-fill${aligned ? " is-ok" : near ? " is-near" : ""}`,
+              style: { width: `${pose.match || 0}%` }
+            }
+          ) }),
+          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+            "div",
+            {
+              className: `pas-photo-status${aligned ? " is-ok" : near ? " is-near" : " is-wait"}`,
+              children: pose.hint
+            }
+          )
+        ]
+      }
+    ) });
+  }
+
+  // src/renderer/components/PassportSessionIntro.jsx
+  var import_react9 = __toESM(require_react());
+  var import_jsx_runtime3 = __toESM(require_jsx_runtime());
+  var INTRO_AUTO_DISMISS_MS2 = 4500;
+  function PassportSessionIntro({ open, backgroundColor, onDismiss }) {
+    (0, import_react9.useEffect)(() => {
+      if (!open) return;
+      const timer = window.setTimeout(onDismiss, INTRO_AUTO_DISMISS_MS2);
+      return () => window.clearTimeout(timer);
+    }, [open, onDismiss]);
+    if (!open) return null;
+    return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      "div",
+      {
+        className: "ai-intro-overlay",
+        role: "dialog",
+        "aria-modal": "true",
+        "aria-label": "Pengenalan Pas Photo",
+        onClick: onDismiss,
+        onKeyDown: (event) => {
+          if (event.key === "Escape") onDismiss();
+        },
+        children: /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { className: "ai-intro-card", onClick: (event) => event.stopPropagation(), children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { className: "ai-intro-badge", children: "Pas Photo" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+            "div",
+            {
+              className: "ai-intro-preview",
+              style: { backgroundColor: backgroundColor || "#438CCB" }
+            }
+          ),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("h2", { className: "ai-intro-title", children: [
+            "Pose di bingkai ",
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { children: "3\xD74" })
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("p", { className: "ai-intro-copy", children: "Cocokkan wajah ke oval orang (bukan kotak). Mata di garis kuning. Hijau = pas, merah = geser. Soft file memakai warna ini untuk 2\xD73, 3\xD74, dan 4\xD76." }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", className: "ai-intro-skip", onClick: onDismiss, children: "Mulai sesi \u2192" })
         ] })
       }
     );
@@ -28638,7 +29035,7 @@
   });
 
   // src/renderer/App.jsx
-  var import_jsx_runtime2 = __toESM(require_jsx_runtime());
+  var import_jsx_runtime4 = __toESM(require_jsx_runtime());
   var import_meta2 = {};
   var Screen = {
     IDLE: "idle",
@@ -28654,63 +29051,72 @@
   function App() {
     useViewportLayout();
     const { play, unlockAudio } = useKioskAudio();
-    const [kioskConfig, setKioskConfig] = (0, import_react7.useState)({
+    const [kioskConfig, setKioskConfig] = (0, import_react10.useState)({
       sessionDurationMinutes: 10,
       captureCountdownSeconds: 3
     });
-    const [screen, setScreen] = (0, import_react7.useState)(Screen.IDLE);
-    const [sessionUser, setSessionUser] = (0, import_react7.useState)(null);
-    const [captureCountdown, setCaptureCountdown] = (0, import_react7.useState)(3);
-    const [isCapturing, setIsCapturing] = (0, import_react7.useState)(false);
-    const [isFlashing, setIsFlashing] = (0, import_react7.useState)(false);
-    const [isWaitingCapture, setIsWaitingCapture] = (0, import_react7.useState)(false);
-    const [isReviewing, setIsReviewing] = (0, import_react7.useState)(false);
-    const [shotStamp, setShotStamp] = (0, import_react7.useState)(0);
-    const [captureCount, setCaptureCount] = (0, import_react7.useState)(0);
-    const [lastImageUrl, setLastImageUrl] = (0, import_react7.useState)(null);
-    const [lastImageProcessing, setLastImageProcessing] = (0, import_react7.useState)(false);
-    const [processingError, setProcessingError] = (0, import_react7.useState)(null);
-    const [latestPreviewImage, setLatestPreviewImage] = (0, import_react7.useState)(null);
-    const [packageType, setPackageType] = (0, import_react7.useState)("self-photo");
-    const [aiThemeLabel, setAiThemeLabel] = (0, import_react7.useState)(null);
-    const [aiThemePreviewUrl, setAiThemePreviewUrl] = (0, import_react7.useState)(null);
-    const [aiThemePreviewColor, setAiThemePreviewColor] = (0, import_react7.useState)(null);
-    const [aiThemeType, setAiThemeType] = (0, import_react7.useState)(null);
-    const [aiGenerateLimit, setAiGenerateLimit] = (0, import_react7.useState)(0);
-    const [showAiIntro, setShowAiIntro] = (0, import_react7.useState)(false);
-    const [endedPackageType, setEndedPackageType] = (0, import_react7.useState)("self-photo");
-    const [endedAiThemeLabel, setEndedAiThemeLabel] = (0, import_react7.useState)(null);
-    const [endedAiGenerateLimit, setEndedAiGenerateLimit] = (0, import_react7.useState)(0);
-    const sessionUserRef = (0, import_react7.useRef)(sessionUser);
-    const screenRef = (0, import_react7.useRef)(screen);
-    const countdownTimerRef = (0, import_react7.useRef)(null);
-    const reviewTimerRef = (0, import_react7.useRef)(null);
-    const sessionEndingRef = (0, import_react7.useRef)(false);
-    const sessionEndAudioPlayedRef = (0, import_react7.useRef)(false);
-    const startCameraPreviewRef = (0, import_react7.useRef)(() => {
+    const [screen, setScreen] = (0, import_react10.useState)(Screen.IDLE);
+    const [sessionUser, setSessionUser] = (0, import_react10.useState)(null);
+    const [captureCountdown, setCaptureCountdown] = (0, import_react10.useState)(3);
+    const [isCapturing, setIsCapturing] = (0, import_react10.useState)(false);
+    const [isFlashing, setIsFlashing] = (0, import_react10.useState)(false);
+    const [isWaitingCapture, setIsWaitingCapture] = (0, import_react10.useState)(false);
+    const [isReviewing, setIsReviewing] = (0, import_react10.useState)(false);
+    const [shotStamp, setShotStamp] = (0, import_react10.useState)(0);
+    const [captureCount, setCaptureCount] = (0, import_react10.useState)(0);
+    const [lastImageUrl, setLastImageUrl] = (0, import_react10.useState)(null);
+    const [lastImageProcessing, setLastImageProcessing] = (0, import_react10.useState)(false);
+    const [processingError, setProcessingError] = (0, import_react10.useState)(null);
+    const [latestPreviewImage, setLatestPreviewImage] = (0, import_react10.useState)(null);
+    const [packageType, setPackageType] = (0, import_react10.useState)("self-photo");
+    const [aiThemeLabel, setAiThemeLabel] = (0, import_react10.useState)(null);
+    const [aiThemePreviewUrl, setAiThemePreviewUrl] = (0, import_react10.useState)(null);
+    const [aiThemePreviewColor, setAiThemePreviewColor] = (0, import_react10.useState)(null);
+    const [aiThemeType, setAiThemeType] = (0, import_react10.useState)(null);
+    const [aiGenerateLimit, setAiGenerateLimit] = (0, import_react10.useState)(0);
+    const [showAiIntro, setShowAiIntro] = (0, import_react10.useState)(false);
+    const [showPassportIntro, setShowPassportIntro] = (0, import_react10.useState)(false);
+    const [passportBackgroundColor, setPassportBackgroundColor] = (0, import_react10.useState)(null);
+    const [endedPackageType, setEndedPackageType] = (0, import_react10.useState)("self-photo");
+    const [endedAiThemeLabel, setEndedAiThemeLabel] = (0, import_react10.useState)(null);
+    const [endedAiGenerateLimit, setEndedAiGenerateLimit] = (0, import_react10.useState)(0);
+    const sessionUserRef = (0, import_react10.useRef)(sessionUser);
+    const screenRef = (0, import_react10.useRef)(screen);
+    const countdownTimerRef = (0, import_react10.useRef)(null);
+    const reviewTimerRef = (0, import_react10.useRef)(null);
+    const sessionEndingRef = (0, import_react10.useRef)(false);
+    const sessionEndAudioPlayedRef = (0, import_react10.useRef)(false);
+    const startCameraPreviewRef = (0, import_react10.useRef)(() => {
     });
     sessionUserRef.current = sessionUser;
     screenRef.current = screen;
-    const kioskSetters = (0, import_react7.useMemo)(
+    const kioskSetters = (0, import_react10.useMemo)(
       () => ({
         setPackageType,
         setAiThemeLabel,
         setAiThemePreviewUrl,
         setAiThemePreviewColor,
         setAiThemeType,
-        setAiGenerateLimit
+        setAiGenerateLimit,
+        setPassportBackgroundColor
       }),
       []
     );
-    const dismissAiIntro = (0, import_react7.useCallback)(() => {
+    const dismissAiIntro = (0, import_react10.useCallback)(() => {
       setShowAiIntro(false);
     }, []);
-    const maybeShowAiIntro = (0, import_react7.useCallback)((fields) => {
-      if (fields?.packageType === "ai-self-photo" && (fields?.aiThemeLabel || fields?.aiThemePreviewUrl)) {
+    const dismissPassportIntro = (0, import_react10.useCallback)(() => {
+      setShowPassportIntro(false);
+    }, []);
+    const maybeShowSessionIntro = (0, import_react10.useCallback)((fields) => {
+      if ((fields?.packageType === "ai-self-photo" || fields?.packageType === "theme-self-photo") && (fields?.aiThemeLabel || fields?.aiThemePreviewUrl)) {
         setShowAiIntro(true);
       }
+      if (fields?.packageType === "pas-photo") {
+        setShowPassportIntro(true);
+      }
     }, []);
-    const handlePreviewUpdate = (0, import_react7.useCallback)(({ previewUrl, isProcessing, failed, error, image }) => {
+    const handlePreviewUpdate = (0, import_react10.useCallback)(({ previewUrl, isProcessing, failed, error, image }) => {
       if (previewUrl) setLastImageUrl(previewUrl);
       if (image) setLatestPreviewImage(image);
       if (typeof isProcessing === "boolean") setLastImageProcessing(isProcessing);
@@ -28720,14 +29126,14 @@
         setProcessingError(null);
       }
     }, []);
-    const { refreshPreview, handlePhotoProcessed, cancelPoll } = useKioskPreview({
+    const { refreshPreview, handlePhotoProcessed, cancelPoll, waitForImageProcessing } = useKioskPreview({
       userSlug: sessionUser,
       enabled: screen === Screen.TRIAL || screen === Screen.MAIN,
       onPreviewUpdate: handlePreviewUpdate
     });
     const { videoRef, start: startCameraPreview, stop: stopCameraPreview } = useCameraPreview();
     startCameraPreviewRef.current = startCameraPreview;
-    const clearCaptureTimers = (0, import_react7.useCallback)(() => {
+    const clearCaptureTimers = (0, import_react10.useCallback)(() => {
       if (countdownTimerRef.current) {
         window.clearInterval(countdownTimerRef.current);
         countdownTimerRef.current = null;
@@ -28737,12 +29143,12 @@
         reviewTimerRef.current = null;
       }
     }, []);
-    const endReviewAndResume = (0, import_react7.useCallback)(() => {
+    const endReviewAndResume = (0, import_react10.useCallback)(() => {
       setIsReviewing(false);
       startCameraPreviewRef.current();
       reviewTimerRef.current = null;
     }, []);
-    const scheduleReviewEnd = (0, import_react7.useCallback)(
+    const scheduleReviewEnd = (0, import_react10.useCallback)(
       (ms) => {
         if (reviewTimerRef.current) {
           window.clearTimeout(reviewTimerRef.current);
@@ -28753,7 +29159,7 @@
       },
       [endReviewAndResume]
     );
-    const celebrateNewCapture = (0, import_react7.useCallback)(
+    const celebrateNewCapture = (0, import_react10.useCallback)(
       async (payload) => {
         const user = sessionUserRef.current;
         const scr = screenRef.current;
@@ -28786,26 +29192,31 @@
         await flashHold;
         setIsFlashing(false);
         setIsWaitingCapture(true);
-        await previewPromise;
-        setLastImageProcessing(false);
+        const result = await previewPromise;
         setIsWaitingCapture(false);
         setIsReviewing(true);
         play("captureSuccess");
+        const processing = Boolean(result?.isProcessing);
+        setLastImageProcessing(processing);
+        if (processing && payload?.imageId) {
+          void waitForImageProcessing(payload.imageId);
+        }
         scheduleReviewEnd(REVIEW_DISPLAY_MS);
       },
       [
         clearCaptureTimers,
         play,
         refreshPreview,
+        waitForImageProcessing,
         scheduleReviewEnd,
         unlockAudio
       ]
     );
-    const celebrateNewCaptureRef = (0, import_react7.useRef)(celebrateNewCapture);
+    const celebrateNewCaptureRef = (0, import_react10.useRef)(celebrateNewCapture);
     celebrateNewCaptureRef.current = celebrateNewCapture;
-    const clearSessionTimerRef = (0, import_react7.useRef)(() => {
+    const clearSessionTimerRef = (0, import_react10.useRef)(() => {
     });
-    const endSession = (0, import_react7.useCallback)(() => {
+    const endSession = (0, import_react10.useCallback)(() => {
       if (sessionEndingRef.current && screenRef.current === Screen.END) {
         return;
       }
@@ -28829,7 +29240,7 @@
       setScreen(Screen.END);
       setSessionUser(null);
     }, [cancelPoll, clearCaptureTimers, play, stopCameraPreview, packageType, aiThemeLabel, aiGenerateLimit]);
-    const endSessionRef = (0, import_react7.useRef)(endSession);
+    const endSessionRef = (0, import_react10.useRef)(endSession);
     endSessionRef.current = endSession;
     const sessionTimer = useSessionTimer({
       durationMs: kioskConfig.sessionDurationMinutes * 60 * 1e3,
@@ -28840,22 +29251,22 @@
     });
     clearSessionTimerRef.current = sessionTimer.clear;
     const remainingMs = sessionTimer.remainingMs;
-    const remainingLabel = (0, import_react7.useMemo)(() => {
+    const remainingLabel = (0, import_react10.useMemo)(() => {
       if (!remainingMs) return "10:00";
       const totalSeconds = Math.max(0, Math.floor(remainingMs / 1e3));
       const m = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
       const s = String(totalSeconds % 60).padStart(2, "0");
       return `${m}:${s}`;
     }, [remainingMs]);
-    const processingMessage = (0, import_react7.useMemo)(
+    const processingMessage = (0, import_react10.useMemo)(
       () => getKioskProcessingMessage(lastImageProcessing, latestPreviewImage),
       [lastImageProcessing, latestPreviewImage]
     );
-    (0, import_react7.useEffect)(() => {
+    (0, import_react10.useEffect)(() => {
       fetchKioskConfig().then(setKioskConfig).catch(() => {
       });
     }, []);
-    (0, import_react7.useEffect)(() => {
+    (0, import_react10.useEffect)(() => {
       const socket = lookup2(getApiBase(), {
         transports: ["websocket"]
       });
@@ -28875,7 +29286,7 @@
         setIsWaitingCapture(false);
         setIsReviewing(false);
         syncKioskFields(fields, kioskSetters);
-        maybeShowAiIntro(fields);
+        maybeShowSessionIntro(fields);
         sessionTimer.startWithEndsAt(endsAt);
         startCameraPreview();
       });
@@ -28902,7 +29313,7 @@
         setIsWaitingCapture(false);
         setIsReviewing(false);
         syncKioskFields(fields, kioskSetters);
-        maybeShowAiIntro(fields);
+        maybeShowSessionIntro(fields);
         sessionTimer.startWithEndsAt(endsAt);
         startCameraPreview();
       });
@@ -28974,7 +29385,7 @@
         socket.disconnect();
       };
     }, []);
-    (0, import_react7.useEffect)(() => {
+    (0, import_react10.useEffect)(() => {
       if (screen !== Screen.TRIAL && screen !== Screen.MAIN) return;
       const unlock = () => unlockAudio();
       window.addEventListener("pointerdown", unlock, { once: true });
@@ -29005,7 +29416,7 @@
         });
       }
     }
-    const runCaptureCountdown = (0, import_react7.useCallback)(
+    const runCaptureCountdown = (0, import_react10.useCallback)(
       (totalSeconds) => {
         if (isCapturing || isReviewing || !sessionUser) return;
         unlockAudio();
@@ -29047,41 +29458,52 @@
         unlockAudio
       ]
     );
-    const runCaptureCountdownRef = (0, import_react7.useRef)(runCaptureCountdown);
+    const runCaptureCountdownRef = (0, import_react10.useRef)(runCaptureCountdown);
     runCaptureCountdownRef.current = runCaptureCountdown;
     function startCaptureCountdown() {
       runCaptureCountdown(kioskConfig.captureCountdownSeconds || 3);
     }
     if (screen === Screen.IDLE) {
-      return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "screen screen--idle", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "idle-content", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "idle-logo-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("img", { src: "./logo-light.png", className: "idle-logo", alt: "Sudut Pandang" }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "idle-badge", children: "Self Photo Studio" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("h1", { className: "idle-title", children: "Siap untuk sesi foto" }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("p", { className: "idle-subtitle", children: [
+      return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "screen screen--idle", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "idle-content", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "idle-logo-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("img", { src: "./logo-light.png", className: "idle-logo", alt: "Sudut Pandang" }) }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "idle-badge", children: "Self Photo Studio" }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("h1", { className: "idle-title", children: "Siap untuk sesi foto" }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { className: "idle-subtitle", children: [
             "Menunggu operator memulai sesi.",
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("br", {}),
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("br", {}),
             "Registrasi & kontrol dari meja operator."
           ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "idle-pulse", "aria-hidden": "true", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "idle-pulse-dot" }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { className: "idle-pulse-label", children: "Standby" })
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "idle-pulse", "aria-hidden": "true", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "idle-pulse-dot" }),
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "idle-pulse-label", children: "Standby" })
           ] })
         ] }),
-        import_meta2.env.DEV && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "dev-badge", title: "Development mode \u2014 webcam capture", children: "Dev \xB7 Webcam" })
+        import_meta2.env.DEV && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "dev-badge", title: "Development mode \u2014 webcam capture", children: "Dev \xB7 Webcam" })
       ] });
     }
     if (screen === Screen.TRIAL || screen === Screen.MAIN) {
       const phaseLabel = screen === Screen.TRIAL ? "Trial Session:" : "Halo,";
       const isAiPackage = packageType === "ai-self-photo";
-      const reviewCaption = "Lihat hasilnya \u2014 sesi lanjut sebentar lagi";
-      const footerHint = screen === Screen.TRIAL ? "Trial \u2014 lihat ke kamera & senyum" : "Operator akan mengambil foto untuk Anda";
+      const isThemePackage = packageType === "theme-self-photo";
+      const isPasPhoto = packageType === "pas-photo";
+      const reviewCaption = isPasPhoto ? "Cek pose di oval \u2014 hasil 3\xD74 sedang disiapkan" : isThemePackage ? "Lihat hasilnya \u2014 latar tema disusun otomatis" : "Lihat hasilnya \u2014 sesi lanjut sebentar lagi";
+      const footerHint = isPasPhoto ? screen === Screen.TRIAL ? "Trial \u2014 kepala di oval, mata di garis kuning" : "Kepala di oval, mata di garis kuning, lalu tekan remote" : screen === Screen.TRIAL ? "Trial \u2014 pose ke kamera, lalu tekan remote" : "Pose ke kamera, lalu tekan remote untuk mengambil foto";
       const videoWrapperStyle = isAiPackage && aiThemePreviewColor ? { "--ai-theme-color": aiThemePreviewColor } : void 0;
-      return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "screen screen--preview", children: [
-        isAiPackage ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+      return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "screen screen--preview", children: [
+        isPasPhoto ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+          PassportSessionIntro,
+          {
+            open: showPassportIntro,
+            backgroundColor: passportBackgroundColor,
+            onDismiss: dismissPassportIntro
+          }
+        ) : null,
+        isAiPackage || isThemePackage ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
           AiSessionIntro,
           {
             open: showAiIntro,
+            mode: isThemePackage ? "theme" : "ai",
             themeLabel: aiThemeLabel,
             themePreviewUrl: aiThemePreviewUrl,
             themeType: aiThemeType,
@@ -29089,28 +29511,28 @@
             onDismiss: dismissAiIntro
           }
         ) : null,
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "kiosk-shell", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "preview-wrapper", children: [
-          !isReviewing && !isWaitingCapture && !isFlashing && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("header", { className: "preview-header", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "preview-header__primary", children: [
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "pill pill--session", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "kiosk-shell", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "preview-wrapper", children: [
+          !isReviewing && !isWaitingCapture && !isFlashing && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("header", { className: "preview-header", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "preview-header__primary", children: [
+              /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "pill pill--session", children: [
                 phaseLabel,
                 " ",
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("strong", { children: sessionUser ?? "-" })
+                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("strong", { children: sessionUser ?? "-" })
               ] }),
-              /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "pill pill--timer pill-big", "aria-live": "polite", children: remainingLabel })
+              /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "pill pill--timer pill-big", "aria-live": "polite", children: remainingLabel })
             ] }),
-            captureCount > 0 && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "preview-header__meta", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "pill pill--shots", children: [
+            captureCount > 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "preview-header__meta", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "pill pill--shots", children: [
               captureCount,
               " foto"
             ] }) })
           ] }),
-          isCapturing && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+          isCapturing && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
             "div",
             {
               className: `capture-overlay capture-overlay--countdown${captureCountdown <= 1 ? " capture-overlay--urgent" : ""}`,
               "aria-live": "polite",
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "capture-countdown-ring", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "capture-countdown-ring", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
                   "div",
                   {
                     className: `capture-overlay-number${captureCountdown <= 1 ? " capture-overlay-number--final" : ""}`,
@@ -29118,37 +29540,46 @@
                   },
                   captureCountdown
                 ) }, `ring-${captureCountdown}`),
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "capture-overlay-hint", children: captureCountdown <= 1 ? "Pose!" : "Siap\u2026" })
+                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "capture-overlay-hint", children: captureCountdown <= 1 ? "Pose!" : "Siap\u2026" })
               ]
             }
           ),
-          isFlashing && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "capture-flash", "aria-hidden": "true" }),
-          isWaitingCapture && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "capture-wait", "aria-live": "polite", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "capture-wait-text", children: "Mengambil foto\u2026" }),
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "capture-wait-sub", children: "Mohon tunggu sebentar" })
+          isFlashing && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "capture-flash", "aria-hidden": "true" }),
+          isWaitingCapture && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "capture-wait", "aria-live": "polite", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "capture-wait-text", children: "Mengambil foto\u2026" }),
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "capture-wait-sub", children: "Mohon tunggu sebentar" })
           ] }),
-          !isReviewing && !isWaitingCapture && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          !isReviewing && !isWaitingCapture && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
             "div",
             {
               className: `preview-video-wrapper${isAiPackage ? " preview-video-wrapper--ai-theme" : ""}${isCapturing ? " preview-video-wrapper--countdown" : ""}`,
               style: videoWrapperStyle,
-              children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-                "video",
-                {
-                  className: "preview-video",
-                  ref: videoRef,
-                  playsInline: true,
-                  muted: true
-                }
-              )
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+                  "video",
+                  {
+                    className: "preview-video",
+                    ref: videoRef,
+                    playsInline: true,
+                    muted: true
+                  }
+                ),
+                isPasPhoto ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+                  PassportGuideOverlay,
+                  {
+                    color: passportBackgroundColor,
+                    videoRef
+                  }
+                ) : null
+              ]
             }
           ),
-          isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+          isReviewing && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
             "div",
             {
               className: "capture-overlay capture-overlay--review",
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
                   "img",
                   {
                     src: lastImageUrl,
@@ -29156,37 +29587,37 @@
                     className: "capture-review-image"
                   }
                 ),
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "capture-review-badge", children: "Hasil foto" }),
-                lastImageProcessing && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "processing-overlay", children: [
-                  /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "processing-spinner" }),
-                  /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "processing-overlay-hint", children: "Sedikit sabar \u2014 hasilnya worth it" })
+                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "capture-review-badge", children: "Hasil foto" }),
+                lastImageProcessing && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "processing-overlay", children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "processing-spinner" }),
+                  /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "processing-overlay-hint", children: "Sedikit sabar \u2014 hasilnya worth it" })
                 ] }),
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "capture-review-caption", children: isAiPackage && !lastImageProcessing ? reviewCaption : processingMessage || reviewCaption })
+                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "capture-review-caption", children: isAiPackage && !lastImageProcessing ? reviewCaption : processingMessage || reviewCaption })
               ]
             },
             `review-${shotStamp}`
           ),
-          !isReviewing && !isWaitingCapture && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+          !isReviewing && !isWaitingCapture && lastImageUrl && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(
             "div",
             {
               className: `last-shot-thumb${lastImageProcessing ? " last-shot-thumb--processing" : ""}`,
               children: [
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
                   "img",
                   {
                     src: lastImageUrl,
                     alt: "Foto terakhir"
                   }
                 ),
-                lastImageProcessing && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "last-shot-thumb-overlay", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "processing-spinner processing-spinner--sm" }) }),
-                /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "last-shot-label", children: lastImageProcessing ? processingMessage || "Memproses\u2026" : "Foto terakhir" })
+                lastImageProcessing && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "last-shot-thumb-overlay", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "processing-spinner processing-spinner--sm" }) }),
+                /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "last-shot-label", children: lastImageProcessing ? processingMessage || "Memproses\u2026" : "Foto terakhir" })
               ]
             }
           ),
-          processingError && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "kiosk-processing-error", children: processingError }),
-          !isReviewing && !isWaitingCapture && !isFlashing && /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("footer", { className: "preview-toolbar", children: [
-            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "preview-hint", children: footerHint }),
-            import_meta2.env.DEV && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+          processingError && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "kiosk-processing-error", children: processingError }),
+          !isReviewing && !isWaitingCapture && !isFlashing && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("footer", { className: "preview-toolbar", children: [
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "preview-hint", children: footerHint }),
+            import_meta2.env.DEV && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
               "button",
               {
                 type: "button",
@@ -29198,39 +29629,44 @@
             )
           ] })
         ] }) }),
-        import_meta2.env.DEV && /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "dev-badge dev-badge--overlay", title: "Development mode", children: "Dev \xB7 Webcam" })
+        import_meta2.env.DEV && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "dev-badge dev-badge--overlay", title: "Development mode", children: "Dev \xB7 Webcam" })
       ] });
     }
     if (screen === Screen.END) {
       const isAiPackage = endedPackageType === "ai-self-photo";
-      return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "screen screen--idle screen--end", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "idle-content", children: [
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "idle-badge idle-badge--success", children: "Sesi selesai" }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("h1", { className: "headline", children: "Terima kasih" }),
-        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("p", { className: "subheadline", children: [
+      const isThemePackage = endedPackageType === "theme-self-photo";
+      return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "screen screen--idle screen--end", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "idle-content", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "idle-badge idle-badge--success", children: "Sesi selesai" }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("h1", { className: "headline", children: "Terima kasih" }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("p", { className: "subheadline", children: [
           "Foto Anda sudah tersimpan.",
-          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("br", {}),
-          isAiPackage ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime2.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("br", {}),
+          isAiPackage ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
             "Ke meja operator \xB7 pilih foto \xB7 lihat hasil",
             endedAiThemeLabel ? ` ${endedAiThemeLabel}` : "",
             endedAiGenerateLimit > 0 ? ` \xB7 kuota ${endedAiGenerateLimit}\xD7` : "",
             "."
-          ] }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_jsx_runtime2.Fragment, { children: "Silakan hubungi tim studio bila ingin melihat atau mencetak." })
+          ] }) : isThemePackage ? /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)(import_jsx_runtime4.Fragment, { children: [
+            "Ke meja operator \xB7 cetak versi tema",
+            endedAiThemeLabel ? ` ${endedAiThemeLabel}` : "",
+            " atau foto asli."
+          ] }) : /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_jsx_runtime4.Fragment, { children: "Silakan hubungi tim studio bila ingin melihat atau mencetak." })
         ] })
       ] }) });
     }
-    return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "screen screen--idle", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { className: "idle-content", children: [
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "idle-logo-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("img", { src: "./logo-light.png", className: "idle-logo", alt: "Sudut Pandang" }) }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { className: "idle-badge", children: "Self Photo Studio" }),
-      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { className: "idle-subtitle", children: "Menunggu sesi dari operator\u2026" })
+    return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "screen screen--idle", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "idle-content", children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "idle-logo-wrap", children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("img", { src: "./logo-light.png", className: "idle-logo", alt: "Sudut Pandang" }) }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { className: "idle-badge", children: "Self Photo Studio" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "idle-subtitle", children: "Menunggu sesi dari operator\u2026" })
     ] }) });
   }
 
   // src/renderer/main.jsx
-  var import_jsx_runtime3 = __toESM(require_jsx_runtime());
+  var import_jsx_runtime5 = __toESM(require_jsx_runtime());
   var container = document.getElementById("app");
   var root = (0, import_client.createRoot)(container);
   root.render(
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_react8.default.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(App, {}) })
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_react11.default.StrictMode, { children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(App, {}) })
   );
 })();
 /*! Bundled license information:

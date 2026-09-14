@@ -122,8 +122,9 @@ export async function mainStart(
   });
 }
 
-const DEFAULT_PACKAGE_DURATIONS: Record<PackageType, number> = {
+  const DEFAULT_PACKAGE_DURATIONS: Record<PackageType, number> = {
   "self-photo": 10,
+  "theme-self-photo": 10,
   "ai-self-photo": 12,
   "pas-photo": 8,
 };
@@ -141,6 +142,9 @@ export async function getKioskConfig(): Promise<KioskConfig> {
         data.packageDurations?.["self-photo"] ??
         data.sessionDurationMinutes ??
         DEFAULT_PACKAGE_DURATIONS["self-photo"],
+      "theme-self-photo":
+        data.packageDurations?.["theme-self-photo"] ??
+        DEFAULT_PACKAGE_DURATIONS["theme-self-photo"],
       "ai-self-photo":
         data.packageDurations?.["ai-self-photo"] ??
         DEFAULT_PACKAGE_DURATIONS["ai-self-photo"],

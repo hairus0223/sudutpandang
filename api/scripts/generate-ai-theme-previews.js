@@ -89,6 +89,26 @@ async function renderThemePreview(theme) {
     placedPath
   );
 
+  const studioBgPath = path.join(root, "studio-bg.png");
+  await sharp({
+    create: {
+      width: PREVIEW_WIDTH,
+      height: PREVIEW_HEIGHT,
+      channels: 3,
+      background: { r: 203, g: 213, b: 225 },
+    },
+  })
+    .png()
+    .toFile(studioBgPath);
+
+  const beforeCompositePath = path.join(root, "before-composite.png");
+  await compositeSubject({
+    subjectPath: placedPath,
+    outputPath: beforeCompositePath,
+    background: { type: "image", path: studioBgPath },
+    harmonizeOptions: { harmonize: false },
+  });
+
   const lookId = normalizeLookId(theme.lookId ?? "warm", "ai-photo");
 
   await compositeSubject({
@@ -108,10 +128,20 @@ async function renderThemePreview(theme) {
   const outDir = path.join(BUNDLED_THEME_PREVIEWS_DIR, theme.id);
   fs.mkdirSync(outDir, { recursive: true });
   const outPath = path.join(outDir, "after.jpg");
+  const beforePath = path.join(outDir, "before.jpg");
 
   await sharp(withOverlays)
     .jpeg({ quality: 90, mozjpeg: true })
     .toFile(outPath);
+
+  const hasBefore = [".jpg", ".jpeg", ".png", ".webp"].some((ext) =>
+    fs.existsSync(path.join(outDir, `before${ext}`))
+  );
+  if (!hasBefore) {
+    await sharp(beforeCompositePath)
+      .jpeg({ quality: 90, mozjpeg: true })
+      .toFile(beforePath);
+  }
 
   await fs.promises.rm(root, { recursive: true, force: true });
 

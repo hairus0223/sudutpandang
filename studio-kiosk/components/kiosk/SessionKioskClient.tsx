@@ -74,6 +74,7 @@ const DEFAULT_KIOSK_CONFIG = {
   trialDurationSeconds: 60,
   packageDurations: {
     "self-photo": 10,
+    "theme-self-photo": 10,
     "ai-self-photo": 12,
     "pas-photo": 8,
   } as Record<PackageType, number>,
@@ -426,6 +427,7 @@ export function SessionKioskClient() {
             aiGenerateLimit:
               customer.aiGenerateLimit ??
               resolveAiGenerateLimit(packageType, peopleCount),
+            aiThemeId: customer.aiThemeId ?? null,
             aiThemeLabel: customer.aiThemeLabel ?? null,
             aiThemePreviewUrl: customer.aiThemePreviewUrl ?? null,
             aiThemeType:
@@ -444,10 +446,12 @@ export function SessionKioskClient() {
           });
           const quotaNote =
             packageType === "ai-self-photo"
-              ? ` · kuota AI: ${customer.aiGenerateLimit ?? resolveAiGenerateLimit(packageType, peopleCount)}`
+              ? ` · kuota edit: ${customer.aiGenerateLimit ?? resolveAiGenerateLimit(packageType, peopleCount)}`
               : "";
           const themeNote =
-            packageType === "ai-self-photo" && customer.aiThemeLabel
+            (packageType === "ai-self-photo" ||
+              packageType === "theme-self-photo") &&
+            customer.aiThemeLabel
               ? ` · tema: ${customer.aiThemeLabel}`
               : packageType === "pas-photo"
                 ? " · Pas Photo"
@@ -467,6 +471,7 @@ export function SessionKioskClient() {
             aiGenerateLimit:
               customer.aiGenerateLimit ??
               resolveAiGenerateLimit(packageType, customer.peopleCount),
+            aiThemeId: customer.aiThemeId ?? null,
             aiThemeLabel: customer.aiThemeLabel ?? null,
             aiThemePreviewUrl: customer.aiThemePreviewUrl ?? null,
             aiThemeType:
@@ -583,7 +588,7 @@ export function SessionKioskClient() {
           Foto sudah tersimpan.{" "}
           {endedPackageType === "ai-self-photo" ? (
             <>
-              Lanjut ke galeri untuk pilih foto dan generate AI
+              Lanjut ke galeri untuk pilih foto dan edit ke tema
               {endedSessionMeta?.aiThemeLabel
                 ? ` (${endedSessionMeta.aiThemeLabel})`
                 : ""}
@@ -592,21 +597,29 @@ export function SessionKioskClient() {
                 : ""}
               .
             </>
+          ) : endedPackageType === "theme-self-photo" ? (
+            <>
+              Lanjut ke galeri untuk cetak versi tema
+              {endedSessionMeta?.aiThemeLabel
+                ? ` (${endedSessionMeta.aiThemeLabel})`
+                : ""}
+              {" "}atau foto asli.
+            </>
           ) : (
             "Customer bisa review dan cetak dari meja studio."
           )}
         </p>
         <div className="mt-8 flex flex-wrap justify-center gap-3 sm:mt-10">
-          {endedPackageType === "ai-self-photo" && endedSessionUser ? (
+          {endedSessionUser ? (
             <Button
-              className="bg-violet-500 px-6 py-3 font-semibold text-white hover:bg-violet-400"
+              className="bg-[#B59240] px-6 py-3 font-semibold text-black hover:bg-[#C9A855]"
               onClick={() =>
                 router.push(
                   `/gallery?user=${encodeURIComponent(endedSessionUser)}`
                 )
               }
             >
-              Buka Galeri AI
+              Buka galeri
             </Button>
           ) : null}
           <Button

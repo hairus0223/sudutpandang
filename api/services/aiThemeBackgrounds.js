@@ -85,7 +85,10 @@ export function getBackgroundThemeId(theme) {
  */
 async function loadBackgroundFile(filePath, width, height) {
   return sharp(filePath)
+    .rotate()
     .resize(width, height, { fit: "cover", position: "centre" })
+    .removeAlpha()
+    .ensureAlpha()
     .png()
     .toBuffer();
 }
@@ -122,7 +125,7 @@ export async function resolveAiThemeBackground({
     return { buffer, source: "photo", backgroundThemeId };
   }
 
-  if (requirePhoto) {
+  if (requirePhoto || theme.backgroundRequired !== false) {
     throw new Error("background_not_found");
   }
 
@@ -189,11 +192,8 @@ export function resolveAiThemeBackgroundPublicUrl(
   }
 
   return {
-    backgroundUrl: buildThemePreviewPublicUrl(
-      host,
-      `/theme-assets/ai-self-photo/${backgroundThemeId}.png`
-    ),
-    backgroundSource: "svg",
+    backgroundUrl: null,
+    backgroundSource: null,
     backgroundThemeId,
   };
 }

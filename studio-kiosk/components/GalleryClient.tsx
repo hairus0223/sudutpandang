@@ -20,8 +20,9 @@ import { resolveGalleryPreviewUrl } from "@/lib/resolveImageUrl";
 import { PRINT_TEMPLATES } from "@/lib/printTemplates";
 import { useSocketStatus } from "@/hooks/useSocketStatus";
 import { useToast } from "@/components/ui/ToastProvider";
-import { getPackageLabel } from "@/lib/packageTypes";
+import { mapAiClientError } from "@/lib/aiUiCopy";
 import type { PackageType } from "@/lib/imageTypes";
+import { getPackageLabel } from "@/lib/packageTypes";
 import { ArrowLeft, ImageOff, Sparkles } from "lucide-react";
 
 export default function GalleryClient() {
@@ -167,6 +168,7 @@ export default function GalleryClient() {
   ]);
 
   const isAiPackage = packageType === "ai-self-photo";
+  const isThemePackage = packageType === "theme-self-photo";
   const isPasPhoto = packageType === "pas-photo";
 
   return (
@@ -195,6 +197,11 @@ export default function GalleryClient() {
                 Soft file 2×3 · 3×4 · 4×6
               </span>
             ) : null}
+            {isThemePackage && aiThemeLabel ? (
+              <span className="rounded-full bg-[#B59240]/15 px-2.5 py-0.5 text-xs text-[#E8C872]">
+                {aiThemeLabel}
+              </span>
+            ) : null}
             {isAiPackage && aiThemeLabel ? (
               <span className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs text-violet-200">
                 {aiThemeLabel}
@@ -204,7 +211,7 @@ export default function GalleryClient() {
             {isAiPackage && aiGenerateLimit > 0 ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/15 px-2.5 py-0.5 text-xs text-violet-200">
                 <Sparkles className="size-3" />
-                AI {aiGenerateRemaining}/{aiGenerateLimit} tersisa
+                Edit {aiGenerateRemaining}/{aiGenerateLimit} tersisa
               </span>
             ) : null}
             <span>
@@ -229,6 +236,19 @@ export default function GalleryClient() {
                       ).length
                     }{" "}
                     AI)
+                  </span>
+                ) : null}
+                {selectedForPrint.some(
+                  (f) => printVariantByFilename[f] === "theme"
+                ) ? (
+                  <span className="ml-1 text-[#E8C872]">
+                    (
+                    {
+                      selectedForPrint.filter(
+                        (f) => printVariantByFilename[f] === "theme"
+                      ).length
+                    }{" "}
+                    tema)
                   </span>
                 ) : null}
               </span>
@@ -262,7 +282,6 @@ export default function GalleryClient() {
             aiThemeLabel={aiThemeLabel}
             aiThemeLocked={aiThemeLocked}
             aiThemePreviewUrl={aiThemePreviewUrl}
-            aiThemeType={aiThemeType}
             aiGenerateRemaining={aiGenerateRemaining}
             aiGenerateLimit={aiGenerateLimit}
             activePhase={aiActivePhase}
@@ -312,21 +331,16 @@ export default function GalleryClient() {
                       });
                     }
                     if (result.status === "ready") {
-                      toast("Hasil AI siap!", "success");
+                      toast("Hasil edit siap!", "success");
                       setPendingRevealImageId(imageId);
                     } else {
-                      toast("Generate AI dimulai…", "default");
+                      toast("Edit dimulai…", "default");
                     }
                     await refreshGallery();
                   } catch (err) {
                     const code =
                       err instanceof Error ? err.message : "ai_generate_failed";
-                    toast(
-                      code === "quota_exhausted"
-                        ? "Kuota AI habis."
-                        : "Gagal memulai generate AI.",
-                      "error"
-                    );
+                    toast(mapAiClientError(code), "error");
                   } finally {
                     setGeneratingAi(false);
                   }

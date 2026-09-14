@@ -64,7 +64,7 @@ export function AiResultRevealModal({
         <div className="mb-3 flex items-center gap-2 text-violet-200">
           <Sparkles className="size-4" />
           <span className="text-sm font-medium">
-            {themeLabel ? `Hasil AI · ${themeLabel}` : "Hasil AI siap!"}
+          {themeLabel ? `Hasil edit · ${themeLabel}` : "Hasil edit siap!"}
           </span>
         </div>
 

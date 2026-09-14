@@ -11,7 +11,7 @@ import {
   AlertCircle,
   Printer,
 } from "lucide-react";
-import type { AiThemeType, GalleryImageData, PrintVariant } from "@/lib/imageTypes";
+import type { GalleryImageData, PrintVariant } from "@/lib/imageTypes";
 import { requestAiGenerate } from "@/services/ai.service";
 import {
   canGenerateAiSelection,
@@ -43,15 +43,20 @@ import {
   btnGhost,
   toggleChipClass,
 } from "@/lib/galleryUiStyles";
+import { mapAiClientError } from "@/lib/aiUiCopy";
 import { useGalleryStore } from "@/stores/useGalleryStore";
 
 const PHASE_LABELS: Record<string, string> = {
+  queued: "Antrian edit…",
+  processing: "Masih mengedit…",
   segmenting: "Memisahkan subjek…",
-  generating: "Mengganti kostum AI…",
+  costume: "Mengedit pakaian…",
+  generating: "Mengedit pakaian…",
   refining: "Menjaga wajah asli…",
-  compositing: "Menyusun background…",
+  compositing: "Menyusun latar…",
+  lighting: "Menyesuaikan cahaya…",
   finishing: "Finishing…",
-  transform: "Transformasi AI…",
+  transform: "Mengedit foto…",
 };
 
 type GalleryAiWizardProps = {
@@ -62,7 +67,6 @@ type GalleryAiWizardProps = {
   aiThemeLabel: string | null;
   aiThemeLocked: boolean;
   aiThemePreviewUrl?: string | null;
-  aiThemeType?: AiThemeType | null;
   aiGenerateRemaining: number;
   aiGenerateLimit: number;
   activePhase?: string | null;
@@ -73,20 +77,29 @@ type GalleryAiWizardProps = {
   onRevealDismiss?: () => void;
 };
 
-function AiTileStatusBadge({ status }: { status: string | null }) {
+function AiTileStatusBadge({
+  status,
+  error,
+}: {
+  status: string | null;
+  error?: string | null;
+}) {
   if (!status) return null;
 
   if (status === "ready") {
     return (
       <span className="absolute left-3 bottom-3 z-20 inline-flex items-center gap-1 rounded-full bg-emerald-500/90 px-2 py-0.5 text-[10px] font-medium text-white">
         <CheckCircle2 className="size-3" />
-        AI selesai
+        Edit selesai
       </span>
     );
   }
   if (status === "failed") {
     return (
-      <span className="absolute left-3 bottom-3 z-20 inline-flex items-center gap-1 rounded-full bg-red-500/90 px-2 py-0.5 text-[10px] font-medium text-white">
+      <span
+        className="absolute left-3 bottom-3 z-20 inline-flex items-center gap-1 rounded-full bg-red-500/90 px-2 py-0.5 text-[10px] font-medium text-white"
+        title={error || "Edit gagal"}
+      >
         <AlertCircle className="size-3" />
         Gagal
       </span>
@@ -111,7 +124,6 @@ export function GalleryAiWizard({
   aiThemeLabel,
   aiThemeLocked,
   aiThemePreviewUrl = null,
-  aiThemeType = null,
   aiGenerateRemaining,
   aiGenerateLimit,
   activePhase = null,
@@ -231,16 +243,16 @@ export function GalleryAiWizard({
         (img) => getAiSelectionStatus(img) === "ready"
       );
       if (hasReady) {
-        toast("Foto terpilih sudah di-generate. Lihat hasil atau pilih foto lain.", "default");
+        toast("Foto terpilih sudah diedit. Lihat hasil atau pilih foto lain.", "default");
         setStep("results");
       } else {
-        toast("Foto terpilih sedang diproses atau tidak bisa di-generate.", "default");
+        toast("Foto terpilih sedang diproses atau tidak bisa diedit.", "default");
       }
       return;
     }
 
     if (quotaExhausted) {
-      toast("Kuota AI habis.", "error");
+      toast("Kuota edit habis.", "error");
       if (readyCount > 0) setStep("results");
       return;
     }
@@ -264,20 +276,14 @@ export function GalleryAiWizard({
       }
 
       if (finished > 0) {
-        toast(`${finished} hasil AI siap!`, "success");
+        toast(`${finished} hasil edit siap!`, "success");
         setStep("results");
       } else if (started > 0) {
-        toast(`Generate dimulai untuk ${started} foto…`, "default");
+        toast(`Edit dimulai untuk ${started} foto…`, "default");
       }
     } catch (err) {
       const code = err instanceof Error ? err.message : "ai_generate_failed";
-      const message =
-        code === "quota_exhausted"
-          ? "Kuota AI habis."
-          : code === "theme_required"
-            ? "Tema sesi belum di-set. Daftar ulang di layar sesi."
-            : "Gagal memulai generate AI.";
-      toast(message, "error");
+      toast(mapAiClientError(code), "error");
       if (code === "quota_exhausted" && readyCount > 0) setStep("results");
     } finally {
       setGenerating(false);
@@ -358,7 +364,6 @@ export function GalleryAiWizard({
       aiThemeLabel={aiThemeLabel}
       aiThemeLocked={aiThemeLocked}
       aiThemePreviewUrl={aiThemePreviewUrl}
-      aiThemeType={aiThemeType}
       aiGenerateRemaining={aiGenerateRemaining}
       aiGenerateLimit={aiGenerateLimit}
     />
@@ -410,11 +415,11 @@ export function GalleryAiWizard({
           <div className="space-y-3">
             <div>
               <h2 className="text-sm font-medium text-violet-100 sm:text-base">
-                Pilih foto → Generate atau cetak
+                Pilih foto → Edit atau cetak
               </h2>
               <p className="mt-1 text-xs text-white/45">
-                Pilih foto, lalu generate AI atau masukkan ke antrian cetak.
-                Badge emas/ungu = sudah di antrian.
+                Pilih foto, lalu edit ke tema sesi atau masukkan ke antrian cetak
+                Asli / AI. Badge emas/ungu = sudah di antrian.
               </p>
             </div>
             {sessionBanner}
@@ -422,7 +427,7 @@ export function GalleryAiWizard({
 
           {quotaExhausted && readyCount > 0 ? (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-              Kuota AI habis.{" "}
+              Kuota edit habis.{" "}
               <button
                 type="button"
                 onClick={() => setStep("results")}
@@ -458,7 +463,12 @@ export function GalleryAiWizard({
                   isPrintSelected={isPrintSelected}
                   printVariant={printVariant}
                   isBusy={isBusy}
-                  aiStatusBadge={<AiTileStatusBadge status={aiStatus} />}
+                  aiStatusBadge={
+                    <AiTileStatusBadge
+                      status={aiStatus}
+                      error={img.aiSelection?.error ?? img.processingError}
+                    />
+                  }
                   onToggleSelect={() => toggleGallerySelection(img.imageId!)}
                   onTogglePrint={() => removeFromPrint(img.filename)}
                   onOpenPhoto={() => onOpenPhoto(index)}
@@ -478,6 +488,7 @@ export function GalleryAiWizard({
               aiQueuedCount={aiQueuedCount}
               aiPrintReadyCount={aiPrintReadyCount}
               showAiPrint
+              hint="Pilih foto, lalu edit ke tema sesi atau masukkan antrian cetak Asli / AI."
               onClearSelection={clearGallerySelection}
               onEnqueuePrint={handleEnqueuePrint}
               onRemovePrintFromSelection={handleRemovePrintFromSelection}
@@ -488,22 +499,26 @@ export function GalleryAiWizard({
                       type="button"
                       onClick={() => void handleGenerateSelected()}
                       disabled={generating}
-                        className={cn(btnPrimary(), "flex-1 sm:flex-none")}
+                      className={cn(btnPrimary(), "flex-1 sm:flex-none")}
                     >
                       {generating ? (
                         <Loader2 className="size-4 animate-spin" />
                       ) : (
                         <Sparkles className="size-4" />
                       )}
-                      Generate AI ({eligibleGenerateCount})
+                      Edit {eligibleGenerateCount} foto · {aiThemeLabel ?? "tema"}
                     </button>
+                  ) : quotaExhausted && selectedImages.length > 0 && readySelectedCount === 0 ? (
+                    <span className="inline-flex w-full items-center justify-center rounded-xl border-2 border-white/15 px-4 py-2 text-xs font-semibold text-white/45 sm:w-auto">
+                      Kuota 0 / {aiGenerateLimit}
+                    </span>
                   ) : readySelectedCount > 0 ? (
                     <button
                       type="button"
                       onClick={() => setStep("results")}
                         className={cn(btnPrimary(), "flex-1 sm:flex-none")}
                     >
-                      Lihat hasil AI
+                      Lihat hasil edit
                       <ArrowRight className="size-4" />
                     </button>
                   ) : null}
@@ -562,11 +577,11 @@ export function GalleryAiWizard({
           {resultImages.length === 0 ? (
             <div className="rounded-2xl border border-white/10 bg-white/5 py-16 text-center text-white/50">
               <Sparkles className="mx-auto mb-3 size-8 opacity-40" />
-              <p>Belum ada hasil AI.</p>
+              <p>Belum ada hasil edit.</p>
               <p className="mt-1 text-sm">
                 {quotaExhausted
-                  ? "Kuota generate habis untuk sesi ini."
-                  : "Pilih foto lalu generate di langkah sebelumnya."}
+                  ? "Kuota edit habis untuk sesi ini."
+                  : "Pilih foto lalu edit di langkah sebelumnya."}
               </p>
               {!quotaExhausted ? (
                 <button
@@ -574,7 +589,7 @@ export function GalleryAiWizard({
                   onClick={() => setStep("compose")}
                   className={cn(btnPrimary(), "mt-4")}
                 >
-                  Pilih & generate
+                  Pilih & edit
                 </button>
               ) : null}
             </div>

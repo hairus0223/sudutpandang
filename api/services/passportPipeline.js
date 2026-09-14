@@ -1,9 +1,12 @@
 import fs from "fs";
 import path from "path";
 import { compositePassportPhoto } from "./passportComposite.js";
-import { refinePassportHair } from "./passportHairRefine.js";
+import { analyzeSubjectGeometry } from "./passportFraming.js";
+import { rebuildPassportSubject } from "./passportMatte.js";
+import { retouchPassportSubject } from "./passportRetouch.js";
 import { PASSPORT_SIZE_PRESETS } from "./passportSizes.js";
 import { segmentAndSaveArtifacts } from "./personSegmentation.js";
+import { getPassportSegmentationModel } from "./personSegmentationInference.js";
 import {
   readPassportBackgroundColor,
   readCustomerPackageType,
@@ -13,10 +16,10 @@ import {
   findOriginalPath,
   findIncompletePassportJobs,
   getPassportPath,
+  getPassportPrintPath,
   getPassportSizePath,
   getSubjectPath,
   markFailed,
-  readMeta,
   updateAfterPassportBg,
   updateAfterRemoveBg,
   updateStatus,
@@ -61,30 +64,42 @@ export async function runPassportPipeline({
     error: null,
   });
 
-  let subjectPath = getSubjectPath(userDir, imageId);
-  const meta = readMeta(userDir, imageId);
-  const operations = Array.isArray(meta?.operations) ? meta.operations : [];
+  await segmentAndSaveArtifacts({
+    userDir,
+    imageId,
+    sourcePath: originalPath,
+    portraitBoost: true,
+    model: getPassportSegmentationModel(),
+  });
+  const subjectPath = getSubjectPath(userDir, imageId);
+  updateAfterRemoveBg(userDir, imageId, "passport");
 
-  if (!fs.existsSync(subjectPath) || !operations.includes("remove-bg")) {
-    await segmentAndSaveArtifacts({
-      userDir,
-      imageId,
-      sourcePath: originalPath,
-    });
-    subjectPath = getSubjectPath(userDir, imageId);
-    updateAfterRemoveBg(userDir, imageId, "passport");
-  }
+  updateStatus(userDir, imageId, PROCESSING_STATUS.PROCESSING, {
+    processingPhase: "retouch",
+    error: null,
+  });
 
   try {
-    const refined = await refinePassportHair(fs.readFileSync(subjectPath));
-    fs.writeFileSync(subjectPath, refined);
+    const rebuilt = await rebuildPassportSubject({
+      originalPath,
+      subjectBuffer: fs.readFileSync(subjectPath),
+    });
+    fs.writeFileSync(subjectPath, await retouchPassportSubject(rebuilt));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[pas-photo] hair refine skipped: ${message}`);
+    console.warn(`[pas-photo] matte rebuild skipped: ${message}`);
   }
 
   const backgroundColor = readPassportBackgroundColor(userDir);
   const sizeResults = {};
+
+  let geometry = null;
+  try {
+    geometry = await analyzeSubjectGeometry(fs.readFileSync(subjectPath));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[pas-photo] framing fallback to centre crop: ${message}`);
+  }
 
   for (const size of PASSPORT_SIZE_PRESETS) {
     const outputPath = getPassportSizePath(userDir, imageId, size.id);
@@ -93,6 +108,8 @@ export async function runPassportPipeline({
       outputPath,
       backgroundColor,
       sizeId: size.id,
+      geometry,
+      jpegPath: getPassportPrintPath(userDir, imageId, size.id),
     });
   }
 
@@ -110,6 +127,11 @@ export async function runPassportPipeline({
       "2x3": relativeVariant(imageId, "passport-2x3.png"),
       "3x4": relativeVariant(imageId, "passport-3x4.png"),
       "4x6": relativeVariant(imageId, "passport-4x6.png"),
+    },
+    {
+      "2x3": relativeVariant(imageId, "passport-2x3-print.jpg"),
+      "3x4": relativeVariant(imageId, "passport-3x4-print.jpg"),
+      "4x6": relativeVariant(imageId, "passport-4x6-print.jpg"),
     }
   );
 
@@ -124,6 +146,11 @@ export async function runPassportPipeline({
       "2x3": buildPublicUrl(updated.variants.passportSizes["2x3"]),
       "3x4": buildPublicUrl(updated.variants.passportSizes["3x4"]),
       "4x6": buildPublicUrl(updated.variants.passportSizes["4x6"]),
+    },
+    passportPrintSizes: {
+      "2x3": buildPublicUrl(updated.variants.passportPrintSizes["2x3"]),
+      "3x4": buildPublicUrl(updated.variants.passportPrintSizes["3x4"]),
+      "4x6": buildPublicUrl(updated.variants.passportPrintSizes["4x6"]),
     },
   });
 }

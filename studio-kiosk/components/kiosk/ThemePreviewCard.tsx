@@ -1,7 +1,12 @@
 "use client";
 
-import { Check, Sparkles } from "lucide-react";
-import type { AiTheme, AiThemeType } from "@/lib/imageTypes";
+import { Check } from "lucide-react";
+import type { AiTheme } from "@/lib/imageTypes";
+import {
+  AI_IDENTITY_COPY,
+  getAiThemeStyleLabel,
+  isAiThemeSelectable,
+} from "@/lib/aiUiCopy";
 import { cn } from "@/lib/utils";
 
 type ThemePreviewCardProps = {
@@ -11,43 +16,68 @@ type ThemePreviewCardProps = {
   onExpand?: () => void;
 };
 
-function getTypeBadge(type: AiThemeType): { label: string; className: string } {
-  if (type === "transform") {
-    return {
-      label: "Transform",
-      className: "bg-violet-600/85 text-white",
-    };
-  }
-  return {
-    label: "Latar Premium",
-    className: "bg-black/60 text-white/90",
-  };
-}
-
 export function ThemePreviewCard({
   theme,
   selected,
   onSelect,
   onExpand,
 }: ThemePreviewCardProps) {
-  const typeBadge = getTypeBadge(theme.type);
+  const selectable = isAiThemeSelectable(theme);
+  const styleLabel = getAiThemeStyleLabel(theme);
+  const hasBeforeAfter = Boolean(theme.previewUrl && theme.previewBeforeUrl);
 
   return (
     <article
       className={cn(
         "group relative overflow-hidden rounded-xl border bg-white/5 text-left transition",
-        selected
+        !selectable && "opacity-55",
+        selected && selectable
           ? "border-[#B59240]/60 ring-2 ring-[#B59240]/45"
           : "border-white/10 hover:border-white/25 hover:bg-white/[0.07]"
       )}
     >
       <button
         type="button"
-        onClick={onSelect}
-        className="block w-full text-left"
+        onClick={() => {
+          if (!selectable) return;
+          if (onExpand) {
+            onExpand();
+            return;
+          }
+          onSelect();
+        }}
+        disabled={!selectable}
+        className="block w-full text-left disabled:cursor-not-allowed"
       >
         <div className="relative aspect-[3/4] w-full overflow-hidden bg-black/30">
-          {theme.previewUrl ? (
+          {hasBeforeAfter ? (
+            <div className="flex h-full">
+              <div className="relative w-1/2">
+                <img
+                  src={theme.previewBeforeUrl!}
+                  alt=""
+                  loading="lazy"
+                  draggable={false}
+                  className="h-full w-full object-cover"
+                />
+                <span className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-medium text-white/90">
+                  Asli
+                </span>
+              </div>
+              <div className="relative w-1/2">
+                <img
+                  src={theme.previewUrl!}
+                  alt={theme.label}
+                  loading="lazy"
+                  draggable={false}
+                  className="h-full w-full object-cover"
+                />
+                <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-medium text-white/90">
+                  Hasil
+                </span>
+              </div>
+            </div>
+          ) : theme.previewUrl ? (
             <img
               src={theme.previewUrl}
               alt={theme.label}
@@ -60,19 +90,16 @@ export function ThemePreviewCard({
             />
           ) : (
             <div
-              className="h-full w-full"
+              className="flex h-full w-full items-center justify-center px-3 text-center text-[11px] text-white/45"
               style={{ backgroundColor: theme.previewColor }}
-            />
+            >
+              Preview belum siap
+            </div>
           )}
 
           <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-wrap gap-1 p-2">
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-[10px] font-medium backdrop-blur",
-                typeBadge.className
-              )}
-            >
-              {typeBadge.label}
+            <span className="rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur">
+              {styleLabel}
             </span>
             {theme.seasonal ? (
               <span className="rounded-full bg-amber-500/85 px-2 py-0.5 text-[10px] font-medium text-white">
@@ -81,7 +108,7 @@ export function ThemePreviewCard({
             ) : null}
           </div>
 
-          {selected ? (
+          {selected && selectable ? (
             <div className="pointer-events-none absolute bottom-2 right-2 rounded-full bg-[#B59240] p-1 text-black shadow-lg">
               <Check className="size-4" />
             </div>
@@ -91,23 +118,10 @@ export function ThemePreviewCard({
         <div className="space-y-1 p-3">
           <p className="text-sm font-semibold text-white">{theme.label}</p>
           <p className="line-clamp-2 text-[11px] leading-snug text-white/50">
-            {theme.description}
+            {selectable ? theme.description : "Preview atau background tema belum lengkap."}
           </p>
         </div>
       </button>
-
-      {onExpand && theme.previewUrl ? (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onExpand();
-          }}
-          className="absolute bottom-3 left-3 rounded-full bg-black/65 px-2.5 py-1 text-[10px] font-medium text-white/90 backdrop-blur transition hover:bg-black/80"
-        >
-          Lihat contoh
-        </button>
-      ) : null}
     </article>
   );
 }
@@ -124,18 +138,8 @@ export function ThemePreviewCardSkeleton() {
   );
 }
 
-export function ThemePickerHint({ type }: { type?: AiThemeType }) {
-  if (type === "transform") {
-    return (
-      <p className="flex items-start gap-2 text-xs leading-relaxed text-violet-200/90">
-        <Sparkles className="mt-0.5 size-3.5 shrink-0" />
-        Transform: foto diubah seperti contoh (wajah & pose tetap sama).
-      </p>
-    );
-  }
+export function ThemePickerHint() {
   return (
-    <p className="text-xs leading-relaxed text-white/50">
-      Latar premium: baju asli tetap, background berubah seperti contoh.
-    </p>
+    <p className="text-xs leading-relaxed text-white/55">{AI_IDENTITY_COPY}</p>
   );
 }

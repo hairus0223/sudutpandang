@@ -10,6 +10,8 @@ import {
 import { writePlacedSubjectFile } from "./aiThemePlacement.js";
 import { compositeSubject } from "./imageComposite.js";
 import { normalizeLookId } from "./lookPresets.js";
+import { getThemePrintTune, runWithThemeTune } from "./themePrintTune.js";
+import { subjectScaleForFocalLength } from "./themeCameraBokeh.js";
 import {
   getThemeCostumeNegativePrompt,
   getThemeCostumePrompt,
@@ -24,20 +26,24 @@ import {
   segmentPersonFromFile,
   buildSegmentationMasks,
 } from "./personSegmentation.js";
-import { buildCompositeSubjectFromEdited } from "./personMask.js";
-import { getEditMaskPath, getSubjectPath } from "./imageStorage.js";
+import {
+  buildCompositeSubjectFromEdited,
+  stabilizePrintMatte,
+} from "./personMask.js";
+import { getThemeSegmentationModel } from "./personSegmentationInference.js";
+import { getSubjectPath } from "./imageStorage.js";
 import {
   generateTransformedImage,
   OPENAI_MASKED_EDIT_ENABLED,
 } from "./openaiImage.js";
-import {
-  FACE_REFINE_ENABLED,
-  isFaceRefineAvailable,
-  refineEditedFaceFromOriginal,
-} from "./faceRefine.js";
+import { isFaceRefineAvailable, refineEditedFaceFromOriginal } from "./faceRefine.js";
+import { assertIdentityLock, assertSubjectMatte } from "./aiIdentityLock.js";
 
 export const AI_PIPELINE_FALLBACK_DIRECT =
-  process.env.AI_PIPELINE_FALLBACK_DIRECT !== "false";
+  process.env.AI_PIPELINE_FALLBACK_DIRECT === "true";
+
+export const AI_ALLOW_DIRECT_PIPELINE =
+  process.env.AI_ALLOW_DIRECT_PIPELINE === "true";
 
 /**
  * @returns {boolean}
@@ -58,20 +64,31 @@ export function isCostumePassAvailable() {
 
 /**
  * @param {import("./aiThemeCatalog.js").AiTheme} theme
+ * @param {{
+ *   allowDirect?: boolean,
+ *   fallbackDirect?: boolean,
+ *   costumeAvailable?: boolean,
+ *   compositeAvailable?: boolean,
+ * }} [options]
  * @returns {"direct" | "composite-only" | "composite-costume"}
  */
-export function resolveEffectivePipeline(theme) {
+export function resolveEffectivePipeline(theme, options = {}) {
   const configured = getThemePipelineMode(theme);
+  const allowDirect = options.allowDirect === true || AI_ALLOW_DIRECT_PIPELINE;
+  const fallbackDirect = options.fallbackDirect ?? AI_PIPELINE_FALLBACK_DIRECT;
+  const costumeAvailable = options.costumeAvailable ?? isCostumePassAvailable();
+  const compositeAvailable = options.compositeAvailable ?? isCompositeBoothAvailable();
 
   if (!isCompositePipelineMode(configured)) {
-    return "direct";
+    if (allowDirect) return "direct";
+    throw new Error("direct_pipeline_disabled");
   }
 
-  if (configured === "composite-costume" && isCostumePassAvailable()) {
+  if (configured === "composite-costume" && costumeAvailable) {
     return "composite-costume";
   }
 
-  if (isCompositeBoothAvailable()) {
+  if (compositeAvailable) {
     if (configured === "composite-costume") {
       console.warn(
         `[ai-booth] costume pass unavailable for theme=${theme.id} — falling back to composite-only`
@@ -80,7 +97,7 @@ export function resolveEffectivePipeline(theme) {
     return "composite-only";
   }
 
-  if (AI_PIPELINE_FALLBACK_DIRECT) {
+  if (fallbackDirect && allowDirect) {
     console.warn(
       `[ai-booth] composite unavailable for theme=${theme.id} — falling back to direct OpenAI`
     );
@@ -95,8 +112,8 @@ export function resolveEffectivePipeline(theme) {
  * @returns {string}
  */
 export function getInitialPhaseForTheme(theme) {
-  const pipeline = resolveEffectivePipeline(theme);
-  return pipeline === "direct" ? "generating" : "segmenting";
+  resolveEffectivePipeline(theme);
+  return "segmenting";
 }
 
 /**
@@ -133,6 +150,7 @@ async function compositeSubjectOntoThemeBackground({
   width,
   height,
   cleanupSubjectPath = false,
+  onProgress,
 }) {
   const requirePhoto = theme.backgroundRequired !== false;
   const { buffer: backgroundBuffer, source: bgSource } = await resolveAiThemeBackground({
@@ -143,7 +161,12 @@ async function compositeSubjectOntoThemeBackground({
     requirePhoto,
   });
 
-  const lookId = theme.lookId ? normalizeLookId(theme.lookId, "ai-photo") : null;
+  const tune = getThemePrintTune();
+  const lookId =
+    theme.pipelineMode === "composite-only"
+      ? "natural"
+      : normalizeLookId(theme.lookId || "warm", "theme-self-photo");
+  const lookIntensity = theme.pipelineMode === "composite-only" ? 0.16 : 0.28;
   const processedDir = path.dirname(outputPath);
   const stamp = Date.now();
   const tempBgPath = path.join(processedDir, `.booth-bg-${theme.id}-${stamp}.png`);
@@ -153,14 +176,25 @@ async function compositeSubjectOntoThemeBackground({
     `.booth-placed-subject-${stamp}.png`
   );
 
+  const cleanedSubject = await stabilizePrintMatte(
+    await fs.promises.readFile(subjectPath)
+  );
+  const cleanedSubjectPath = path.join(
+    processedDir,
+    `.booth-clean-subject-${stamp}.png`
+  );
+  await fs.promises.writeFile(cleanedSubjectPath, cleanedSubject);
   await fs.promises.writeFile(tempBgPath, backgroundBuffer);
 
   try {
     await writePlacedSubjectFile(
-      subjectPath,
+      cleanedSubjectPath,
       width,
       height,
-      theme.placement,
+      {
+        ...(theme.placement || {}),
+        scale: subjectScaleForFocalLength(tune.focalLengthMm),
+      },
       tempPlacedSubjectPath
     );
 
@@ -168,12 +202,20 @@ async function compositeSubjectOntoThemeBackground({
       subjectPath: tempPlacedSubjectPath,
       outputPath: tempCompositePath,
       background: { type: "image", path: tempBgPath },
-      harmonizeOptions: { harmonize: true, lookId },
+      harmonizeOptions: {
+        harmonize: tune.harmonize,
+        lookId,
+        lookIntensity,
+        cinematicFinish: tune.cinematicFinish,
+        cinematicIntensity: tune.cinematicIntensity,
+      },
     });
+    onProgress?.("lighting");
   } finally {
     await Promise.all([
       fs.promises.unlink(tempBgPath).catch(() => {}),
       fs.promises.unlink(tempPlacedSubjectPath).catch(() => {}),
+      fs.promises.unlink(cleanedSubjectPath).catch(() => {}),
       cleanupSubjectPath
         ? fs.promises.unlink(subjectPath).catch(() => {})
         : Promise.resolve(),
@@ -189,7 +231,10 @@ async function compositeSubjectOntoThemeBackground({
   );
 
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  await sharp(withOverlays).jpeg({ quality: 92, mozjpeg: true }).toFile(outputPath);
+  await sharp(withOverlays)
+    .removeAlpha()
+    .jpeg({ quality: 92, mozjpeg: true })
+    .toFile(outputPath);
 
   await fs.promises.unlink(tempCompositePath).catch(() => {});
   await removeTempFiles(processedDir, `.booth-bg-`);
@@ -220,6 +265,7 @@ export async function runCompositeBoothGeneration({
   baseDir,
   onProgress,
   artifacts = null,
+  reuseSubject = false,
 }) {
   onProgress?.("segmenting");
 
@@ -227,18 +273,38 @@ export async function runCompositeBoothGeneration({
   let width;
   let height;
 
-  if (artifacts?.userDir && artifacts?.imageId) {
+  const existingSubject =
+    artifacts?.userDir && artifacts?.imageId
+      ? getSubjectPath(artifacts.userDir, artifacts.imageId)
+      : null;
+  const canReuse =
+    Boolean(reuseSubject && existingSubject && fs.existsSync(existingSubject));
+
+  if (artifacts?.userDir && artifacts?.imageId && canReuse) {
+    subjectPath = existingSubject;
+    const subjectBuffer = await fs.promises.readFile(subjectPath);
+    await assertSubjectMatte(subjectBuffer);
+    const meta = await sharp(subjectPath).metadata();
+    width = meta.width || 1024;
+    height = meta.height || 1536;
+  } else if (artifacts?.userDir && artifacts?.imageId) {
     await segmentAndSaveArtifacts({
       userDir: artifacts.userDir,
       imageId: artifacts.imageId,
       sourcePath,
+      model: getThemeSegmentationModel(),
     });
     subjectPath = getSubjectPath(artifacts.userDir, artifacts.imageId);
+    const subjectBuffer = await fs.promises.readFile(subjectPath);
+    await assertSubjectMatte(subjectBuffer);
     const meta = await sharp(subjectPath).metadata();
     width = meta.width || 1024;
     height = meta.height || 1536;
   } else {
-    const segmented = await segmentPersonFromFile(sourcePath);
+    const segmented = await segmentPersonFromFile(sourcePath, {
+      model: getThemeSegmentationModel(),
+    });
+    await assertSubjectMatte(segmented.subjectBuffer);
     width = segmented.width;
     height = segmented.height;
 
@@ -250,15 +316,18 @@ export async function runCompositeBoothGeneration({
 
   onProgress?.("compositing");
 
-  const { bgSource, overlaysApplied } = await compositeSubjectOntoThemeBackground({
-    subjectPath,
-    theme,
-    outputPath,
-    baseDir,
-    width,
-    height,
-    cleanupSubjectPath: !artifacts,
-  });
+  const { bgSource, overlaysApplied } = await runWithThemeTune(theme.id, () =>
+    compositeSubjectOntoThemeBackground({
+      subjectPath,
+      theme,
+      outputPath,
+      baseDir,
+      width,
+      height,
+      cleanupSubjectPath: !artifacts,
+      onProgress,
+    })
+  );
 
   onProgress?.("finishing");
 
@@ -316,16 +385,22 @@ export async function runCompositeCostumeBoothGeneration({
       userDir: artifacts.userDir,
       imageId: artifacts.imageId,
       sourcePath,
+      model: getThemeSegmentationModel(),
     });
     subjectPath = saved.subjectPath;
     subjectBuffer = saved.subjectBuffer;
+    await assertSubjectMatte(subjectBuffer);
     editMaskPath = saved.editMaskPath;
+    editMaskBuffer = await fs.promises.readFile(editMaskPath);
     const meta = await sharp(subjectPath).metadata();
     width = meta.width || 1024;
     height = meta.height || 1536;
   } else {
-    const segmented = await segmentPersonFromFile(sourcePath);
+    const segmented = await segmentPersonFromFile(sourcePath, {
+      model: getThemeSegmentationModel(),
+    });
     subjectBuffer = segmented.subjectBuffer;
+    await assertSubjectMatte(subjectBuffer);
     width = segmented.width;
     height = segmented.height;
 
@@ -339,7 +414,7 @@ export async function runCompositeCostumeBoothGeneration({
     await fs.promises.writeFile(subjectPath, subjectBuffer);
   }
 
-  onProgress?.("generating");
+  onProgress?.("costume");
 
   const editedBuffer = await generateTransformedImage({
     imagePath: sourcePath,
@@ -355,19 +430,30 @@ export async function runCompositeCostumeBoothGeneration({
     billing: billing ?? undefined,
   });
 
-  let refinedBuffer = editedBuffer;
-  if (isFaceRefineAvailable()) {
-    onProgress?.("refining");
-    refinedBuffer = await refineEditedFaceFromOriginal({
-      originalPath: sourcePath,
-      editedBuffer,
-      subjectBuffer,
-    });
+  await assertIdentityLock({
+    originalPath: sourcePath,
+    editedBuffer,
+    subjectBuffer,
+  });
+
+  if (!isFaceRefineAvailable()) {
+    throw new Error("face_refine_unavailable");
   }
+
+  onProgress?.("refining");
+  const refinedBuffer = await refineEditedFaceFromOriginal({
+    originalPath: sourcePath,
+    editedBuffer,
+    subjectBuffer,
+  });
 
   const costumedSubjectBuffer = await buildCompositeSubjectFromEdited(
     refinedBuffer,
-    subjectBuffer
+    subjectBuffer,
+    {
+      originalPath: sourcePath,
+      editMaskBuffer: editMaskBuffer ?? null,
+    }
   );
 
   const processedDir = path.dirname(outputPath);
@@ -388,6 +474,7 @@ export async function runCompositeCostumeBoothGeneration({
       width,
       height,
       cleanupSubjectPath: true,
+      onProgress,
     });
 
     onProgress?.("finishing");
@@ -396,7 +483,7 @@ export async function runCompositeCostumeBoothGeneration({
       pipeline: "composite-costume",
       bgSource,
       overlaysApplied,
-      faceRefined: isFaceRefineAvailable(),
+      faceRefined: true,
     };
   } finally {
     await fs.promises.unlink(costumedSubjectPath).catch(() => {});
@@ -415,6 +502,7 @@ export function mapCompositeBoothErrorToUserMessage(error) {
 
   if (
     message === "person_segmentation_disabled" ||
+    message === "segmentation_failed" ||
     message.startsWith("PERSON_SEGMENTATION_TIMEOUT") ||
     message === "invalid_subject_dimensions"
   ) {
@@ -427,8 +515,16 @@ export function mapCompositeBoothErrorToUserMessage(error) {
     return "Background tema belum tersedia. Hubungi staf.";
   }
 
-  if (message === "composite_pipeline_unavailable") {
-    return "Pipeline booth belum siap. Hubungi staf.";
+  if (
+    message === "composite_pipeline_unavailable" ||
+    message === "direct_pipeline_disabled" ||
+    message === "face_refine_unavailable"
+  ) {
+    return "Layanan edit AI belum siap.";
+  }
+
+  if (message === "identity_mismatch") {
+    return "Hasil tidak menjaga wajah asli. Tidak disimpan. Coba foto lain.";
   }
 
   return null;

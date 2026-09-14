@@ -84,6 +84,19 @@ export function getPassportSizePath(userDir, imageId, sizeId) {
 }
 
 /**
+ * Flattened 300 DPI JPEG handed to print shops.
+ * @param {string} userDir
+ * @param {string} imageId
+ * @param {string} sizeId
+ */
+export function getPassportPrintPath(userDir, imageId, sizeId) {
+  return path.join(
+    getProcessedDir(userDir, imageId),
+    `passport-${sizeId}-print.jpg`
+  );
+}
+
+/**
  * @param {string} userDir
  * @param {string} imageId
  */
@@ -107,6 +120,26 @@ export function getAiThemedPath(userDir, imageId, themeId) {
 export function getAiThemedRelativePath(imageId, themeId) {
   return path
     .join("processed", imageId, `ai-${themeId}.jpg`)
+    .split(path.sep)
+    .join("/");
+}
+
+/**
+ * @param {string} userDir
+ * @param {string} imageId
+ * @param {string} themeId
+ */
+export function getThemePhotoPath(userDir, imageId, themeId) {
+  return path.join(getProcessedDir(userDir, imageId), `theme-${themeId}.jpg`);
+}
+
+/**
+ * @param {string} imageId
+ * @param {string} themeId
+ */
+export function getThemePhotoRelativePath(imageId, themeId) {
+  return path
+    .join("processed", imageId, `theme-${themeId}.jpg`)
     .split(path.sep)
     .join("/");
 }
@@ -225,7 +258,7 @@ export function writeMeta(userDir, imageId, meta) {
  * @param {string} params.userDir
  * @param {string} params.imageId
  * @param {string} params.sourceFilename
- * @param {string} [params.ext]
+ * @param {string} [params.processingPhase]
  */
 export function createPendingMeta({
   userDir,
@@ -233,6 +266,7 @@ export function createPendingMeta({
   sourceFilename,
   ext,
   status = PROCESSING_STATUS.PENDING,
+  processingPhase,
 }) {
   const fileExt = ext || path.extname(sourceFilename) || ".jpg";
   const relativeOriginal = path.join("captures", `${imageId}${fileExt}`);
@@ -241,7 +275,10 @@ export function createPendingMeta({
     imageId,
     sourceFilename,
     status,
-    processingPhase: status === PROCESSING_STATUS.PENDING ? "remove-bg" : null,
+    processingPhase:
+      status === PROCESSING_STATUS.PENDING
+        ? processingPhase ?? "remove-bg"
+        : null,
     operations: [],
     createdAt: new Date().toISOString(),
     processedAt: null,
@@ -249,7 +286,7 @@ export function createPendingMeta({
       original: relativeOriginal.split(path.sep).join("/"),
       subject: null,
       passport: null,
-      themed: null,
+      theme: null,
     },
     error: null,
   };
@@ -387,7 +424,8 @@ export function updateAfterPassportBg(
   passportColor,
   passportSizeId,
   dimensions = {},
-  passportSizes = null
+  passportSizes = null,
+  passportPrintSizes = null
 ) {
   const existing = readMeta(userDir, imageId) || { imageId, variants: {} };
   const operations = Array.isArray(existing.operations) ? [...existing.operations] : [];
@@ -407,6 +445,11 @@ export function updateAfterPassportBg(
       "2x3": rel("passport-2x3.png"),
       "3x4": rel("passport-3x4.png"),
       "4x6": rel("passport-4x6.png"),
+    },
+    passportPrintSizes: passportPrintSizes || {
+      "2x3": rel("passport-2x3-print.jpg"),
+      "3x4": rel("passport-3x4-print.jpg"),
+      "4x6": rel("passport-4x6-print.jpg"),
     },
   };
 
@@ -464,6 +507,48 @@ export function updateAfterTheme(userDir, imageId, themeId, options = {}) {
   if (options.bakedLookId) {
     pipeline.bakedLookId = options.bakedLookId;
   }
+
+  const updated = {
+    ...existing,
+    imageId,
+    status: PROCESSING_STATUS.READY,
+    operations,
+    variants,
+    pipeline,
+    processingPhase: null,
+    processedAt: new Date().toISOString(),
+    error: null,
+  };
+
+  writeMeta(userDir, imageId, updated);
+  return updated;
+}
+
+/**
+ * @param {string} userDir
+ * @param {string} imageId
+ * @param {string} themeId
+ * @param {string} relativePath
+ * @param {{ bgSource?: string }} [options]
+ */
+export function updateAfterThemePhoto(userDir, imageId, themeId, relativePath, options = {}) {
+  const existing = readMeta(userDir, imageId) || { imageId, variants: {} };
+  const operations = Array.isArray(existing.operations) ? [...existing.operations] : [];
+
+  if (!operations.includes("apply-theme-bg")) {
+    operations.push("apply-theme-bg");
+  }
+
+  const variants = {
+    ...(typeof existing.variants === "object" && existing.variants ? existing.variants : {}),
+    theme: relativePath,
+  };
+
+  const pipeline = {
+    ...(typeof existing.pipeline === "object" && existing.pipeline ? existing.pipeline : {}),
+    themeId,
+    ...(options.bgSource ? { themeBackgroundSource: options.bgSource } : {}),
+  };
 
   const updated = {
     ...existing,
@@ -697,12 +782,12 @@ export function findIncompletePassportJobs(baseDir, todayFolder) {
 }
 
 /**
- * Jobs where remove-bg finished but theme composite did not.
+ * Incomplete Foto Tema composites (pending/processing, no theme JPEG yet).
  * @param {string} baseDir
  * @param {string} todayFolder
  * @returns {Array<{ userDir: string, imageId: string, user: string }>}
  */
-export function findIncompleteThemeJobs(baseDir, todayFolder) {
+export function findIncompleteThemePhotoJobs(baseDir, todayFolder) {
   const dayPath = path.join(baseDir, todayFolder);
   if (!fs.existsSync(dayPath)) return [];
 
@@ -710,28 +795,35 @@ export function findIncompleteThemeJobs(baseDir, todayFolder) {
 
   for (const userSlug of fs.readdirSync(dayPath)) {
     const userDir = path.join(dayPath, userSlug);
-    if (!fs.statSync(userDir).isDirectory()) continue;
+    try {
+      if (!fs.statSync(userDir).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    if (readCustomerPackageType(userDir) !== "theme-self-photo") continue;
 
     const processedRoot = path.join(userDir, "processed");
     if (!fs.existsSync(processedRoot)) continue;
 
     for (const imageId of fs.readdirSync(processedRoot)) {
       const imageDir = path.join(processedRoot, imageId);
-      if (!fs.statSync(imageDir).isDirectory()) continue;
-
-      const meta = readMeta(userDir, imageId);
-      if (!meta || meta.status !== PROCESSING_STATUS.PROCESSING) continue;
-
-      const operations = Array.isArray(meta.operations) ? meta.operations : [];
-      if (!operations.includes("remove-bg") || operations.includes("apply-theme")) {
+      try {
+        if (!fs.statSync(imageDir).isDirectory()) continue;
+      } catch {
         continue;
       }
 
-      if (readCustomerPackageType(userDir) !== "ai-photo") continue;
+      const meta = readMeta(userDir, imageId);
+      if (!meta) continue;
 
-      const subjectPath = getSubjectPath(userDir, imageId);
-      if (!fs.existsSync(subjectPath)) continue;
+      const operations = Array.isArray(meta.operations) ? meta.operations : [];
+      const alreadyDone = operations.includes("apply-theme-bg") && meta.variants?.theme;
+      const incomplete =
+        !alreadyDone &&
+        (meta.status === PROCESSING_STATUS.PENDING ||
+          meta.status === PROCESSING_STATUS.PROCESSING);
 
+      if (!incomplete) continue;
       jobs.push({ userDir, imageId, user: userSlug });
     }
   }

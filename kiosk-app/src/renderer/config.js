@@ -11,6 +11,7 @@ export function getApiBase() {
 
 const DEFAULT_PACKAGE_DURATIONS = {
   "self-photo": 10,
+  "theme-self-photo": 10,
   "ai-self-photo": 12,
   "pas-photo": 8,
 };
@@ -61,6 +62,9 @@ function resolvePackageDurations(data) {
   return {
     "self-photo":
       Number(fromApi["self-photo"]) || DEFAULT_PACKAGE_DURATIONS["self-photo"],
+    "theme-self-photo":
+      Number(fromApi["theme-self-photo"]) ||
+      DEFAULT_PACKAGE_DURATIONS["theme-self-photo"],
     "ai-self-photo":
       Number(fromApi["ai-self-photo"]) ||
       DEFAULT_PACKAGE_DURATIONS["ai-self-photo"],

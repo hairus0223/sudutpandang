@@ -49,10 +49,13 @@ export function mapAiGenerationErrorToUserMessage(error) {
     return "Tema tidak valid.";
   }
   if (message === "ai_disabled") {
-    return "Generate AI belum aktif. Hubungi staf.";
+    return "Layanan edit AI belum siap.";
   }
-  if (message.startsWith("timeout:")) {
-    return "Generate AI terlalu lama. Coba lagi.";
+  if (message === "job_interrupted") {
+    return "Job terputus karena server restart. Coba edit lagi.";
+  }
+  if (message.startsWith("timeout:") || message === "openai_timeout") {
+    return "Edit kostum terlalu lama. Coba lagi.";
   }
 
   if (
@@ -85,7 +88,6 @@ async function resolveOriginalDimensions(userDir, imageId) {
 
 /** @returns {string} */
 export function getAiGenerationInitialPhase() {
-  if (!isCompositeBoothAvailable()) return "generating";
   return "segmenting";
 }
 
@@ -269,7 +271,7 @@ export function getAiPipelineStatus() {
   const defaultMode =
     process.env.AI_DEFAULT_PIPELINE_MODE || "composite-costume";
 
-  let pipeline = "direct";
+  let pipeline = "unavailable";
   if (costumeAvailable && defaultMode === "composite-costume") {
     pipeline = "composite-costume";
   } else if (compositeAvailable) {
@@ -287,7 +289,8 @@ export function getAiPipelineStatus() {
     faceRefine: getFaceRefineStatus(),
     personSegmentation: getPersonSegmentationStatus(),
     defaultPipelineMode: defaultMode,
-    fallbackDirect: process.env.AI_PIPELINE_FALLBACK_DIRECT !== "false",
+    fallbackDirect: process.env.AI_PIPELINE_FALLBACK_DIRECT === "true",
+    allowDirect: process.env.AI_ALLOW_DIRECT_PIPELINE === "true",
     propOverlays: {
       enabled: THEME_PROP_OVERLAYS_ENABLED,
       bundledReady: overlayReport.ok,

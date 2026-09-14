@@ -27,6 +27,9 @@ function mapOpenAiGenError(status, body) {
 }
 
 /**
+ * Photorealistic empty booth backgrounds via OpenAI Images Generations.
+ * Offline asset bake only (`npm run generate:theme-backgrounds:openai`).
+ * Do not call from gallery / kiosk customer jobs.
  * @param {Response} res
  * @param {unknown} body
  * @param {AbortSignal} signal
@@ -56,7 +59,8 @@ async function readGeneratedImageBuffer(res, body, signal) {
 }
 
 /**
- * Generate a photorealistic booth background via OpenAI Images API.
+ * Generate a photorealistic empty booth background via OpenAI Images Generations.
+ * Offline asset bake only — never import this from gallery/kiosk customer jobs.
  * @param {{
  *   themeId: string,
  *   quality?: string,

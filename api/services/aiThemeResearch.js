@@ -4,7 +4,7 @@ import path from "path";
 import sharp from "sharp";
 import { mapAiGenerationErrorToUserMessage } from "./aiGeneration.js";
 import { getOpenAiImageTierOptions, RESEARCH_QUALITY_PRESETS, resolveResearchQualityPreset } from "./packageTypes.js";
-import { publishThemeToCatalog, isValidThemeId } from "./aiThemeCatalog.js";
+import { publishThemeToCatalog, isValidThemeId, isCompositePipelineMode } from "./aiThemeCatalog.js";
 import { generateTransformedImage } from "./openaiImage.js";
 import { getAiTheme, normalizeAiThemeId } from "./aiThemes.js";
 import {
@@ -28,7 +28,9 @@ import {
   saveDraftBackground,
   syncDraftBackgroundForPreview,
   toPublicDraftBackground,
+  writePublishedThemePreviews,
 } from "./aiThemeStudio.js";
+import { assertBackgroundMeetsPrintSize } from "./aiThemeProduction.js";
 
 const RESEARCH_IMAGE_MAX_BYTES =
   Number(process.env.AI_RESEARCH_IMAGE_MAX_BYTES) || 20 * 1024 * 1024;
@@ -199,6 +201,33 @@ export function toPublicRun(publicHost, run) {
 }
 
 /**
+ * Preview that is allowed as identity QA before publishing to register.
+ * @param {ResearchRun} run
+ */
+export function isIdentityPublishableRun(run) {
+  if (!run || run.status !== "ready" || !run.resultFilename) return false;
+  if (run.editMode === "full") return false;
+  if (run.editMode === "composite") return true;
+  if (run.editMode === "composite-costume") {
+    return run.faceRefined === true || run.qualityPreset === "identity";
+  }
+  return false;
+}
+
+/**
+ * @param {{ runs: ResearchRun[] }} store
+ * @param {string} draftId
+ * @returns {ResearchRun | null}
+ */
+export function findIdentityPublishRun(store, draftId) {
+  return (
+    store.runs.find(
+      (run) => String(run.draftId) === String(draftId) && isIdentityPublishableRun(run)
+    ) ?? null
+  );
+}
+
+/**
  * @param {string} baseDir
  * @param {string} publicHost
  */
@@ -222,9 +251,11 @@ export function listResearchDrafts(baseDir) {
  * @param {string} publicHost
  */
 export function listResearchDraftsPublic(baseDir, publicHost) {
+  const store = readStore(baseDir);
   return listResearchDrafts(baseDir).map((draft) => ({
     ...draft,
     ...toPublicDraftBackground(baseDir, publicHost, draft),
+    identityPreviewReady: Boolean(findIdentityPublishRun(store, draft.id)),
   }));
 }
 
@@ -600,22 +631,38 @@ export async function runResearchPreview(baseDir, publicHost, params) {
  * @param {string} baseDir
  * @param {{ draftId: string, id: string, label: string, description?: string, previewColor?: string }} params
  */
-export function publishDraftAsTheme(baseDir, params) {
+export async function publishDraftAsTheme(baseDir, params) {
   const draftId = String(params.draftId ?? "").trim();
   const id = String(params.id ?? "").trim();
   const label = String(params.label ?? "").trim();
   const description = String(params.description ?? "").trim() || label;
   const previewColor = String(params.previewColor ?? "#888888").trim();
+  const identityCertified = params.identityCertified === true;
 
   if (!draftId) throw new Error("draft_id_required");
   if (!isValidThemeId(id)) throw new Error("invalid_theme_id");
   if (!label) throw new Error("label_required");
+  if (!identityCertified) throw new Error("identity_not_certified");
 
   const store = readStore(baseDir);
   const draft = store.drafts.find((entry) => entry.id === draftId);
   if (!draft) throw new Error("draft_not_found");
   if (!draftHasBackground(baseDir, draftId)) {
     throw new Error("background_required");
+  }
+
+  const identityRun = findIdentityPublishRun(store, draftId);
+  if (!identityRun) {
+    throw new Error("identity_preview_required");
+  }
+
+  const sample = store.samples.find((entry) => entry.id === identityRun.sampleId);
+  if (!sample) throw new Error("sample_not_found");
+
+  const samplePath = path.join(getResearchSamplesDir(baseDir), sample.filename);
+  const resultPath = path.join(getResearchResultsDir(baseDir), identityRun.resultFilename);
+  if (!fs.existsSync(samplePath) || !fs.existsSync(resultPath)) {
+    throw new Error("identity_preview_required");
   }
 
   const theme = buildThemeFromDraft(
@@ -629,8 +676,26 @@ export function publishDraftAsTheme(baseDir, params) {
     { publishId: id }
   );
 
-  publishDraftBackground(baseDir, draftId, id);
-  const published = publishThemeToCatalog(baseDir, theme);
+  if (!isCompositePipelineMode(theme.pipelineMode)) {
+    throw new Error("pipeline_not_composite");
+  }
+  if (!theme.lookId || !theme.placement) {
+    throw new Error("invalid_theme_payload");
+  }
+
+  const bgPath = publishDraftBackground(baseDir, draftId, id);
+  await assertBackgroundMeetsPrintSize(bgPath);
+  await writePublishedThemePreviews({
+    baseDir,
+    themeId: id,
+    samplePath,
+    resultPath,
+  });
+
+  const published = publishThemeToCatalog(baseDir, {
+    ...theme,
+    identityCertifiedAt: new Date().toISOString(),
+  });
   cleanupDraftBackgroundStaging(baseDir, draftId).catch(() => {});
 
   return published;
@@ -740,14 +805,28 @@ export function mapResearchError(error) {
     draft_not_found: 404,
     invalid_theme_payload: 400,
     background_required: 400,
+    identity_not_certified: 400,
+    identity_preview_required: 400,
+    pipeline_not_composite: 400,
+    background_too_small: 400,
     custom_wardrobe_required: 400,
     invalid_costume_preset: 400,
+  };
+
+  const clientMessages = {
+    identity_not_certified:
+      "Centang konfirmasi identitas (side-by-side sample vs hasil) sebelum publish.",
+    identity_preview_required:
+      "Generate preview booth dulu (composite, bukan full generate) lalu bandingkan dengan sample.",
+    pipeline_not_composite: "Pipeline tema harus composite-only atau composite-costume.",
+    background_too_small: "Background tema terlalu kecil untuk cetak. Unggah minimal sisi pendek 1200px.",
+    background_required: "Upload background foto dulu.",
   };
 
   if (code in clientErrors) {
     return {
       status: clientErrors[code],
-      body: { ok: false, error: code },
+      body: { ok: false, error: code, message: clientMessages[code] },
     };
   }
 

@@ -46,11 +46,18 @@ export function PhotoCard({
   printVariant = "original",
   style,
 }: PhotoCardProps) {
-  const { selectedForPrint, togglePrint, printVariantByFilename } =
+  const { selectedForPrint, togglePrint, printVariantByFilename, packageType } =
     useGalleryStore();
   const isSelected = selectedForPrint.includes(filename);
   const activeVariant = printVariantByFilename[filename] ?? printVariant;
-  const statusLabel = getProcessingStatusLabel(processingStatus);
+  const statusLabel = getProcessingStatusLabel(
+    processingStatus,
+    packageType === "theme-self-photo"
+      ? "theme"
+      : packageType === "pas-photo"
+        ? "passport"
+        : "default"
+  );
 
   return (
     <div

@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { API_BASE_URL } from "@/lib/env";
 import { DEV_DUMMY_HEADLINES, IS_DEV } from "@/lib/devHeadlines";
-import { PhotoCard } from "../cards/PhotoCard";
 import { cn } from "@/lib/utils";
 
 type Headline = {
@@ -11,24 +10,17 @@ type Headline = {
   url: string;
 };
 
-type PhotoGrid = {
+type MosaicLayout = {
   cols: number;
   rows: number;
-  tileW: number;
-  tileH: number;
+  hero: boolean;
   gap: number;
 };
 
-/** Portrait photo tiles: width / height = 3 / 5 */
-const PHOTO_ASPECT = 3 / 5;
-const MIN_COLS = 2;
-const MIN_TILE_WIDTH = 88;
-const MAX_SLOTS = 36;
-const DESKTOP_MIN_WIDTH = 1024;
-const DESKTOP_COLS = 6;
-const DESKTOP_ROWS = 2;
-const INTERVAL = 4000;
-const ANIMATION_MS = 400;
+const DESKTOP_MIN_WIDTH = 900;
+const TILE_INTERVAL = 2800;
+const HERO_INTERVAL = 7200;
+const ANIMATION_MS = 620;
 
 function shuffleHeadlines(items: Headline[]) {
   return [...items].sort(() => Math.random() - 0.5);
@@ -39,130 +31,117 @@ function fillSlots(items: Headline[], count: number): (Headline | null)[] {
   return Array.from({ length: count }, (_, i) => items[i % items.length]);
 }
 
-function layoutForCols(
-  width: number,
-  height: number,
-  cols: number,
-  gap: number
-): PhotoGrid {
-  const widthBasedTileW = (width - gap * (cols - 1)) / cols;
-  const widthBasedTileH = widthBasedTileW / PHOTO_ASPECT;
-  let rows = Math.max(1, Math.floor((height + gap) / (widthBasedTileH + gap)));
-  while (cols * rows > MAX_SLOTS && rows > 1) rows -= 1;
-
-  const fitted = fitTiles(width, height, cols, rows, gap);
-  return { cols, rows, tileW: fitted.tileW, tileH: fitted.tileH, gap };
-}
-
-function computePhotoGrid(width: number, height: number): PhotoGrid {
-  const gap = width < 640 ? 4 : width < 1280 ? 6 : 8;
-
-  if (width <= 0 || height <= 0) {
-    return { cols: 3, rows: 2, tileW: 160, tileH: 160 / PHOTO_ASPECT, gap };
-  }
-
+function computeMosaic(width: number): MosaicLayout {
+  const gap = width < 640 ? 6 : width < 1280 ? 8 : 10;
   if (width >= DESKTOP_MIN_WIDTH) {
-    const fitted = fitTiles(width, height, DESKTOP_COLS, DESKTOP_ROWS, gap);
-    return {
-      cols: DESKTOP_COLS,
-      rows: DESKTOP_ROWS,
-      tileW: fitted.tileW,
-      tileH: fitted.tileH,
-      gap,
-    };
+    return { cols: 5, rows: 2, hero: true, gap };
   }
+  if (width >= 640) {
+    return { cols: 4, rows: 2, hero: true, gap };
+  }
+  return { cols: 3, rows: 2, hero: false, gap };
+}
 
-  const maxCols = Math.max(
-    MIN_COLS,
-    Math.min(12, Math.floor((width + gap) / (MIN_TILE_WIDTH + gap)))
+function slotCountFor(layout: MosaicLayout) {
+  if (!layout.hero) return layout.cols * layout.rows;
+  return 1 + (layout.cols - 2) * layout.rows;
+}
+
+const INITIAL_LAYOUT = computeMosaic(0);
+const INITIAL_SLOT_COUNT = slotCountFor(INITIAL_LAYOUT);
+const INITIAL_HEADLINES = IS_DEV ? DEV_DUMMY_HEADLINES : [];
+
+function HeadlineTile({
+  item,
+  flipping,
+  hero,
+  loading,
+}: {
+  item: Headline | null;
+  flipping: boolean;
+  hero: boolean;
+  loading: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "home-headline-tile relative h-full min-h-0 w-full overflow-hidden bg-[#0c0c0c]",
+        hero && "home-headline-hero"
+      )}
+    >
+      {loading && !item ? (
+        <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-[#E8C872]/12 via-white/[0.04] to-transparent" />
+      ) : !item ? (
+        <div className="absolute inset-0 bg-gradient-to-br from-[#E8C872]/10 via-white/[0.03] to-transparent" />
+      ) : (
+        <div
+          className={cn(
+            "absolute inset-0 transform-gpu transition-[opacity,transform] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            flipping ? "home-tile-exit" : "home-tile-enter"
+          )}
+        >
+          <img
+            src={item.url}
+            alt=""
+            draggable={false}
+            className={cn(
+              "absolute inset-0 h-full w-full object-cover",
+              hero && "home-kenburns"
+            )}
+          />
+          <div
+            className={cn(
+              "pointer-events-none absolute inset-0",
+              hero
+                ? "bg-gradient-to-t from-black/45 via-transparent to-black/15"
+                : "bg-gradient-to-t from-black/25 via-transparent to-transparent"
+            )}
+            aria-hidden
+          />
+        </div>
+      )}
+    </div>
   );
-
-  let best: PhotoGrid & { coverage: number } = {
-    cols: MIN_COLS,
-    rows: 1,
-    tileW: MIN_TILE_WIDTH,
-    tileH: MIN_TILE_WIDTH / PHOTO_ASPECT,
-    gap,
-    coverage: -1,
-  };
-
-  for (let cols = MIN_COLS; cols <= maxCols; cols++) {
-    const candidate = layoutForCols(width, height, cols, gap);
-    if (candidate.tileW < MIN_TILE_WIDTH && cols > MIN_COLS) continue;
-
-    const usedW = cols * candidate.tileW + (cols - 1) * gap;
-    const usedH = candidate.rows * candidate.tileH + (candidate.rows - 1) * gap;
-    const coverage = Math.min(1, (usedW * usedH) / (width * height));
-    const slots = cols * candidate.rows;
-    const bestSlots = best.cols * best.rows;
-    const betterCoverage = coverage > best.coverage + 0.01;
-    const sameCoverageMoreTiles =
-      Math.abs(coverage - best.coverage) <= 0.01 && slots > bestSlots;
-
-    if (betterCoverage || sameCoverageMoreTiles) {
-      best = { ...candidate, coverage };
-    }
-  }
-
-  const { coverage: _coverage, ...grid } = best;
-  return grid;
 }
-
-function fitTiles(
-  width: number,
-  height: number,
-  cols: number,
-  rows: number,
-  gap: number
-) {
-  const maxTileW = Math.max(1, (width - gap * (cols - 1)) / cols);
-  const maxTileH = Math.max(1, (height - gap * (rows - 1)) / rows);
-
-  if (maxTileW / maxTileH > PHOTO_ASPECT) {
-    const tileH = maxTileH;
-    return { tileW: tileH * PHOTO_ASPECT, tileH };
-  }
-
-  const tileW = maxTileW;
-  return { tileW, tileH: tileW / PHOTO_ASPECT };
-}
-
-const INITIAL_GRID = computePhotoGrid(0, 0);
 
 export function HeadlineGallery() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [grid, setGrid] = useState<PhotoGrid>(INITIAL_GRID);
-  const [headlines, setHeadlines] = useState<Headline[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [layout, setLayout] = useState<MosaicLayout>(INITIAL_LAYOUT);
+  const [headlines, setHeadlines] = useState<Headline[]>(INITIAL_HEADLINES);
+  const [isLoading, setIsLoading] = useState(!IS_DEV);
   const [slots, setSlots] = useState<(Headline | null)[]>(() =>
-    fillSlots([], INITIAL_GRID.cols * INITIAL_GRID.rows)
+    fillSlots(INITIAL_HEADLINES, INITIAL_SLOT_COUNT)
   );
   const [flipState, setFlipState] = useState<boolean[]>(() =>
-    Array(INITIAL_GRID.cols * INITIAL_GRID.rows).fill(false)
+    Array(INITIAL_SLOT_COUNT).fill(false)
   );
 
-  const slotIndexRef = useRef(0);
+  const mosaicIndexRef = useRef(1);
   const isUpdatingRef = useRef(false);
   const seenUrlsRef = useRef<Set<string>>(new Set());
-  const slotCountRef = useRef(grid.cols * grid.rows);
+  const slotsRef = useRef(slots);
+  const headlinesRef = useRef(headlines);
+  const layoutRef = useRef(layout);
 
-  const slotCount = grid.cols * grid.rows;
-  slotCountRef.current = slotCount;
+  slotsRef.current = slots;
+  headlinesRef.current = headlines;
+  layoutRef.current = layout;
+
+  const slotCount = slotCountFor(layout);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     const applySize = () => {
-      const { width, height } = el.getBoundingClientRect();
-      const next = computePhotoGrid(width, height);
-      setGrid((prev) => {
+      const { width } = el.getBoundingClientRect();
+      setLayout((prev) => {
+        const next = computeMosaic(width);
         if (
           prev.cols === next.cols &&
           prev.rows === next.rows &&
-          prev.gap === next.gap &&
-          Math.abs(prev.tileW - next.tileW) < 0.5 &&
-          Math.abs(prev.tileH - next.tileH) < 0.5
+          prev.hero === next.hero &&
+          prev.gap === next.gap
         ) {
           return prev;
         }
@@ -181,14 +160,14 @@ export function HeadlineGallery() {
       const shuffled = shuffleHeadlines(items);
       setHeadlines(shuffled);
 
-      const count = slotCountRef.current;
+      const count = slotCountFor(layoutRef.current);
       const initialSlots = fillSlots(shuffled, count);
       seenUrlsRef.current = new Set(
         initialSlots.filter(Boolean).map((h) => h!.url)
       );
       setSlots(initialSlots);
       setFlipState(Array(count).fill(false));
-      slotIndexRef.current = 0;
+      mosaicIndexRef.current = 1;
       setIsLoading(false);
     };
 
@@ -198,10 +177,19 @@ export function HeadlineGallery() {
         return res.json();
       })
       .then((data) => {
-        const items = Array.isArray(data?.headlines) ? data.headlines : [];
+        const items = Array.isArray(data?.headlines)
+          ? data.headlines.filter(
+              (entry: { url?: unknown }) =>
+                typeof entry?.url === "string" && entry.url.length > 0
+            )
+          : [];
 
-        if (items.length === 0 && IS_DEV) {
-          applyHeadlines(DEV_DUMMY_HEADLINES);
+        if (items.length === 0) {
+          if (IS_DEV) applyHeadlines(DEV_DUMMY_HEADLINES);
+          else {
+            setHeadlines([]);
+            setIsLoading(false);
+          }
           return;
         }
 
@@ -235,116 +223,117 @@ export function HeadlineGallery() {
       return next;
     });
     setFlipState(Array(slotCount).fill(false));
-    slotIndexRef.current = 0;
+    mosaicIndexRef.current = 1;
   }, [slotCount, headlines]);
 
   useEffect(() => {
     if (!headlines.length) return;
 
-    const interval = setInterval(() => {
+    const rotateSlot = (slotIndex: number) => {
       if (isUpdatingRef.current) return;
-      isUpdatingRef.current = true;
+      const current = slotsRef.current;
+      const pool = headlinesRef.current;
+      const count = current.length;
+      if (slotIndex < 0 || slotIndex >= count) return;
 
-      const count = slotCountRef.current;
-      const slotIndex = slotIndexRef.current % count;
-      const usedUrls = slots.filter(Boolean).map((s) => s!.url);
-
-      let candidates = headlines.filter(
+      const usedUrls = current.filter(Boolean).map((s) => s!.url);
+      let candidates = pool.filter(
         (h) => !seenUrlsRef.current.has(h.url) && !usedUrls.includes(h.url)
       );
-
       if (candidates.length === 0) {
-        candidates = headlines.filter((h) => !usedUrls.includes(h.url));
+        candidates = pool.filter((h) => !usedUrls.includes(h.url));
       }
-
       if (candidates.length === 0) {
-        candidates = headlines.filter((h) => h.url !== slots[slotIndex]?.url);
+        candidates = pool.filter((h) => h.url !== current[slotIndex]?.url);
       }
-
-      if (candidates.length === 0) {
-        isUpdatingRef.current = false;
-        slotIndexRef.current = (slotIndex + 1) % count;
-        return;
-      }
+      if (candidates.length === 0) return;
 
       const nextHeadline =
         candidates[Math.floor(Math.random() * candidates.length)];
 
+      isUpdatingRef.current = true;
       setFlipState((prev) => {
         const next = [...prev];
         if (slotIndex < next.length) next[slotIndex] = true;
         return next;
       });
 
-      setTimeout(() => {
+      window.setTimeout(() => {
         setSlots((prev) => {
           const next = [...prev];
           if (slotIndex < next.length) next[slotIndex] = nextHeadline;
           return next;
         });
-
         seenUrlsRef.current.add(nextHeadline.url);
-
         setFlipState((prev) => {
           const next = [...prev];
           if (slotIndex < next.length) next[slotIndex] = false;
           return next;
         });
-
         isUpdatingRef.current = false;
-        slotIndexRef.current = (slotIndex + 1) % slotCountRef.current;
       }, ANIMATION_MS / 2);
-    }, INTERVAL);
+    };
 
-    return () => clearInterval(interval);
-  }, [headlines, slots]);
+    const tileTimer = window.setInterval(() => {
+      const count = slotsRef.current.length;
+      if (count <= 1) {
+        rotateSlot(0);
+        return;
+      }
+      const start = layoutRef.current.hero ? 1 : 0;
+      const idx =
+        start +
+        (mosaicIndexRef.current % Math.max(1, count - start));
+      mosaicIndexRef.current += 1;
+      rotateSlot(idx);
+    }, TILE_INTERVAL);
+
+    const heroTimer = window.setInterval(() => {
+      if (layoutRef.current.hero) rotateSlot(0);
+    }, HERO_INTERVAL);
+
+    return () => {
+      window.clearInterval(tileTimer);
+      window.clearInterval(heroTimer);
+    };
+  }, [headlines]);
 
   return (
     <div
       ref={containerRef}
-      className="absolute inset-0 flex items-center justify-center overflow-hidden"
+      className="absolute inset-0 overflow-hidden bg-[#050505]"
     >
       <div
-        className="grid"
+        className="home-headline-grid absolute inset-2 grid h-auto sm:inset-3 lg:inset-4"
         style={{
-          width: grid.cols * grid.tileW + (grid.cols - 1) * grid.gap,
-          height: grid.rows * grid.tileH + (grid.rows - 1) * grid.gap,
-          gridTemplateColumns: `repeat(${grid.cols}, ${grid.tileW}px)`,
-          gridTemplateRows: `repeat(${grid.rows}, ${grid.tileH}px)`,
-          gap: grid.gap,
+          gap: layout.gap,
+          gridTemplateColumns: `repeat(${layout.cols}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${layout.rows}, minmax(0, 1fr))`,
         }}
       >
         {Array.from({ length: slotCount }).map((_, idx) => {
-          const item = slots[idx];
-
+          const isHero = layout.hero && idx === 0;
           return (
             <div
               key={`slot-${idx}`}
-              className="perspective relative min-h-0 overflow-hidden bg-[#111]"
+              className="h-full min-h-0 min-w-0 w-full"
+              style={
+                isHero
+                  ? { gridColumn: "span 2", gridRow: "span 2" }
+                  : undefined
+              }
             >
-              {isLoading || !item ? (
-                <div className="size-full animate-pulse bg-gradient-to-br from-white/[0.07] to-white/[0.02]" />
-              ) : (
-                <div
-                  className={cn(
-                    "absolute inset-0 transform-gpu transition-all duration-300 ease-in-out",
-                    flipState[idx] ? "flip-hidden" : "flip-visible"
-                  )}
-                >
-                  <PhotoCard
-                    src={item.url}
-                    filename={item.filename}
-                    onClick={() => {}}
-                    hideFilename
-                    hidePrintToggle
-                    compact
-                  />
-                </div>
-              )}
+              <HeadlineTile
+                item={slots[idx] ?? null}
+                flipping={Boolean(flipState[idx])}
+                hero={isHero}
+                loading={isLoading}
+              />
             </div>
           );
         })}
       </div>
+      <div className="home-film-grain pointer-events-none absolute inset-0" aria-hidden />
     </div>
   );
 }

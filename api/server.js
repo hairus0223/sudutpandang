@@ -22,6 +22,11 @@ import {
   resumeIncompletePassportJobs,
   schedulePassportPipeline,
 } from "./services/passportPipeline.js";
+import {
+  resumeIncompleteThemePhotoJobs,
+  scheduleThemePhotoPipeline,
+  scheduleThemePhotoRetune,
+} from "./services/themePhotoPipeline.js";
 import { bootstrapStudioDirs, resolveBaseDir } from "./services/studioPaths.js";
 import { readCustomerJson, readCustomerPackageType, readPassportBackgroundColor, resolvePassportBackground } from "./services/customerConfig.js";
 import {
@@ -32,6 +37,8 @@ import {
   readAiQuotaFromCustomer,
   getAiGenerationConfig,
   isAiGenerationEnabled,
+  isThemePhotoPackage,
+  usesSessionTheme,
   PACKAGE_TYPES,
 } from "./services/packageTypes.js";
 import { listAiThemesPublic, getAiTheme, buildAiJobId, toPublicAiTheme } from "./services/aiThemes.js";
@@ -42,6 +49,8 @@ import {
   findAiSelectionForImage,
   readAiQuotaWithPending,
   readSessionTheme,
+  recoverIncompleteAiJobs,
+  resolveAiRegisterTheme,
   reserveAiQuota,
   setSessionTheme,
   lockSessionTheme,
@@ -61,6 +70,11 @@ import { resolvePromoToolsUploadDir } from "./services/promo-tools/paths.js";
 import { createPromoToolsRouter } from "./routes/promo-tools/index.js";
 import { createAdminRouter } from "./routes/admin/index.js";
 import { isAdminApiEnabled } from "./services/adminAuth.js";
+import {
+  applyThemePrintPreset,
+  getThemePrintTunePublic,
+  saveThemePrintTune,
+} from "./services/themePrintTune.js";
 import {
   prewarmPersonSegmentation,
   validatePersonSegmentationAssets,
@@ -189,6 +203,24 @@ function buildVariantUrls(host, todayFolder, userSlug, meta) {
     }
   }
 
+  if (
+    meta?.variants?.passportPrintSizes &&
+    typeof meta.variants.passportPrintSizes === "object"
+  ) {
+    variants.passportPrintSizes = {};
+    for (const [sizeId, relPath] of Object.entries(
+      meta.variants.passportPrintSizes
+    )) {
+      if (!relPath) continue;
+      variants.passportPrintSizes[sizeId] = buildPublicImageUrl(
+        todayFolder,
+        userSlug,
+        String(relPath),
+        host
+      );
+    }
+  }
+
   if (meta?.variants?.ai && typeof meta.variants.ai === "object") {
     /** @type {Record<string, string>} */
     variants.ai = {};
@@ -201,6 +233,16 @@ function buildVariantUrls(host, todayFolder, userSlug, meta) {
         host
       );
     }
+  }
+
+  if (meta?.variants?.theme) {
+    const stamp = Date.parse(String(meta.processedAt || "")) || Date.now();
+    variants.theme = `${buildPublicImageUrl(
+      todayFolder,
+      userSlug,
+      String(meta.variants.theme),
+      host
+    )}?v=${stamp}`;
   }
 
   return variants;
@@ -231,6 +273,17 @@ function publicUrlForUser(userSlug, relativePath, host = PUBLIC_HOST) {
 function maybeSchedulePassportPipeline(userDir, imageId, user, host = PUBLIC_HOST) {
   if (readCustomerPackageType(userDir) !== "pas-photo") return;
   schedulePassportPipeline({
+    userDir,
+    imageId,
+    user,
+    io,
+    buildPublicUrl: (relativePath) => publicUrlForUser(user, relativePath, host),
+  });
+}
+
+function maybeScheduleThemePhotoPipeline(userDir, imageId, user, host = PUBLIC_HOST) {
+  if (!isThemePhotoPackage(readCustomerPackageType(userDir))) return;
+  scheduleThemePhotoPipeline({
     userDir,
     imageId,
     user,
@@ -303,7 +356,7 @@ function listUserImages(userPath, host, todayFolder, userSlug) {
       }
       images.push({
         filename,
-        url: variants.passport ?? variants.passportSizes?.["3x4"] ?? variants.original,
+        url: variants.theme ?? variants.passport ?? variants.passportSizes?.["3x4"] ?? variants.original,
         imageId,
         processingStatus: meta?.status ?? "none",
         processingPhase: meta?.processingPhase ?? null,
@@ -484,13 +537,15 @@ app.post("/api/register", (req, res) => {
 
   let aiThemeId = null;
   let aiThemeLabel = null;
-  if (packageType === "ai-self-photo") {
-    const theme = getAiTheme(rawAiThemeId, BASE_DIR);
-    if (!theme) {
-      return res.status(400).json({ error: "theme_required" });
+  if (usesSessionTheme(packageType)) {
+    try {
+      const theme = resolveAiRegisterTheme(rawAiThemeId, BASE_DIR);
+      aiThemeId = theme.id;
+      aiThemeLabel = theme.label;
+    } catch (err) {
+      const code = err instanceof Error ? err.message : String(err);
+      return res.status(400).json({ error: code });
     }
-    aiThemeId = theme.id;
-    aiThemeLabel = theme.label;
   }
 
   const passportBg =
@@ -504,7 +559,7 @@ app.post("/api/register", (req, res) => {
 
   const registeredAt = new Date().toISOString();
   const aiThemeLockedAt =
-    packageType === "ai-self-photo" && aiThemeId ? registeredAt : null;
+    usesSessionTheme(packageType) && aiThemeId ? registeredAt : null;
 
   const customerData = {
     name: name.trim(),
@@ -531,7 +586,7 @@ app.post("/api/register", (req, res) => {
     JSON.stringify(customerData, null, 2)
   );
 
-  if (packageType === "ai-self-photo" && aiThemeId) {
+  if (usesSessionTheme(packageType) && aiThemeId) {
     logAiAnalyticsEvent(BASE_DIR, {
       type: "theme_selected",
       user: slugName,
@@ -542,7 +597,7 @@ app.post("/api/register", (req, res) => {
 
   const host = req.headers.host || PUBLIC_HOST;
   const themePublic =
-    packageType === "ai-self-photo" && aiThemeId
+    usesSessionTheme(packageType) && aiThemeId
       ? toPublicAiTheme(getAiTheme(aiThemeId, BASE_DIR), BASE_DIR, host)
       : null;
 
@@ -767,10 +822,13 @@ app.patch("/api/ai-theme/:user", (req, res) => {
     if (code === "theme_locked") {
       return res.status(409).json({ error: "theme_locked" });
     }
+    if (code === "theme_not_ready") {
+      return res.status(400).json({ error: "theme_not_ready" });
+    }
     if (code === "invalid_theme") {
       return res.status(400).json({ error: "invalid_theme" });
     }
-    if (code === "package_not_ai") {
+    if (code === "package_not_themed" || code === "package_not_ai") {
       return res.status(403).json({ error: "package_not_ai" });
     }
     return res.status(400).json({ error: code });
@@ -1114,6 +1172,48 @@ app.get("/api/kiosk-config", (_req, res) => {
   });
 });
 
+app.get("/api/theme-print-tune", (req, res) => {
+  const themeId = String(req.query.themeId || "").trim() || null;
+  res.json({ ok: true, ...getThemePrintTunePublic(BASE_DIR, themeId) });
+});
+
+app.put("/api/theme-print-tune", (req, res) => {
+  try {
+    const themeId = String(req.body?.themeId || req.query.themeId || "").trim() || null;
+    const presetId = req.body?.presetId;
+    const tune = presetId
+      ? applyThemePrintPreset(String(presetId), BASE_DIR, themeId)
+      : saveThemePrintTune(req.body?.tune ?? req.body ?? {}, BASE_DIR, themeId);
+
+    const user = String(req.body?.user || "").trim();
+    const requestedImageId = String(req.body?.imageId || "").trim();
+    let reprocess = null;
+    if (user) {
+      const userDir = getUserPathForToday(user);
+      reprocess = scheduleThemePhotoRetune({
+        userDir,
+        user,
+        imageId: requestedImageId,
+        io,
+        baseDir: BASE_DIR,
+        buildPublicUrl: (relativePath) =>
+          publicUrlForUser(user, relativePath, req.headers.host),
+      });
+    }
+
+    res.json({
+      ok: true,
+      ...getThemePrintTunePublic(BASE_DIR, themeId),
+      reprocess,
+    });
+  } catch (err) {
+    res.status(400).json({
+      ok: false,
+      error: err instanceof Error ? err.message : "tune_save_failed",
+    });
+  }
+});
+
 app.post("/api/session/pause", (req, res) => {
   if (!activeSession || activeSession.pausedAt)
     return res.status(400).json({ error: "No active session or already paused" });
@@ -1317,13 +1417,16 @@ app.post("/api/images/:user/upload", (req, res) => {
         req.file.originalname
       );
 
-      const isPasPhoto = readCustomerPackageType(userPath) === "pas-photo";
+      const packageType = readCustomerPackageType(userPath);
+      const needsProcess =
+        packageType === "pas-photo" || isThemePhotoPackage(packageType);
       createPendingMeta({
         userDir: userPath,
         imageId,
         sourceFilename,
         ext,
-        status: isPasPhoto ? PROCESSING_STATUS.PENDING : PROCESSING_STATUS.NONE,
+        status: needsProcess ? PROCESSING_STATUS.PENDING : PROCESSING_STATUS.NONE,
+        processingPhase: isThemePhotoPackage(packageType) ? "compositing" : undefined,
       });
 
       io.emit("new-photo", {
@@ -1334,6 +1437,7 @@ app.post("/api/images/:user/upload", (req, res) => {
       });
 
       maybeSchedulePassportPipeline(userPath, imageId, user, req.headers.host);
+      maybeScheduleThemePhotoPipeline(userPath, imageId, user, req.headers.host);
 
       res.status(201).json({
         success: true,
@@ -1577,13 +1681,16 @@ chokidar
         filePath
       );
 
-      const isPasPhoto = readCustomerPackageType(userFolder) === "pas-photo";
+      const packageType = readCustomerPackageType(userFolder);
+      const needsProcess =
+        packageType === "pas-photo" || isThemePhotoPackage(packageType);
       createPendingMeta({
         userDir: userFolder,
         imageId,
         sourceFilename,
         ext,
-        status: isPasPhoto ? PROCESSING_STATUS.PENDING : PROCESSING_STATUS.NONE,
+        status: needsProcess ? PROCESSING_STATUS.PENDING : PROCESSING_STATUS.NONE,
+        processingPhase: isThemePhotoPackage(packageType) ? "compositing" : undefined,
       });
 
       io.emit("new-photo", {
@@ -1594,6 +1701,7 @@ chokidar
       });
 
       maybeSchedulePassportPipeline(userFolder, imageId, userSlug);
+      maybeScheduleThemePhotoPipeline(userFolder, imageId, userSlug);
     } catch (err) {
       console.error("Image processing failed:", err);
     }
@@ -1639,5 +1747,17 @@ server.listen(PORT, "0.0.0.0", () => {
     io,
     buildPublicUrlForUser: (userSlug, relativePath) =>
       publicUrlForUser(userSlug, relativePath),
+  });
+  resumeIncompleteThemePhotoJobs({
+    baseDir: BASE_DIR,
+    todayFolder: getTodayFolder(),
+    io,
+    buildPublicUrlForUser: (userSlug, relativePath) =>
+      publicUrlForUser(userSlug, relativePath),
+  });
+  recoverIncompleteAiJobs({
+    baseDir: BASE_DIR,
+    todayFolder: getTodayFolder(),
+    io,
   });
 });

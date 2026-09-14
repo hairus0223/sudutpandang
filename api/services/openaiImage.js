@@ -145,7 +145,7 @@ function mapOpenAiError(status, body) {
 export function mapOpenAiErrorToUserMessage(code) {
   switch (code) {
     case "openai_not_configured":
-      return "Layanan AI belum dikonfigurasi. Hubungi staf.";
+      return "Layanan edit AI belum siap.";
     case "openai_unauthorized":
       return "Kunci API OpenAI tidak valid. Hubungi staf.";
     case "openai_rate_limited":
@@ -155,7 +155,7 @@ export function mapOpenAiErrorToUserMessage(code) {
     case "openai_unavailable":
       return "Layanan AI sedang tidak tersedia. Coba lagi.";
     case "openai_timeout":
-      return "Generate AI terlalu lama. Coba lagi.";
+      return "Edit kostum terlalu lama. Coba lagi.";
     case "openai_empty_response":
       return "AI tidak mengembalikan gambar. Coba lagi.";
     case "edit_mask_not_found":

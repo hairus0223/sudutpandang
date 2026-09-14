@@ -12,6 +12,7 @@ type SessionPhotoViewerProps = {
   index: number;
   onClose: () => void;
   onChange: (index: number) => void;
+  processingKind?: "theme" | "passport" | "default";
 };
 
 export function SessionPhotoViewer({
@@ -20,10 +21,11 @@ export function SessionPhotoViewer({
   index,
   onClose,
   onChange,
+  processingKind = "default",
 }: SessionPhotoViewerProps) {
   const image = images[index] ?? null;
   const src = image ? getOriginalPreviewUrl(image) : null;
-  const statusLabel = getProcessingStatusLabel(image?.processingStatus);
+  const statusLabel = getProcessingStatusLabel(image?.processingStatus, processingKind);
   const canPrev = index > 0;
   const canNext = index < images.length - 1;
 

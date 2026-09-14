@@ -143,6 +143,38 @@ export function publishDraftBackground(baseDir, draftId, themeId) {
 }
 
 /**
+ * Write register before/after cards from a research sample + result.
+ * @param {{
+ *   baseDir: string,
+ *   themeId: string,
+ *   samplePath: string,
+ *   resultPath: string,
+ * }} params
+ */
+export async function writePublishedThemePreviews({
+  baseDir,
+  themeId,
+  samplePath,
+  resultPath,
+}) {
+  const destDir = path.join(baseDir, "themes", themeId);
+  fs.mkdirSync(destDir, { recursive: true });
+
+  await Promise.all([
+    sharp(samplePath, { failOn: "none" })
+      .rotate()
+      .resize(1024, 1536, { fit: "cover", position: "north" })
+      .jpeg({ quality: 90, mozjpeg: true })
+      .toFile(path.join(destDir, "before.jpg")),
+    sharp(resultPath, { failOn: "none" })
+      .rotate()
+      .resize(1024, 1536, { fit: "cover", position: "north" })
+      .jpeg({ quality: 90, mozjpeg: true })
+      .toFile(path.join(destDir, "after.jpg")),
+  ]);
+}
+
+/**
  * @param {string} baseDir
  * @param {string} draftId
  */
